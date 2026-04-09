@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Memory Assistant</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="header-accent"></div>
+      <h2>Memory Assistant</h2>
+    </div>
+
+    <!-- Directory selector -->
+    <div class="dir-row">
+      <span id="dirName" class="dir-name">未选择目录</span>
+      <button id="selectDirBtn" class="btn-sm">选择目录</button>
+    </div>
+
+    <!-- API Key -->
+    <div class="dir-row">
+      <span id="apiKeyStatus" class="dir-name">API Key: 未配置</span>
+      <button id="apiKeyBtn" class="btn-sm">设置</button>
+    </div>
+    <div id="apiKeyPanel" class="api-key-panel hidden">
+      <input type="password" id="apiKeyInput" placeholder="sk-..." />
+      <button id="apiKeySaveBtn" class="btn-sm btn-confirm">保存</button>
+    </div>
+
+    <hr class="divider">
+
+    <!-- Export -->
+    <button id="exportMemoryBtn" class="btn-full">导出并保存记忆</button>
+
+    <hr class="divider">
+
+    <!-- Consolidate persistent nodes -->
+    <button id="consolidateBtn" class="btn-full btn-consolidate">整理节点（合并相似）</button>
+
+    <hr class="divider">
+
+    <!-- Import by tags -->
+    <button id="importMemoryBtn" class="btn-full">按标签导入记忆</button>
+
+    <!-- Persistent node panel (hidden until import clicked) -->
+    <div id="importPanel" class="import-panel hidden">
+      <div id="persistentList" class="persistent-list"></div>
+      <button id="confirmImportBtn" class="btn-full btn-confirm">确认导入选中节点</button>
+    </div>
+
+    <div id="result" class="result hidden"></div>
+  </div>
+
+  <script src="../config.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

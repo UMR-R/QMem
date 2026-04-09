@@ -1,0 +1,383 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  width: 320px;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 14px;
+  background-color: #000000;
+  color: #ffffff;
+}
+
+.container {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ── Header ── */
+.header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #5e5e5e;
+}
+
+.header-accent {
+  width: 3px;
+  height: 18px;
+  background-color: #76b900;
+  flex-shrink: 0;
+}
+
+h2 {
+  font-size: 14px;
+  font-weight: 700;
+  color: #ffffff;
+  line-height: 1.25;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/* ── Input group ── */
+.input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #a7a7a7;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  line-height: 1.5;
+}
+
+input[type="text"],
+input[type="password"] {
+  width: 100%;
+  padding: 8px 10px;
+  background-color: #1a1a1a;
+  border: 1px solid #5e5e5e;
+  border-radius: 2px;
+  font-size: 14px;
+  font-family: Arial, Helvetica, sans-serif;
+  color: #ffffff;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+input[type="text"]::placeholder,
+input[type="password"]::placeholder {
+  color: #757575;
+}
+
+input[type="text"]:focus,
+input[type="password"]:focus {
+  border-color: #76b900;
+  border-width: 2px;
+}
+
+/* ── API Key panel ── */
+.api-key-panel {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.api-key-panel.hidden {
+  display: none;
+}
+
+.api-key-panel input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ── Buttons ── */
+.button-group {
+  display: flex;
+  gap: 8px;
+}
+
+button {
+  flex: 1;
+  padding: 8px 12px;
+  background: transparent;
+  border: 2px solid #76b900;
+  border-radius: 2px;
+  font-size: 12px;
+  font-weight: 700;
+  font-family: Arial, Helvetica, sans-serif;
+  color: #ffffff;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  line-height: 1.25;
+  transition: background-color 0.15s, color 0.15s;
+}
+
+button:hover {
+  background-color: #1eaedb;
+  border-color: #1eaedb;
+  color: #ffffff;
+}
+
+button:active {
+  background-color: #007fff;
+  border-color: #003eff;
+  color: #ffffff;
+}
+
+button:focus-visible {
+  outline: 2px solid #000000;
+  outline-offset: 2px;
+}
+
+button:disabled {
+  background: transparent;
+  border-color: #5e5e5e;
+  color: #757575;
+  cursor: not-allowed;
+}
+
+/* Export memory — full width, same style */
+.btn-full {
+  width: 100%;
+  padding: 9px 13px;
+}
+
+/* ── Checkbox ── */
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #a7a7a7;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  user-select: none;
+}
+
+input[type="checkbox"] {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border: 1px solid #5e5e5e;
+  border-radius: 2px;
+  background-color: #1a1a1a;
+  flex-shrink: 0;
+  cursor: pointer;
+  position: relative;
+  transition: border-color 0.15s;
+}
+
+input[type="checkbox"]:checked {
+  background-color: #76b900;
+  border-color: #76b900;
+}
+
+input[type="checkbox"]:checked::after {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 1px;
+  width: 5px;
+  height: 8px;
+  border: 2px solid #000000;
+  border-top: none;
+  border-left: none;
+  transform: rotate(45deg);
+}
+
+/* ── Divider ── */
+.divider {
+  border: none;
+  border-top: 1px solid #5e5e5e;
+  margin: 2px 0;
+}
+
+/* ── File input（隐藏原生控件，由按钮触发）── */
+input[type="file"] {
+  display: none;
+}
+
+/* ── Result box ── */
+.result {
+  padding: 10px;
+  background-color: #1a1a1a;
+  border: 1px solid #5e5e5e;
+  border-radius: 2px;
+  font-size: 11px;
+  font-family: Arial, Helvetica, sans-serif;
+  line-height: 1.5;
+  color: #a7a7a7;
+  word-break: break-all;
+  max-height: 180px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+
+.result.hidden {
+  display: none;
+}
+
+.result.error {
+  border-color: #e52020;
+  color: #e52020;
+  background-color: #1a0000;
+}
+
+/* ── Directory row ── */
+.dir-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background-color: #0d0d0d;
+  border: 1px solid #5e5e5e;
+  border-radius: 2px;
+}
+
+.dir-name {
+  flex: 1;
+  font-size: 11px;
+  color: #a7a7a7;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.btn-sm {
+  flex: none;
+  width: auto;
+  padding: 4px 10px;
+  font-size: 10px;
+}
+
+/* ── Import panel ── */
+.import-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.import-panel.hidden {
+  display: none;
+}
+
+/* ── Persistent node list ── */
+.persistent-list {
+  max-height: 230px;
+  overflow-y: auto;
+  background-color: #0d0d0d;
+  border: 1px solid #5e5e5e;
+  border-radius: 2px;
+  padding: 4px 0;
+}
+
+.pn-empty {
+  font-size: 11px;
+  color: #757575;
+  text-align: center;
+  padding: 14px 0;
+}
+
+/* Group header */
+.pn-group {
+  margin-bottom: 2px;
+}
+
+.pn-group-header {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #76b900;
+  padding: 5px 8px 3px;
+  border-bottom: 1px solid #1a1a1a;
+}
+
+/* Node row */
+.pn-node {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 5px 8px;
+  border-radius: 2px;
+  cursor: default;
+}
+
+.pn-node:hover {
+  background-color: #141414;
+}
+
+.pn-node input[type="checkbox"] {
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.pn-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.pn-key {
+  font-size: 11px;
+  font-weight: 700;
+  color: #ffffff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pn-desc {
+  font-size: 11px;
+  color: #a7a7a7;
+  line-height: 1.4;
+  margin-top: 1px;
+}
+
+.pn-meta {
+  font-size: 10px;
+  color: #5e5e5e;
+  margin-top: 2px;
+  letter-spacing: 0.02em;
+}
+
+/* Confirm import button */
+.btn-confirm {
+  border-color: #1eaedb;
+}
+
+.btn-confirm:hover {
+  background-color: #0d7fa8;
+  border-color: #0d7fa8;
+}
+
+/* Consolidate button — muted amber to distinguish from primary actions */
+.btn-consolidate {
+  border-color: #a07800;
+  color: #c49a00;
+}
+
+.btn-consolidate:hover {
+  background-color: #a07800;
+  border-color: #a07800;
+  color: #ffffff;
+}
+
+.btn-consolidate:active {
+  background-color: #7a5c00;
+  border-color: #7a5c00;
+  color: #ffffff;
+}
