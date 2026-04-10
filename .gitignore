@@ -1,5 +1,76 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+wheels/
+pip-wheel-metadata/
+*.whl
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Testing
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.tox/
+
+# Type checking
+.mypy_cache/
+.ruff_cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
 .DS_Store
+Thumbs.db
+
+# -----------------------------------------------------------------------
+# Project-specific
+# -----------------------------------------------------------------------
+
+# User's personal wiki - this is private user data, never commit it
+wiki/
+
+# Exported memory packages - contain personal data
+*.zip
+memory_package_*/
+_tmp_package_*/
+
+# Raw chat history uploads - private conversation data
+*.jsonl
+uploads/
+raw_history/
+
+# API keys and secrets
+.env
+.env.*
+!.env.example
+
+# Temporary files
+*.tmp
+*.bak
+
 .claude/
 DESIGN.md
 PROJECT_SPEC.md
 step.md
+
+llm_memory_transferor/data
+llm_memory_transferor/wiki

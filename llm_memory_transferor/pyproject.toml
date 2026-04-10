@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llm-memory-transferor"
+version = "0.1.0"
+description = "Portable Personal Memory Layer - Cross-platform LLM memory migration and maintenance"
+requires-python = ">=3.10"
+dependencies = [
+    "click>=8.1.0",
+    "pydantic>=2.0.0",
+    "rich>=13.0.0",
+    "python-dateutil>=2.8.0",
+    "jsonlines>=4.0.0",
+    "tqdm>=4.0.0",
+]
+
+[project.optional-dependencies]
+anthropic = ["anthropic>=0.40.0"]
+openai = ["openai>=1.0.0"]
+all = ["anthropic>=0.40.0", "openai>=1.0.0"]
+dev = ["pytest>=7.0", "pytest-asyncio>=0.23", "ruff>=0.1.0", "anthropic>=0.40.0", "openai>=1.0.0"]
+
+[project.scripts]
+mwiki = "llm_memory_transferor.cli:cli"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

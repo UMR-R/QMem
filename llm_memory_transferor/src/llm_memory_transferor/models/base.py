@@ -1,0 +1,59 @@
+"""Base memory model with audit fields shared by all memory types."""
+
+from __future__ import annotations
+
+import uuid
+from datetime import datetime, timezone
+from typing import Any
+
+from pydantic import BaseModel, Field
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _new_id() -> str:
+    return str(uuid.uuid4())
+
+
+class EvidenceLink(BaseModel):
+    source_type: str  # "chat_history" | "l1_signal" | "file" | "user_input"
+    source_id: str
+    excerpt: str = ""
+
+
+class MemoryBase(BaseModel):
+    """All L2 managed memory objects extend this."""
+
+    id: str = Field(default_factory=_new_id)
+    created_at: datetime = Field(default_factory=_now)
+    updated_at: datetime = Field(default_factory=_now)
+    version: int = 1
+    evidence_links: list[EvidenceLink] = Field(default_factory=list)
+    conflict_log: list[dict[str, Any]] = Field(default_factory=list)
+    user_confirmed: bool = False
+    # IDs of EpisodicMemory objects that contributed to this memory object.
+    # For EpisodicMemory itself this is always empty.
+    source_episode_ids: list[str] = Field(default_factory=list)
+
+    def touch(self, ts: datetime | None = None) -> None:
+        self.updated_at = ts if ts is not None else _now()
+        self.version += 1
+
+    def add_evidence(self, source_type: str, source_id: str, excerpt: str = "") -> None:
+        self.evidence_links.append(
+            EvidenceLink(source_type=source_type, source_id=source_id, excerpt=excerpt)
+        )
+
+    def record_conflict(self, field: str, old_value: Any, new_value: Any, source: str) -> None:
+        self.conflict_log.append(
+            {
+                "timestamp": _now().isoformat(),
+                "field": field,
+                "old_value": old_value,
+                "new_value": new_value,
+                "source": source,
+                "resolved": False,
+            }
+        )
