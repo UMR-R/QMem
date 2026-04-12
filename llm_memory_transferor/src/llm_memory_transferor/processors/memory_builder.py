@@ -8,6 +8,7 @@ Two-phase pipeline:
 
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -308,6 +309,42 @@ class MemoryBuilder:
             return min(times), max(times)
         return global_earliest, None
 
+    @staticmethod
+    def _best_episode_ts(
+        entry_text: str,
+        ep_ids: list[str],
+        ep_by_id: dict[str, EpisodicMemory],
+        min_score: float = 0.25,
+    ) -> datetime | None:
+        """
+        Return the time_range_end of the episode whose key_decisions / open_issues /
+        topics_covered best match entry_text by word-set (Jaccard) overlap.
+        Returns None if the best score is below min_score.
+        """
+        entry_words = set(re.sub(r"[^\w\s]", " ", entry_text.lower()).split())
+        if not entry_words:
+            return None
+        best_ts: datetime | None = None
+        best_score = 0.0
+        for eid in ep_ids:
+            ep = ep_by_id.get(eid)
+            if not ep:
+                continue
+            ts = ep.time_range_end or ep.time_range_start
+            if ts is None:
+                continue
+            candidates = ep.key_decisions + ep.open_issues + ep.topics_covered
+            for candidate in candidates:
+                cand_words = set(re.sub(r"[^\w\s]", " ", candidate.lower()).split())
+                if not cand_words:
+                    continue
+                union = entry_words | cand_words
+                score = len(entry_words & cand_words) / len(union)
+                if score > best_score:
+                    best_score = score
+                    best_ts = ts
+        return best_ts if best_score >= min_score else None
+
     # ------------------------------------------------------------------ #
     # Phase 2 build helpers                                                #
     # ------------------------------------------------------------------ #
@@ -399,11 +436,15 @@ class MemoryBuilder:
                     raw = item[field]
                     if isinstance(raw, list):
                         existing_texts = {e.text for e in getattr(proj, field)}
-                        new_entries = [
-                            ProjectEntry(text=s, timestamp=updated)
-                            for s in raw
-                            if isinstance(s, str) and s not in existing_texts
-                        ]
+                        new_entries = []
+                        for s in raw:
+                            if not isinstance(s, str) or s in existing_texts:
+                                continue
+                            ts = (
+                                self._best_episode_ts(s, ep_ids, ep_by_id)
+                                or updated
+                            )
+                            new_entries.append(ProjectEntry(text=s, timestamp=ts))
                         setattr(proj, field, getattr(proj, field) + new_entries)
                 else:
                     setattr(proj, field, item[field])

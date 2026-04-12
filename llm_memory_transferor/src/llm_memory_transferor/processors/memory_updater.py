@@ -38,6 +38,7 @@ class MemoryUpdater:
         l1_layer: L1SignalLayer | None = None,
         platform: str = "unknown",
         on_progress: Any = None,
+        conversation_end_time: datetime | None = None,
     ) -> dict:
         def progress(msg: str) -> None:
             if on_progress:
@@ -123,7 +124,7 @@ class MemoryUpdater:
                     proj = ProjectMemory(project_name=name)
                 else:
                     continue
-            now = datetime.now(timezone.utc)
+            now = conversation_end_time or datetime.now(timezone.utc)
             if pu.get("stage_update"):
                 proj.current_stage = pu["stage_update"]
             if pu.get("new_decisions"):

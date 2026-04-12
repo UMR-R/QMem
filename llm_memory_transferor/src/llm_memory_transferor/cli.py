@@ -200,6 +200,7 @@ def update(
     Example:
       mwiki update latest_chat.txt -p claude
     """
+    from .layers.l0_raw import L0RawLayer
     from .layers.l1_signals import L1SignalLayer
     from .layers.l3_schema import L3Schema
     from .processors.memory_updater import MemoryUpdater
@@ -209,6 +210,17 @@ def update(
 
     path = Path(conversation_file)
     text = path.read_text(encoding="utf-8")
+
+    # Extract conversation end time from the file so ProjectEntry timestamps
+    # reflect the original conversation date rather than the processing time.
+    conv_end_time = None
+    try:
+        l0 = L0RawLayer(l2.wiki_dir / "_raw_index")
+        convs = l0.ingest_file(path)
+        if convs:
+            conv_end_time = convs[0].end_time or convs[0].start_time
+    except Exception:
+        pass
 
     l1 = L1SignalLayer()
     for mf in memory_file:
@@ -227,6 +239,7 @@ def update(
             l1_layer=l1 if memory_file else None,
             platform=platform,
             on_progress=on_progress,
+            conversation_end_time=conv_end_time,
         )
 
     status = results.get("status", "unknown")

@@ -117,6 +117,85 @@ mwiki scan conversations.json -p chatgpt -m memory.json
 
 Where `-m` points to any platform memory/profile exports (optional but recommended). The wiki is written to `./wiki/` by default.
 
+#### `conversations.json` format
+
+The file can be JSON, JSONL, Markdown, or plain text. For ChatGPT, the official export (`conversations.json`) is a JSON array of conversation objects:
+
+```json
+[
+  {
+    "id": "conv-abc123",
+    "title": "My conversation",
+    "create_time": 1710000000.0,
+    "update_time": 1710003600.0,
+    "mapping": {
+      "node-1": {
+        "message": {
+          "id": "msg-1",
+          "author": {"role": "user"},
+          "content": {"parts": ["Hello, I'm a software engineer."]}
+        }
+      },
+      "node-2": {
+        "message": {
+          "id": "msg-2",
+          "author": {"role": "assistant"},
+          "content": {"parts": ["Nice to meet you!"]}
+        }
+      }
+    }
+  }
+]
+```
+
+The parser also accepts a simpler flat `messages` list (useful for other platforms or manual exports):
+
+```json
+[
+  {
+    "id": "conv-1",
+    "title": "My conversation",
+    "platform": "chatgpt",
+    "messages": [
+      {"id": "m1", "role": "user", "content": "Hello"},
+      {"id": "m2", "role": "assistant", "content": "Hi!"}
+    ]
+  }
+]
+```
+
+For plain text / Markdown exports, role transitions are detected by lines containing `User:`, `Assistant:`, `Human:`, `Claude:`, etc.
+
+#### `memory.json` format
+
+This is the optional `-m` file — the platform's own saved memory or profile export. Recognized top-level keys:
+
+| Key | Signal type | Example value |
+|---|---|---|
+| `memory` / `memories` | `saved_memory` | `"User prefers concise answers."` |
+| `summary` | `summary` | `"Alice is an ML engineer focused on NLP."` |
+| `profile` | `profile` | `"Alice, senior engineer, Python expert"` or `{...}` |
+| `preferences` / `custom_instructions` | `preference` | `{"style": "concise"}` or `"Be brief."` |
+| `persona` / `instruction` | `custom_instruction` | `"Always respond in English."` |
+
+Any JSON object not matching the above keys is accepted as a generic signal. The file can also be a JSON array of such objects, a `.jsonl` file (one signal per line), or a `.md`/`.txt` file (treated as `saved_memory` if the filename contains "memory", otherwise guessed from the filename stem).
+
+Example minimal `memory.json` for ChatGPT saved memory:
+
+```json
+{"memory": "I'm a Python developer. I prefer short, direct answers. I'm working on a RAG pipeline called FaceGPT."}
+```
+
+Example with multiple signal types:
+
+```json
+{
+  "memory": "User prefers concise responses.",
+  "profile": {"name": "Alice", "role": "ML engineer"},
+  "preferences": {"language": "English", "style": "bullet points"}
+}
+```
+
 During the scan, the detected topics across all episodes are printed to the terminal so you can verify what was found.
 
 ### 3. Inspect what was built
@@ -173,9 +252,15 @@ After a new session on any platform, feed it in:
 mwiki update todays_chat.txt -p claude
 ```
 
----
+#### `todays_chat.txt` format
 
-## CLI reference
+The conversation file for `mwiki update` is passed as raw text directly to the LLM, so any human-readable format works. The LLM interprets whatever role structure it sees.
+
+**Recommended plain-text format** (role markers on their own line):
+
+```
+User:
+How should I frame the LoRA section in my CVPR paper?
 
 ```
 mwiki scan HISTORY_FILES...     Build initial memory wiki from chat history
