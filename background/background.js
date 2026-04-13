@@ -19,6 +19,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       .then(() => sendResponse({ ok: true }))
       .catch(err => sendResponse({ ok: false, error: err.message }));
     return true;
+
+  } else if (message.type === "PROCESS_ALL_RAW") {
+    processAllRaw()
+      .then(result => sendResponse({ ok: true, ...result }))
+      .catch(err => sendResponse({ ok: false, error: err.message }));
+    return true;
   }
 });
 
@@ -133,6 +139,56 @@ async function flushPending() {
 
   const remaining = pending.filter(ref => !done.includes(ref));
   await chrome.storage.local.set({ pending_flush: remaining });
+}
+
+// ── 批量提取 episode：处理所有未经 LLM 处理的 RAW rounds ────────────────────
+// 扫描所有 chat:* 条目，对 last_processed_idx 之后的 rounds 调用 memory_engine。
+// 适用于 realtimeUpdate=false 期间捕获的对话，在同步时补充 episode 提取。
+
+async function processAllRaw() {
+  const settings = await chrome.storage.local.get(["deepseek_api_key"]);
+  const apiKey = settings["deepseek_api_key"];
+  if (!apiKey) throw new Error("DeepSeek API Key 未配置");
+
+  // 只读 key 列表，不缓存数据内容，避免与 flushPending 并发时用到旧的 last_processed_idx
+  const allData = await chrome.storage.local.get(null);
+  const chatKeys = Object.keys(allData).filter(k => k.startsWith("chat:"));
+
+  let processed = 0;
+  let skipped = 0;
+
+  for (const storageKey of chatKeys) {
+    // 每条 chat 都重新读最新数据，防止并发更新导致索引过时
+    const fresh = await chrome.storage.local.get(storageKey);
+    const chatData = fresh[storageKey];
+    if (!chatData?.rounds?.length) { skipped++; continue; }
+
+    const lastIdx = chatData.last_processed_idx ?? 0;
+    if (lastIdx >= chatData.rounds.length) { skipped++; continue; }
+
+    const newRounds = chatData.rounds.slice(lastIdx);
+
+    try {
+      // 整批 rounds 一次调用，updateMemory 内部生成一个 episode
+      await updateMemory(
+        { platform: chatData.platform, url: chatData.url, rounds: newRounds },
+        apiKey
+      );
+      // 成功后更新索引（读最新数据，避免覆盖并发写入）
+      const toUpdate = await chrome.storage.local.get(storageKey);
+      if (toUpdate[storageKey]) {
+        toUpdate[storageKey].last_processed_idx = chatData.rounds.length;
+        await chrome.storage.local.set({ [storageKey]: toUpdate[storageKey] });
+      }
+      processed++;
+      console.log(`[Background] processAllRaw: ${storageKey} 处理了 ${newRounds.length} 条 rounds → 1 个 episode`);
+    } catch (err) {
+      console.error(`[Background] processAllRaw 处理失败 (${storageKey}):`, err.message);
+      skipped++;
+    }
+  }
+
+  return { processed, skipped };
 }
 
 // ── 调试入口 ──────────────────────────────────────────────────────────────────

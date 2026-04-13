@@ -244,11 +244,20 @@ async function _mergePrefsFromExport(exportedPrefs) {
   if (!exportedPrefs) return;
   const stored = await _storageGet("mw:preferences");
   const existing = stored["mw:preferences"] ?? _newPreferences();
+  const ARRAY_FIELDS = new Set([
+    "style_preference", "terminology_preference", "formatting_constraints",
+    "forbidden_expressions", "revision_preference",
+  ]);
   for (const [k, v] of Object.entries(exportedPrefs)) {
     if (Array.isArray(v) && v.length > 0) {
       existing[k] = [...new Set([...(existing[k] ?? []), ...v])];
     } else if (typeof v === "string" && v) {
-      existing[k] = v;
+      if (ARRAY_FIELDS.has(k)) {
+        // LLM may return array fields as a string; wrap to keep type consistent
+        existing[k] = [...new Set([...(Array.isArray(existing[k]) ? existing[k] : []), v])];
+      } else {
+        existing[k] = v;
+      }
     }
   }
   existing.updated_at = new Date().toISOString();
@@ -724,18 +733,20 @@ function pollJobResult(jobId, timeoutMs = 180000) {
   });
 }
 
-function submitAndWait(tabId, prompt, isMemory = false, skipDownload = false) {
+function submitAndWait(tabId, prompt, isMemory = false, skipDownload = false, timeoutMs = 90000) {
   const jobId = "job_" + Date.now();
   return new Promise((resolve, reject) => {
     chrome.tabs.sendMessage(
       tabId,
-      { type: "SUBMIT_AND_WAIT", prompt, jobId, isMemory, skipDownload },
+      { type: "SUBMIT_AND_WAIT", prompt, jobId, isMemory, skipDownload, timeoutMs },
       res => {
         if (chrome.runtime.lastError || !res?.ok) {
           reject(new Error(res?.error ?? chrome.runtime.lastError?.message));
           return;
         }
-        pollJobResult(jobId).then(resolve).catch(reject);
+        // pollJobResult 超时要比 content.js 的 waitForResponse 多 30s，
+        // 保证 content.js 超时后写入 storage，popup 还能读到错误信息
+        pollJobResult(jobId, timeoutMs + 30000).then(resolve).catch(reject);
       }
     );
   });
@@ -772,8 +783,8 @@ async function handleExport(tab) {
     // 2. Build prompt with existing episodic tags, then send to target AI
     const exportPrompt = buildExportPrompt(pnData.episodic_tag_paths ?? []);
     await injectInput(tab.id, exportPrompt);
-    showResult("等待 AI 回复...");
-    const res = await submitAndWait(tab.id, exportPrompt, true, true);
+    showResult("等待 AI 回复（导出 prompt 较长，可能需要 1-3 分钟）...");
+    const res = await submitAndWait(tab.id, exportPrompt, true, true, 300000); // 5 min
     if (!res.text) throw new Error("未获取到 AI 回复内容");
 
     // 3. Split AI response into memory content + episodic tags
@@ -957,7 +968,27 @@ document.getElementById("selectDirBtn").addEventListener("click", async () => {
     await updateDirDisplay();
     document.getElementById("importPanel").classList.add("hidden");
 
-    // 授权后立刻同步 chrome.storage → 文件
+    // 有未处理的 RAW 数据时，先提取 episode 再同步
+    const apiSettings = await new Promise(r => chrome.storage.local.get("deepseek_api_key", r));
+    if (apiSettings["deepseek_api_key"]) {
+      showResult("正在从 RAW 对话提取 episode（首次可能需要几分钟）...");
+      try {
+        const extractResult = await new Promise((resolve, reject) => {
+          chrome.runtime.sendMessage({ type: "PROCESS_ALL_RAW" }, res => {
+            if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+            else if (!res?.ok) reject(new Error(res?.error ?? "处理失败"));
+            else resolve(res);
+          });
+        });
+        if (extractResult.processed > 0) {
+          console.log(`[Popup] 已从 ${extractResult.processed} 条对话提取 episode`);
+        }
+      } catch (err) {
+        console.warn("[Popup] episode 提取失败（跳过，继续同步）:", err.message);
+      }
+    }
+
+    // 同步 chrome.storage → 文件
     showResult("正在同步记忆到文件...");
     await _syncStorageToFiles();
 

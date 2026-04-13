@@ -26,39 +26,75 @@ const KEY = {
  */
 export async function updateMemory(chatData, apiKey) {
   const { platform, rounds } = chatData;
-  for (const round of rounds) {
-    await _processRound(round, platform, apiKey);
-  }
-}
+  if (rounds.length === 0) return;
 
-// ── 内部：处理单轮对话 ────────────────────────────────────────────────────────
-
-async function _processRound(round, platform, apiKey) {
   const state = await _loadState();
+  const episodeId = crypto.randomUUID().slice(0, 8);
+  const firstTimestamp = rounds[0].timestamp;
+  const lastTimestamp  = rounds[rounds.length - 1].timestamp;
 
-  const stateSummary = _buildStateSummary(state);
-  const convText = `User: ${round.user}\n\nAssistant: ${round.assistant}`;
+  // 汇总所有 rounds 的 episode 内容，最终生成一个 episode
+  const epParts = { topics: [], summaries: [], decisions: [], issues: [], projects: [] };
+  let hasContent = false;
 
-  const systemPrompt = _getDeltaSystem();
-  const userPrompt =
+  for (const round of rounds) {
+    const stateSummary = _buildStateSummary(state);
+    const convText = `User: ${round.user}\n\nAssistant: ${round.assistant}`;
+    const userPrompt =
 `CURRENT MEMORY STATE:
 ${stateSummary}
 
 NEW CONVERSATION (${platform}, ${round.timestamp}):
 ${convText.slice(0, 4000)}`;
 
-  let delta;
-  try {
-    delta = await extractJson(systemPrompt, userPrompt, apiKey);
-  } catch (err) {
-    console.error("[memory_engine] LLM call failed:", err.message);
-    return;
+    let delta;
+    try {
+      delta = await extractJson(_getDeltaSystem(), userPrompt, apiKey);
+    } catch (err) {
+      console.error("[memory_engine] LLM call failed:", err.message);
+      continue;
+    }
+    if (!delta || delta.is_noise) continue;
+    hasContent = true;
+
+    // 每轮独立更新 profile / prefs / projects / workflows
+    _applyStateUpdates(delta, episodeId, round.timestamp, platform, state);
+
+    // 累积 episode 内容
+    const ed = delta.episode ?? {};
+    if (ed.topic)   epParts.topics.push(ed.topic);
+    if (ed.summary) epParts.summaries.push(ed.summary);
+    epParts.decisions.push(...(ed.key_decisions    ?? []));
+    epParts.issues.push(...(ed.open_issues         ?? []));
+    if (ed.related_project) epParts.projects.push(ed.related_project);
   }
 
-  if (!delta || delta.is_noise) return;
+  if (!hasContent) return;
 
-  const episodeId = crypto.randomUUID().slice(0, 8);
-  await _applyUpdates(delta, episodeId, round.timestamp, platform, state, apiKey);
+  // 状态只保存一次
+  await _saveState(state);
+
+  // 整批对话生成一个 episode
+  const ep = newEpisode();
+  ep.episode_id          = episodeId;
+  ep.platform            = platform ?? "unknown";
+  ep.topic               = epParts.topics[0] ?? "";
+  ep.summary             = epParts.summaries.join(" | ");
+  ep.key_decisions       = [...new Set(epParts.decisions)];
+  ep.open_issues         = [...new Set(epParts.issues)];
+  ep.relates_to_projects = [...new Set(epParts.projects)];
+  ep.time_range_start    = firstTimestamp;
+  ep.time_range_end      = lastTimestamp;
+  ep.created_at          = firstTimestamp;
+  ep.updated_at          = lastTimestamp;
+
+  await _saveEpisode(episodeId, ep);
+
+  if (apiKey) {
+    _updatePersistentNodes(ep, apiKey).catch(err =>
+      console.error("[memory_engine] persistent nodes update failed:", err.message)
+    );
+  }
 }
 
 // ── 加载 / 保存（chrome.storage.local） ──────────────────────────────────────
@@ -198,9 +234,10 @@ function _applyPersistentResult(pnData, result, epId) {
   }
 }
 
-// ── 应用 delta 更新 ───────────────────────────────────────────────────────────
+// ── 应用 delta 中的状态更新（profile / prefs / projects / workflows） ──────────
+// 不保存 episode，episode 由 updateMemory 在所有 rounds 处理完后统一生成。
 
-async function _applyUpdates(delta, episodeId, timestamp, platform, state, apiKey) {
+function _applyStateUpdates(delta, episodeId, timestamp, platform, state) {
   // Profile
   if (delta.profile_updates && Object.keys(delta.profile_updates).length > 0) {
     state.profile = { ...state.profile, ...delta.profile_updates };
@@ -211,8 +248,9 @@ async function _applyUpdates(delta, episodeId, timestamp, platform, state, apiKe
   if (delta.preference_updates) {
     const pu = delta.preference_updates;
     const p = state.preferences;
-    if (pu.add_style?.length)     p.style_preference     = _dedup([...(p.style_preference ?? []), ...pu.add_style]);
-    if (pu.add_forbidden?.length) p.forbidden_expressions = _dedup([...(p.forbidden_expressions ?? []), ...pu.add_forbidden]);
+    const _toArr = v => Array.isArray(v) ? v : (v ? [String(v)] : []);
+    if (pu.add_style?.length)     p.style_preference      = _dedup([..._toArr(p.style_preference), ..._toArr(pu.add_style)]);
+    if (pu.add_forbidden?.length) p.forbidden_expressions = _dedup([..._toArr(p.forbidden_expressions), ..._toArr(pu.add_forbidden)]);
     if (pu.update_language)       p.language_preference   = pu.update_language;
     if (pu.update_granularity)    p.response_granularity  = pu.update_granularity;
     p.updated_at = timestamp;
@@ -252,31 +290,6 @@ async function _applyUpdates(delta, episodeId, timestamp, platform, state, apiKe
       state.workflows.push(wf);
     }
   }
-
-  // Episode (Python EpisodicMemory schema)
-  const edRaw = delta.episode ?? {};
-  const ep = newEpisode();
-  ep.episode_id          = episodeId;
-  ep.platform            = platform ?? "unknown";
-  ep.topic               = edRaw.topic ?? "";
-  ep.summary             = edRaw.summary ?? "";
-  ep.key_decisions       = edRaw.key_decisions ?? [];
-  ep.open_issues         = edRaw.open_issues ?? [];
-  ep.relates_to_projects = edRaw.related_project ? [edRaw.related_project] : [];
-  ep.time_range_start    = timestamp;
-  ep.time_range_end      = timestamp;
-  ep.created_at          = timestamp;
-  ep.updated_at          = timestamp;
-
-  await _saveEpisode(episodeId, ep);
-  await _saveState(state);
-
-  // Persistent nodes — fire and forget（不阻塞主流程）
-  if (apiKey) {
-    _updatePersistentNodes(ep, apiKey).catch(err =>
-      console.error("[memory_engine] persistent nodes update failed:", err.message)
-    );
-  }
 }
 
 // ── 辅助 ──────────────────────────────────────────────────────────────────────
@@ -293,11 +306,13 @@ function _buildStateSummary(state) {
 
   const p = state.preferences;
   if (p) {
+    // Normalise: LLM may have stored array fields as strings; coerce back to arrays
+    const toArr = v => Array.isArray(v) ? v : (v ? [String(v)] : []);
     lines.push("## Preferences");
-    if (p.style_preference?.length)      lines.push(`- style: ${p.style_preference.join(", ")}`);
-    if (p.forbidden_expressions?.length) lines.push(`- forbidden: ${p.forbidden_expressions.join(", ")}`);
-    if (p.language_preference)           lines.push(`- language: ${p.language_preference}`);
-    if (p.response_granularity)          lines.push(`- granularity: ${p.response_granularity}`);
+    if (toArr(p.style_preference).length)      lines.push(`- style: ${toArr(p.style_preference).join(", ")}`);
+    if (toArr(p.forbidden_expressions).length) lines.push(`- forbidden: ${toArr(p.forbidden_expressions).join(", ")}`);
+    if (p.language_preference)                 lines.push(`- language: ${p.language_preference}`);
+    if (p.response_granularity)                lines.push(`- granularity: ${p.response_granularity}`);
   }
 
   for (const [name, proj] of Object.entries(state.projects)) {

@@ -259,8 +259,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     // 立即应答，不持有 channel —— 防止 SPA 导航时 content script 被卸载导致 channel 断
     sendResponse({ ok: true });
     const jobId = message.jobId;
+    const waitTimeout = message.timeoutMs ?? 90000;
     submitWithRetry(el, config)
-      .then(() => waitForResponse(config))
+      .then(submitted => {
+        if (!submitted) throw new Error("发送失败：未能触发发送按钮，请确认页面已加载完成");
+        return waitForResponse(config, waitTimeout);
+      })
       .then(({ text, source }) => {
         if (message.prompt && !message.skipDownload) {
           chrome.runtime.sendMessage({ type: "SAVE_DOCUMENT", text, platform: config?.name ?? "ai", isMemory: message.isMemory ?? false });
@@ -325,17 +329,21 @@ function findInputElement(config) {
   return null;
 }
 
-// 重试发送：每 500ms 点一次发送键，直到输入框被清空（说明发送成功）或超时
+// 重试发送：每 500ms 点一次发送键，直到输入框内容明显缩短（被清空）或出现停止按钮。
+// 返回 true 表示发送成功，false 表示超时未成功。
+// 注意：不能用"内容变了"作为成功标志——DeepSeek 等平台按 Enter 只会加换行，
+// 内容变长不等于发送，需要内容长度明显缩短（< 原始的一半）才认为被清空。
 async function submitWithRetry(el, config, timeoutMs = 30000) {
   const getContent = () =>
     (el.value !== undefined ? el.value : el.textContent ?? "").trim();
-  const originalContent = getContent();
+  const originalLen = getContent().length;
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     submitInput(el, config);
     await new Promise(r => setTimeout(r, 500));
-    if (getContent() !== originalContent || findStopButton(config)) return;
+    if (getContent().length < originalLen * 0.5 || findStopButton(config)) return true;
   }
+  return false;
 }
 
 function submitInput(el, config) {
@@ -377,7 +385,7 @@ function waitForResponse(config, timeoutMs = 90000) {
     const timer = setInterval(() => {
       if (Date.now() > deadline) {
         clearInterval(timer);
-        reject(new Error("等待回复超时（90s）"));
+        reject(new Error(`等待回复超时（${Math.round(timeoutMs / 1000)}s）`));
         return;
       }
 
@@ -389,6 +397,7 @@ function waitForResponse(config, timeoutMs = 90000) {
         } else if (Date.now() - phaseEnteredAt > 3000) {
           // 3s 内 stop 按钮未出现，选择器可能不匹配，切换为内容稳定性检测
           phase = "wait-stable";
+          phaseEnteredAt = Date.now();
           lastContent = getLastResponseText(config);
         }
       } else if (phase === "wait-end") {
@@ -413,6 +422,8 @@ function waitForResponse(config, timeoutMs = 90000) {
         } else {
           lastContent = current;
           stableCount = 0;
+          // AI 回复后页面可能持续更新（评分、推荐问题等），30s 后强制结束
+          if (Date.now() - phaseEnteredAt > 30000) finish();
         }
       }
     }, 500);

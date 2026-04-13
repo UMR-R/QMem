@@ -57,6 +57,8 @@ Once enabled, you can chat normally. Memory is built automatically without any m
 
 Click **同步** (the button showing your directory name) to flush all memory from browser storage to your local folder. This also removes any duplicate conversation rounds that may have been captured.
 
+If your DeepSeek API key is configured, clicking 同步 also automatically extracts episodes from any conversations that were captured while **实时更新** was off. You don't need to enable 实时更新 retroactively — just click 同步 and episodes will be generated in the background before the files are written. This may take a minute or two on the first sync if there are many conversations.
+
 Files written:
 
 ```
@@ -143,3 +145,5 @@ Starting a new chat on any platform
 | "权限被拒绝" on directory | Click the directory button again; Chrome may have revoked the grant after a browser restart |
 | DeepSeek API error | Check that your key is valid and has sufficient balance at platform.deepseek.com |
 | Duplicate rounds in raw files | Click 同步 — it automatically deduplicates rounds and writes clean data to disk |
+| No episodes generated after sync | Make sure your DeepSeek API key is configured; episode extraction runs automatically on sync when the key is present |
+| Episodes folder looks stale after manual deletion | Deleting files does not clear browser storage. To fully reset episodes: open the Service Worker console (`chrome://extensions/` → Service Worker → 检查) and run the reset commands from the PROJECT_SPEC.md debugging section, then click 同步 again |
