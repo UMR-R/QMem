@@ -39,6 +39,12 @@ const PLATFORMS = {
       ".model-response-text",
       ".response-content",
     ],
+    userSelectors: [
+      "user-query .query-text",
+      "user-query",
+      "message-content[data-author='user']",
+    ],
+    getChatId: () => location.href.match(/\/app\/([^/?#]+)/)?.[1] ?? null,
   },
 
   "chatgpt.com": {
@@ -72,6 +78,11 @@ const PLATFORMS = {
       "[data-message-author-role='assistant'] .markdown",
       "[data-message-author-role='assistant']",
     ],
+    userSelectors: [
+      "[data-message-author-role='user'] .whitespace-pre-wrap",
+      "[data-message-author-role='user']",
+    ],
+    getChatId: () => location.pathname.match(/\/c\/([^/?#]+)/)?.[1] ?? null,
   },
 
   "chat.deepseek.com": {
@@ -106,6 +117,18 @@ const PLATFORMS = {
       ".markdown-body",
       "[class*='markdown']",
     ],
+    userSelectors: [
+      ".fbb737a4",           // DeepSeek user bubble class（可能随版本变化）
+      "[class*='user-message']",
+      "[class*='human']",
+    ],
+    getChatId: () => {
+      // 新格式 /a/chat/s/{uuid}，旧格式 /chat/{uuid}
+      // 取 /chat/ 之后的所有路径段并拼接为唯一 key
+      const m = location.pathname.match(/\/chat\/(.+)/);
+      if (m?.[1]) return m[1].replace(/\//g, "-");
+      return location.href.match(/id=([^&]+)/)?.[1] ?? null;
+    },
   },
 
   "www.doubao.com": {
@@ -139,6 +162,12 @@ const PLATFORMS = {
       "[class*='chat-message'][class*='assistant']",
       "[class*='message'][class*='bot']",
     ],
+    userSelectors: [
+      "[data-role='user']",
+      "[class*='chat-message'][class*='user']",
+      "[class*='message'][class*='human']",
+    ],
+    getChatId: () => location.pathname.match(/\/chat\/([^/?#]+)/)?.[1] ?? null,
   },
 };
 
@@ -146,6 +175,49 @@ function getConfig() {
   const h = location.hostname;
   if (h === "chat.openai.com") return PLATFORMS["chatgpt.com"];
   return PLATFORMS[h] ?? null;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  全对话抓取
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * 按 DOM 顺序收集当前对话的所有消息，返回 [{role, text}, ...] 数组。
+ */
+function scrapeFullConversation(config) {
+  const messages = [];
+
+  // 收集用户消息
+  for (const sel of (config?.userSelectors ?? [])) {
+    const els = document.querySelectorAll(sel);
+    if (els.length > 0) {
+      els.forEach(el => {
+        const text = el.innerText?.trim();
+        if (text) messages.push({ role: "user", text, el });
+      });
+      break;
+    }
+  }
+
+  // 收集 AI 回复
+  for (const sel of (config?.responseSelectors ?? [])) {
+    const els = document.querySelectorAll(sel);
+    if (els.length > 0) {
+      els.forEach(el => {
+        const text = el.innerText?.trim();
+        if (text) messages.push({ role: "assistant", text, el });
+      });
+      break;
+    }
+  }
+
+  // 按 DOM 位置排序，恢复对话顺序
+  messages.sort((a, b) => {
+    const pos = a.el.compareDocumentPosition(b.el);
+    return pos & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
+  });
+
+  return messages.map(({ role, text }) => ({ role, text }));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -171,6 +243,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   if (message.type === "SCRAPE") {
     sendResponse({ data: scrapePage() });
+
+  } else if (message.type === "TOGGLE_CAPTURE") {
+    if (message.enabled) startCapture();
+    else stopCapture();
+    sendResponse({ ok: true });
 
   } else if (message.type === "INJECT_INPUT") {
     const result = injectInput(message.text, false, config);
@@ -504,3 +581,149 @@ function scrapePage() {
     bodyTextPreview: document.body.innerText.slice(0, 500).trim(),
   };
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  有机对话捕获（轮询）
+//  检测用户正常聊天（非插件触发），在每轮 AI 回复完成时自动保存。
+// ═══════════════════════════════════════════════════════════════════════════════
+
+let _captureObserver = null;
+let _capturePhase = "idle";   // idle → wait-stop | wait-stable → idle
+let _prevMsgCount = 0;        // 上次捕获时的消息数，用于识别新增消息
+let _stableCount = 0;         // 内容连续稳定的轮次
+let _lastStableContent = null;// 稳定性检测用的上一次内容快照
+
+const STABLE_TICKS = 5;       // 5 × 600ms = 3s 内容不变则判定完成
+
+function startCapture() {
+  if (_captureObserver) return;
+
+  const config = getConfig();
+  if (!config) {
+    console.log("[MemAssist] 不支持当前平台，跳过捕获:", location.hostname);
+    return;
+  }
+
+  _capturePhase = "idle";
+  _prevMsgCount = _countMessages(config);
+  _stableCount = 0;
+  _lastStableContent = null;
+  console.log("[MemAssist] 开始捕获，平台:", config.name, "，初始消息数:", _prevMsgCount);
+
+  // 用轮询替代 MutationObserver，复用 findStopButton 的逻辑
+  _captureObserver = setInterval(() => _captureStep(config), 600);
+}
+
+function stopCapture() {
+  if (_captureObserver) {
+    clearInterval(_captureObserver);
+    _captureObserver = null;
+  }
+  _capturePhase = "idle";
+  console.log("[MemAssist] 已停止捕获");
+}
+
+function _captureStep(config) {
+  const stopBtn = findStopButton(config);
+  const currentCount = _countMessages(config);
+
+  if (_capturePhase === "idle") {
+    if (stopBtn) {
+      // 主路径：检测到 stop 按钮出现，等它消失
+      _capturePhase = "wait-stop";
+      console.log("[MemAssist] 检测到 stop 按钮，等待响应完成...");
+    } else if (currentCount > _prevMsgCount) {
+      // 备用路径：消息数增加但没看到 stop 按钮（快速响应 或 选择器不匹配）
+      _capturePhase = "wait-stable";
+      _stableCount = 0;
+      _lastStableContent = _getLastMessage(config.responseSelectors);
+      console.log("[MemAssist] 消息数增加（无 stop 按钮），切换稳定性检测...");
+    }
+
+  } else if (_capturePhase === "wait-stop") {
+    if (!stopBtn) {
+      _capturePhase = "idle";
+      console.log("[MemAssist] stop 按钮消失，本轮响应完成");
+      _onRoundComplete(config);
+    }
+
+  } else if (_capturePhase === "wait-stable") {
+    if (stopBtn) {
+      // stop 按钮迟到了，切回按钮检测
+      _capturePhase = "wait-stop";
+      _stableCount = 0;
+      return;
+    }
+    const current = _getLastMessage(config.responseSelectors);
+    if (current && current === _lastStableContent) {
+      _stableCount++;
+      if (_stableCount >= STABLE_TICKS) {
+        _capturePhase = "idle";
+        _stableCount = 0;
+        console.log("[MemAssist] 内容稳定，本轮响应完成（稳定性检测）");
+        _onRoundComplete(config);
+      }
+    } else {
+      _stableCount = 0;
+      _lastStableContent = current;
+    }
+  }
+}
+
+function _countMessages(config) {
+  for (const sel of (config?.responseSelectors ?? [])) {
+    const els = document.querySelectorAll(sel);
+    if (els.length > 0) return els.length;
+  }
+  return 0;
+}
+
+async function _onRoundComplete(config) {
+  const chatId = config.getChatId?.();
+  if (!chatId) {
+    console.log("[MemAssist] 无法获取 chatId，跳过（URL:", location.pathname, "）");
+    return;
+  }
+
+  const currentCount = _countMessages(config);
+  if (currentCount <= _prevMsgCount) {
+    console.log("[MemAssist] 消息数未增加，跳过（当前:", currentCount, "，上次:", _prevMsgCount, "）");
+    return;
+  }
+  _prevMsgCount = currentCount;
+
+  // 提取最新 user + assistant pair
+  const userText = _getLastMessage(config.userSelectors);
+  const assistantText = _getLastMessage(config.responseSelectors);
+  if (!userText || !assistantText) {
+    console.log("[MemAssist] 未提取到消息内容，跳过（user:", !!userText, "，assistant:", !!assistantText, "）");
+    return;
+  }
+  console.log("[MemAssist] 发送 ROUND_CAPTURED，chatId:", chatId, "，用户消息前50字:", userText.slice(0, 50));
+
+  chrome.runtime.sendMessage({
+    type: "ROUND_CAPTURED",
+    chatId,
+    platform: config.name,
+    url: location.href,
+    userText,
+    assistantText,
+    timestamp: new Date().toISOString(),
+  });
+}
+
+function _getLastMessage(selectors) {
+  for (const sel of (selectors ?? [])) {
+    const els = document.querySelectorAll(sel);
+    if (els.length > 0) return els[els.length - 1].innerText?.trim() ?? "";
+  }
+  return "";
+}
+
+// ── 页面加载时根据开关状态决定是否自动启动捕获 ────────────────────────────────
+
+console.log("[MemAssist] content.js 已加载，平台:", location.hostname);
+chrome.storage.local.get("keepUpdated", ({ keepUpdated }) => {
+  console.log("[MemAssist] keepUpdated =", keepUpdated);
+  if (keepUpdated) startCapture();
+});

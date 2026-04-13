@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Demo Extension",
+  "name": "Memory Assitant",
   "version": "1.0.0",
   "description": "Chrome 插件 - 抓取网页数据并提供弹出界面",
 
@@ -9,7 +9,10 @@
     "scripting",
     "storage",
     "downloads",
-    "clipboardRead"
+    "clipboardRead",
+    "idle",
+    "alarms",
+    "offscreen"
   ],
 
   "host_permissions": [
@@ -27,7 +30,8 @@
   },
 
   "background": {
-    "service_worker": "background/background.js"
+    "service_worker": "background/background.js",
+    "type": "module"
   },
 
   "content_scripts": [

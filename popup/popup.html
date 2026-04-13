@@ -29,12 +29,31 @@
       <button id="apiKeySaveBtn" class="btn-sm btn-confirm">保存</button>
     </div>
 
+    <!-- Keep Updated / Realtime Update toggles -->
+    <div class="toggle-row">
+      <span class="toggle-label">保持更新</span>
+      <label class="toggle-switch">
+        <input type="checkbox" id="keepUpdatedToggle">
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+    <div class="toggle-row" id="realtimeRow" style="display:none">
+      <span class="toggle-label">实时更新</span>
+      <label class="toggle-switch">
+        <input type="checkbox" id="realtimeUpdateToggle">
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+
     <hr class="divider">
 
     <!-- Export -->
     <button id="exportMemoryBtn" class="btn-full">导出并保存记忆</button>
 
     <hr class="divider">
+
+    <!-- Rebuild persistent nodes from captured episodes -->
+    <button id="rebuildBtn" class="btn-full btn-consolidate">从历史对话重建记忆节点</button>
 
     <!-- Consolidate persistent nodes -->
     <button id="consolidateBtn" class="btn-full btn-consolidate">整理节点（合并相似）</button>
