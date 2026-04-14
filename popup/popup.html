@@ -52,6 +52,13 @@
 
     <hr class="divider">
 
+    <!-- Import from exported file -->
+    <input type="file" id="importFileInput" accept=".json">
+    <button id="importFileBtn" class="btn-full btn-consolidate">导入历史记录文件</button>
+    <div class="import-hint">支持 ChatGPT / DeepSeek 导出格式，自动识别平台<br>ChatGPT：先从导出 ZIP 中解压 conversations.json</div>
+
+    <hr class="divider">
+
     <!-- Rebuild persistent nodes from captured episodes -->
     <button id="rebuildBtn" class="btn-full btn-consolidate">从历史对话重建记忆节点</button>
 

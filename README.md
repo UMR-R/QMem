@@ -57,7 +57,9 @@ Once enabled, you can chat normally. Memory is built automatically without any m
 
 Click **同步** (the button showing your directory name) to flush all memory from browser storage to your local folder. This also removes any duplicate conversation rounds that may have been captured.
 
-If your DeepSeek API key is configured, clicking 同步 also automatically extracts episodes from any conversations that were captured while **实时更新** was off. You don't need to enable 实时更新 retroactively — just click 同步 and episodes will be generated in the background before the files are written. This may take a minute or two on the first sync if there are many conversations.
+If your DeepSeek API key is configured, clicking 同步 also automatically extracts episodes from any conversations that were captured while **实时更新** was off. You don't need to enable 实时更新 retroactively — just click 同步 and episodes will be generated in the background before the files are written.
+
+**Batch processing:** To avoid long waits and browser extension timeouts, each sync processes at most **10 conversations** at a time. If there are more remaining, the result area will show "还有 N 条对话待提取，再次点击同步继续" — just keep clicking 同步 until all conversations are processed. Each click takes roughly 30–60 seconds depending on conversation length.
 
 Files written:
 
@@ -113,6 +115,25 @@ Click **整理节点（合并相似）** to ask DeepSeek to find and merge seman
 5. Click **确认导入选中节点**
 
 The extension uploads a memory package (selected nodes + supporting episode evidence) to the AI and sends a cold-start prompt, giving the AI full context from your past conversations.
+
+---
+
+## Customizing prompts
+
+All prompts used by the extension are plain text and can be edited directly in the source files — no build step required.
+
+| Prompt | File | Purpose |
+|---|---|---|
+| Export prompt | `config.js` → `CONFIG.skills.episodicTag` | Injected into the target AI during **导出并保存记忆**. Instructs the AI to output a structured JSON summary of the conversation. Edit this to change what fields are captured or how the AI is asked to summarize. |
+| Persistent distill prompt | `config.js` → `CONFIG.skills.persistentDistill` | Sent to DeepSeek after export to extract cross-session patterns (persistent nodes). Edit this to change how nodes are named, merged, or prioritized. |
+| Architecture context | `config.js` → `CONFIG.skills.architecture` | Shared preamble prepended to both prompts above. Describes the two-layer memory structure (episodic + persistent). |
+| Import cold-start prompt | `config.js` → `CONFIG.load` | Sent to the target AI after uploading the memory package during **确认导入选中节点**. Edit this to change how the AI is instructed to use the imported memory. |
+| Auto-capture delta prompt | `background/memory_engine.js` → `_getDeltaSystem()` | Used during **实时更新** to extract incremental changes (profile, preferences, projects) from each conversation round. Edit this to tune what the background processor picks up. |
+
+**Notes:**
+- `config.js` is loaded by the popup. `memory_engine.js` runs in the Service Worker — these are separate contexts, so each maintains its own copy of the distill prompt.
+- The export prompt contains a `{{EXISTING_TAGS}}` placeholder that is replaced at runtime with your current tag list. Keep this placeholder if you edit the prompt.
+- After editing any file, reload the extension at `chrome://extensions/` for changes to take effect.
 
 ---
 

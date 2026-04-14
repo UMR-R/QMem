@@ -370,7 +370,7 @@ ${memStr}`;
         { role: "user",   content: userMsg },
       ],
       temperature: 0.2,
-      max_tokens: 800,
+      max_tokens: 2000,
     }),
   });
 
@@ -380,8 +380,9 @@ ${memStr}`;
   }
   const data = await resp.json();
   const raw = data.choices[0].message.content.trim();
+  try { return JSON.parse(raw); } catch { /* fall through */ }
   const m = raw.match(/\{[\s\S]*\}/);
-  if (!m) throw new Error("DeepSeek 返回格式异常");
+  if (!m) throw new Error("DeepSeek 返回格式异常（可能被截断）：" + raw.slice(0, 120));
   return JSON.parse(m[0]);
 }
 
@@ -472,7 +473,7 @@ ${JSON.stringify(allNodes, null, 2)}`;
         { role: "user",   content: userMsg },
       ],
       temperature: 0.2,
-      max_tokens: 400,
+      max_tokens: 3000,
     }),
   });
 
@@ -482,9 +483,250 @@ ${JSON.stringify(allNodes, null, 2)}`;
   }
   const data = await resp.json();
   const raw = data.choices[0].message.content.trim();
-  const m = raw.match(/\{[\s\S]*\}/);
-  if (!m) throw new Error("DeepSeek 返回格式异常");
-  return JSON.parse(m[0]);
+  // 先尝试整体解析，再尝试提取 {...}，最后提取 [...] 作为 merges 列表
+  try { return JSON.parse(raw); } catch { /* fall through */ }
+  const objM = raw.match(/\{[\s\S]*\}/);
+  if (objM) { try { return JSON.parse(objM[0]); } catch { /* fall through */ } }
+  throw new Error("DeepSeek 返回格式异常（可能被截断）：" + raw.slice(0, 120));
+}
+
+// ── 导入历史记录文件（ChatGPT / DeepSeek 导出格式）──────────────────────────────
+
+async function handleImportFile(file) {
+  showResult("正在解析文件...");
+
+  let json;
+  try {
+    json = JSON.parse(await file.text());
+  } catch (err) {
+    showResult("JSON 解析失败：" + err.message, true);
+    return;
+  }
+
+  let conversations;
+  try {
+    conversations = _parseExportedConversations(json);
+  } catch (err) {
+    showResult("格式不支持：" + err.message, true);
+    return;
+  }
+
+  if (conversations.length === 0) {
+    showResult("未找到可导入的对话", true);
+    return;
+  }
+
+  const detectedPlatform = conversations[0]?.platform ?? "unknown";
+  showResult(`识别为 ${detectedPlatform}，解析到 ${conversations.length} 条对话，正在写入存储...`);
+
+  let imported = 0;
+  let skipped = 0;
+
+  for (const conv of conversations) {
+    const storageKey = `chat:${conv.platform}:${conv.chatId}`;
+    const existing = await _storageGet(storageKey);
+    const existingData = existing[storageKey];
+
+    if (existingData) {
+      const existingSet = new Set(
+        (existingData.rounds ?? []).map(r => r.user + "\x00" + r.assistant)
+      );
+      const newRounds = conv.rounds.filter(
+        r => !existingSet.has(r.user + "\x00" + r.assistant)
+      );
+      if (newRounds.length > 0) {
+        existingData.rounds = [...existingData.rounds, ...newRounds];
+        await _storageSet({ [storageKey]: existingData });
+        imported++;
+      } else {
+        skipped++;
+      }
+    } else {
+      await _storageSet({
+        [storageKey]: {
+          platform: conv.platform,
+          url: "",
+          first_seen: conv.first_seen,
+          last_updated: conv.last_updated,
+          rounds: conv.rounds,
+        },
+      });
+      imported++;
+    }
+  }
+
+  showResult(
+    `已导入 ${imported} 条对话（${skipped} 条已存在跳过）\n` +
+    `点击"同步"按钮提取 episode 并保存到文件`
+  );
+}
+
+/**
+ * 从 conversations.json 内容自动识别平台。
+ * DeepSeek：对话有 inserted_at 字段，或消息有 fragments 字段。
+ * ChatGPT：对话有 create_time（数字），或消息有 author 字段。
+ * 返回 "deepseek" | "chatgpt"。
+ */
+function _detectPlatform(list) {
+  const conv = list[0];
+  if (!conv) return "chatgpt";
+
+  // 对话级时间戳
+  if (typeof conv.inserted_at === "string") return "deepseek";
+  if (typeof conv.create_time === "number") return "chatgpt";
+
+  // 消息级结构
+  if (conv.mapping && typeof conv.mapping === "object") {
+    for (const node of Object.values(conv.mapping)) {
+      const msg = node.message;
+      if (!msg) continue;
+      if (Array.isArray(msg.fragments)) return "deepseek";
+      if (msg.author?.role)             return "chatgpt";
+    }
+  }
+
+  return "chatgpt"; // 默认回退
+}
+
+/**
+ * 将 ChatGPT / DeepSeek 导出的 conversations.json 解析为内部 rounds 格式。
+ *
+ * ChatGPT：message.author.role + message.content.parts + create_time（Unix 秒）
+ * DeepSeek：message.fragments[].type (REQUEST/RESPONSE) + fragments[].content
+ *           + message.inserted_at（ISO 字符串）；conv.inserted_at 为对话时间
+ */
+function _parseExportedConversations(json, _platformHint) {
+  const list = Array.isArray(json) ? json
+    : Array.isArray(json.conversations) ? json.conversations
+    : null;
+  if (!list) throw new Error("顶层应为数组或含 conversations 字段的对象");
+
+  const platform = _detectPlatform(list);
+
+  const results = [];
+  for (const conv of list) {
+    // 时间戳：ChatGPT 用 create_time（Unix 秒），DeepSeek 用 inserted_at（ISO）
+    const createTime = conv.create_time
+      ? new Date(conv.create_time * 1000).toISOString()
+      : (conv.inserted_at ?? new Date().toISOString());
+
+    const chatId = conv.id
+      ?? `${platform}_${createTime.replace(/\W/g, "_")}`;
+
+    let rounds = [];
+    if (conv.mapping && typeof conv.mapping === "object") {
+      rounds = _extractRoundsFromMapping(conv.mapping, createTime);
+    } else if (Array.isArray(conv.messages)) {
+      rounds = _extractRoundsFromArray(conv.messages, createTime);
+    }
+
+    if (rounds.length > 0) {
+      results.push({ chatId, platform, first_seen: createTime, last_updated: createTime, rounds });
+    }
+  }
+  return results;
+}
+
+function _extractRoundsFromMapping(mapping, defaultTs) {
+  const allIds = new Set(Object.keys(mapping));
+
+  // 找根节点：parent 为 null 或 parent 不在 mapping 里
+  let rootId = null;
+  for (const [id, node] of Object.entries(mapping)) {
+    if (!node.parent || !allIds.has(node.parent)) {
+      rootId = id;
+      break;
+    }
+  }
+  if (!rootId) return [];
+
+  // 沿树收集消息（跟随最后一个 child，对应用户最新选择的分支）
+  const messages = [];
+  const visited = new Set();
+  let cur = rootId;
+  while (cur && !visited.has(cur)) {
+    visited.add(cur);
+    const node = mapping[cur];
+    if (!node) break;
+    const msg = node.message;
+    if (msg) {
+      const extracted = _extractMessageContent(msg, defaultTs);
+      if (extracted) messages.push(extracted);
+    }
+    const children = node.children ?? [];
+    cur = children[children.length - 1] ?? null;
+  }
+
+  return _pairMessages(messages, defaultTs);
+}
+
+/**
+ * 从单条 message 对象提取 { role, text, timestamp }。
+ * 兼容 ChatGPT（author.role + content.parts）和
+ * DeepSeek（fragments[].type REQUEST/RESPONSE + fragments[].content）。
+ */
+function _extractMessageContent(msg, defaultTs) {
+  let role = null;
+  let text = "";
+  let timestamp = defaultTs;
+
+  // ChatGPT 格式
+  if (msg.author?.role) {
+    role = msg.author.role === "user" ? "user"
+         : msg.author.role === "assistant" ? "assistant"
+         : null;
+    if (!role) return null;
+    const parts = msg.content?.parts ?? [];
+    text = parts.filter(p => typeof p === "string").join("\n").trim();
+    timestamp = msg.create_time
+      ? new Date(msg.create_time * 1000).toISOString()
+      : defaultTs;
+
+  // DeepSeek 格式
+  } else if (Array.isArray(msg.fragments) && msg.fragments.length > 0) {
+    const firstType = msg.fragments[0].type;
+    role = firstType === "REQUEST" ? "user"
+         : firstType === "RESPONSE" ? "assistant"
+         : null;
+    if (!role) return null;
+    text = msg.fragments
+      .map(f => (typeof f.content === "string" ? f.content : ""))
+      .join("\n")
+      .trim();
+    timestamp = msg.inserted_at ?? defaultTs;
+  }
+
+  if (!role || !text) return null;
+  return { role, text, timestamp };
+}
+
+function _extractRoundsFromArray(messages, defaultTs) {
+  const normalized = messages
+    .filter(m => m.role === "user" || m.role === "assistant")
+    .map(m => ({
+      role: m.role,
+      text: (typeof m.content === "string" ? m.content : m.text ?? "").trim(),
+      timestamp: m.create_time
+        ? new Date(m.create_time * 1000).toISOString()
+        : (m.created_at ?? defaultTs),
+    }))
+    .filter(m => m.text);
+  return _pairMessages(normalized, defaultTs);
+}
+
+function _pairMessages(messages, defaultTs) {
+  const rounds = [];
+  for (let i = 0; i < messages.length - 1; i++) {
+    if (messages[i].role === "user" && messages[i + 1].role === "assistant") {
+      rounds.push({
+        user: messages[i].text,
+        assistant: messages[i + 1].text,
+        timestamp: messages[i + 1].timestamp ?? messages[i].timestamp ?? defaultTs,
+      });
+      i++;
+    }
+  }
+  return rounds;
 }
 
 // ── 从已有 episodes 重建 persistent nodes ─────────────────────────────────────
@@ -643,10 +885,36 @@ function renderPersistentNodes(nodes) {
     const groupEl = document.createElement("div");
     groupEl.className = "pn-group";
 
+    // ── Header ──────────────────────────────────────────────────
     const headerEl = document.createElement("div");
     headerEl.className = "pn-group-header";
-    headerEl.textContent = `${TYPE_LABELS[type] || type}  (${nodeList.length})`;
+
+    const titleEl = document.createElement("span");
+    titleEl.className = "pn-group-title";
+    titleEl.textContent = `${TYPE_LABELS[type] || type} (${nodeList.length})`;
+
+    const actionsEl = document.createElement("div");
+    actionsEl.className = "pn-group-actions";
+
+    const btnAll = document.createElement("button");
+    btnAll.className = "pn-btn-sel";
+    btnAll.textContent = "全选";
+
+    const btnNone = document.createElement("button");
+    btnNone.className = "pn-btn-sel";
+    btnNone.textContent = "全不选";
+
+    const toggleEl = document.createElement("span");
+    toggleEl.className = "pn-toggle";
+    toggleEl.textContent = "▾";
+
+    actionsEl.append(btnAll, btnNone, toggleEl);
+    headerEl.append(titleEl, actionsEl);
     groupEl.appendChild(headerEl);
+
+    // ── Body ─────────────────────────────────────────────────────
+    const bodyEl = document.createElement("div");
+    bodyEl.className = "pn-body";
 
     for (const node of nodeList) {
       const nodeEl = document.createElement("div");
@@ -675,10 +943,28 @@ function renderPersistentNodes(nodes) {
 
       infoEl.append(keyEl, descEl, metaEl);
       nodeEl.append(cb, infoEl);
-      groupEl.appendChild(nodeEl);
+      bodyEl.appendChild(nodeEl);
     }
 
+    groupEl.appendChild(bodyEl);
     container.appendChild(groupEl);
+
+    // ── 事件 ─────────────────────────────────────────────────────
+    // 折叠 / 展开（点 header 任意区域，但不触发按钮）
+    headerEl.addEventListener("click", e => {
+      if (e.target === btnAll || e.target === btnNone) return;
+      groupEl.classList.toggle("collapsed");
+    });
+
+    btnAll.addEventListener("click", e => {
+      e.stopPropagation();
+      bodyEl.querySelectorAll(".pn-checkbox").forEach(cb => cb.checked = true);
+    });
+
+    btnNone.addEventListener("click", e => {
+      e.stopPropagation();
+      bodyEl.querySelectorAll(".pn-checkbox").forEach(cb => cb.checked = false);
+    });
   }
 }
 
@@ -854,6 +1140,14 @@ async function handleExport(tab) {
 let _cachedPnData = null;
 
 async function handleShowPanel() {
+  const panel = document.getElementById("importPanel");
+
+  // 已展开时再次点击则收起
+  if (!panel.classList.contains("hidden")) {
+    panel.classList.add("hidden");
+    return;
+  }
+
   if (!dirHandle) { showResult("请先选择保存目录", true); return; }
   if (!await ensureDirPermission()) { showResult("目录访问权限被拒绝，请重新选择目录", true); return; }
 
@@ -861,7 +1155,7 @@ async function handleShowPanel() {
   try {
     _cachedPnData = await readPersistentNodes();
     renderPersistentNodes(_cachedPnData.nodes);
-    document.getElementById("importPanel").classList.remove("hidden");
+    panel.classList.remove("hidden");
     document.getElementById("result").classList.add("hidden");
   } catch (err) {
     showResult("读取失败：" + err.message, true);
@@ -969,22 +1263,37 @@ document.getElementById("selectDirBtn").addEventListener("click", async () => {
     document.getElementById("importPanel").classList.add("hidden");
 
     // 有未处理的 RAW 数据时，先提取 episode 再同步
+    let extractResult = null;
     const apiSettings = await new Promise(r => chrome.storage.local.get("deepseek_api_key", r));
     if (apiSettings["deepseek_api_key"]) {
-      showResult("正在从 RAW 对话提取 episode（首次可能需要几分钟）...");
+      showResult("正在从 RAW 对话提取 episode...");
+
+      // 轮询进度，每秒更新一次状态文字
+      const progressTimer = setInterval(async () => {
+        const pd = await new Promise(r => chrome.storage.local.get("_raw_progress", r));
+        const prog = pd["_raw_progress"];
+        if (prog) {
+          const pct = prog.total > 0 ? Math.round((prog.current / prog.total) * 100) : 0;
+          const bar = "█".repeat(Math.floor(pct / 5)) + "░".repeat(20 - Math.floor(pct / 5));
+          showResult(`提取 episode 中...\n[${bar}] ${prog.current}/${prog.total}`);
+        }
+      }, 1000);
+
       try {
-        const extractResult = await new Promise((resolve, reject) => {
-          chrome.runtime.sendMessage({ type: "PROCESS_ALL_RAW" }, res => {
+        extractResult = await new Promise((resolve, reject) => {
+          chrome.runtime.sendMessage({ type: "PROCESS_ALL_RAW", limit: 10 }, res => {
             if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
             else if (!res?.ok) reject(new Error(res?.error ?? "处理失败"));
             else resolve(res);
           });
         });
         if (extractResult.processed > 0) {
-          console.log(`[Popup] 已从 ${extractResult.processed} 条对话提取 episode`);
+          console.log(`[Popup] 已从 ${extractResult.processed} 条对话提取 episode，还剩 ${extractResult.remaining}`);
         }
       } catch (err) {
         console.warn("[Popup] episode 提取失败（跳过，继续同步）:", err.message);
+      } finally {
+        clearInterval(progressTimer);
       }
     }
 
@@ -994,7 +1303,11 @@ document.getElementById("selectDirBtn").addEventListener("click", async () => {
 
     const allData = await new Promise(r => chrome.storage.local.get(null, r));
     const count = Object.keys(allData).filter(k => k.startsWith("mw:")).length;
-    showResult(count > 0 ? `已同步 ${count} 条记忆到文件` : "目录已授权（暂无记忆数据）");
+    const remaining = extractResult?.remaining ?? 0;
+    const baseMsg = count > 0 ? `已同步 ${count} 条记忆到文件` : "目录已授权（暂无记忆数据）";
+    showResult(remaining > 0
+      ? `${baseMsg}\n还有 ${remaining} 条对话待提取，再次点击同步继续`
+      : baseMsg);
   } catch (err) {
     if (err.name !== "AbortError") showResult("操作失败：" + err.message, true);
   }
@@ -1006,6 +1319,17 @@ document.getElementById("exportMemoryBtn").addEventListener("click", async () =>
     showResult("此页面不支持注入", true); return;
   }
   handleExport(tab);
+});
+
+document.getElementById("importFileBtn").addEventListener("click", () => {
+  document.getElementById("importFileInput").click();
+});
+
+document.getElementById("importFileInput").addEventListener("change", async (e) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  e.target.value = "";
+  await handleImportFile(file);
 });
 
 document.getElementById("rebuildBtn").addEventListener("click", () => {

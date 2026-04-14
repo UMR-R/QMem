@@ -141,10 +141,9 @@ const PLATFORMS = {
       "button[aria-label='发送']",
       "button[type='button'][class*='send']",
     ],
-    stopSelectors: [
-      "button[aria-label='停止生成']",
-      "button[aria-label='Stop']",
-    ],
+    // 豆包按钮没有 aria-label，无法用 aria-label 检测 stop 按钮。
+    // 留空以强制走 wait-stable 路径（内容稳定 3s 后判定完成）。
+    stopSelectors: [],
     fileInputSelectors: ["input[type='file']"],
     attachmentButtonSelectors: [
       "button[aria-label='上传文件']",
@@ -152,20 +151,14 @@ const PLATFORMS = {
       "button[class*='upload']",
     ],
     getCopyButton() {
-      const btns = document.querySelectorAll(
-        "button[aria-label='复制'], button[class*='copy']"
-      );
+      const btns = document.querySelectorAll("button[class*='copy']");
       return btns[btns.length - 1] ?? null;
     },
     responseSelectors: [
-      "[data-role='assistant']",
-      "[class*='chat-message'][class*='assistant']",
-      "[class*='message'][class*='bot']",
+      "[class*='flow-markdown-body']",
     ],
     userSelectors: [
-      "[data-role='user']",
-      "[class*='chat-message'][class*='user']",
-      "[class*='message'][class*='human']",
+      "[class*='bg-g-send-msg-bubble-bg']",
     ],
     getChatId: () => location.pathname.match(/\/chat\/([^/?#]+)/)?.[1] ?? null,
   },
@@ -446,6 +439,7 @@ function findStopButton(config) {
     "button[aria-label='Stop generating']",
     "button.stop-button",
   ];
+  if (selectors.length === 0) return null;
   return document.querySelector(selectors.join(", "));
 }
 

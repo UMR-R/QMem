@@ -211,6 +211,14 @@ input[type="file"] {
   display: none;
 }
 
+/* ── Import from file ── */
+.import-hint {
+  font-size: 10px;
+  color: #5e5e5e;
+  padding: 0 2px;
+  line-height: 1.4;
+}
+
 /* ── Result box ── */
 .result {
   padding: 10px;
@@ -298,6 +306,10 @@ input[type="file"] {
 }
 
 .pn-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
@@ -305,6 +317,69 @@ input[type="file"] {
   color: #76b900;
   padding: 5px 8px 3px;
   border-bottom: 1px solid #1a1a1a;
+  cursor: pointer;
+  user-select: none;
+}
+
+.pn-group-header:hover {
+  background-color: #111;
+}
+
+.pn-group-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.pn-group-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.pn-btn-sel {
+  font-size: 9px;
+  font-weight: 700;
+  font-family: Arial, Helvetica, sans-serif;
+  letter-spacing: 0.04em;
+  color: #5e5e5e;
+  background: none;
+  border: 1px solid #3a3a3a;
+  border-radius: 2px;
+  padding: 1px 5px;
+  cursor: pointer;
+  line-height: 1.4;
+  flex: none;
+  width: auto;
+  text-transform: none;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.pn-btn-sel:hover {
+  color: #a7a7a7;
+  border-color: #5e5e5e;
+  background: none;
+}
+
+.pn-toggle {
+  font-size: 10px;
+  color: #76b900;
+  width: 10px;
+  text-align: center;
+  transition: transform 0.15s;
+  display: inline-block;
+}
+
+.pn-group.collapsed .pn-toggle {
+  transform: rotate(-90deg);
+}
+
+.pn-body {
+  overflow: hidden;
+}
+
+.pn-group.collapsed .pn-body {
+  display: none;
 }
 
 /* Node row */

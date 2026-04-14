@@ -55,7 +55,9 @@
 
 点击显示目录名称的 **同步** 按钮，将浏览器存储中的全部记忆写出到本地文件夹。同步时会自动清理重复的对话记录。
 
-如果已配置 DeepSeek API Key，点击同步时还会自动从「**实时更新**」关闭期间捕获的对话中提取 episode——无需重新开启「实时更新」，直接点同步即可在后台完成提取，之后再写入文件。对话较多时首次同步可能需要一两分钟。
+如果已配置 DeepSeek API Key，点击同步时还会自动从「**实时更新**」关闭期间捕获的对话中提取 episode——无需重新开启「实时更新」，直接点同步即可在后台完成提取，之后再写入文件。
+
+**分批处理：** 为避免长时间等待和浏览器扩展超时，每次同步最多处理 **10 条对话**。如果还有更多待处理，结果区域会显示"还有 N 条对话待提取，再次点击同步继续"——重复点击同步直到全部完成即可。每次点击约需 30–60 秒，取决于对话长度。
 
 写出的文件结构：
 
@@ -111,6 +113,25 @@
 5. 点击 **确认导入选中节点**
 
 扩展将选中的节点及其对应的原始 episode 证据打包上传给 AI，并发送冷启动指令，使 AI 获得完整的历史上下文。
+
+---
+
+## 自定义 Prompt
+
+扩展使用的所有 prompt 都是纯文本，可以直接在源文件中编辑，无需构建工具。
+
+| Prompt | 文件 | 用途 |
+|---|---|---|
+| 导出 prompt | `config.js` → `CONFIG.skills.episodicTag` | 点击「导出并保存记忆」时注入目标 AI，让 AI 输出结构化 JSON 摘要。可修改捕获字段或调整 AI 的总结方式。 |
+| 持久节点提炼 prompt | `config.js` → `CONFIG.skills.persistentDistill` | 导出后发给 DeepSeek，用于从 episodes 中提炼跨会话稳定规律（persistent 节点）。可修改节点命名、合并或优先级策略。 |
+| 架构说明前缀 | `config.js` → `CONFIG.skills.architecture` | 以上两个 prompt 共享的前置说明，描述两层记忆结构（episodic + persistent）。 |
+| 导入冷启动 prompt | `config.js` → `CONFIG.load` | 点击「确认导入选中节点」上传记忆包后，发给目标 AI 的初始化指令。可修改 AI 如何利用导入的记忆。 |
+| 自动捕获 delta prompt | `background/memory_engine.js` → `_getDeltaSystem()` | 「实时更新」模式下，每轮对话后调用 DeepSeek 提取增量变化（profile、偏好、项目）。可调整后台处理的关注点。 |
+
+**注意事项：**
+- `config.js` 由 popup 加载，`memory_engine.js` 在 Service Worker 中运行，两者是独立上下文，各自维护一份提炼 prompt。
+- 导出 prompt 中包含 `{{EXISTING_TAGS}}` 占位符，运行时会自动替换为当前标签列表。编辑时请保留此占位符。
+- 修改文件后，在 `chrome://extensions/` 重新加载扩展才能生效。
 
 ---
 

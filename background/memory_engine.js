@@ -24,9 +24,18 @@ const KEY = {
  * @param {object} chatData  { platform, url, rounds: [{timestamp, user, assistant}] }
  * @param {string} apiKey
  */
+// 每次对话最多处理的轮数。超过时取最后 MAX_ROUNDS_PER_CONV 轮，
+// 避免极长对话导致 Service Worker 超时（Chrome MV3 限制 ~5 分钟）。
+const MAX_ROUNDS_PER_CONV = 20;
+
 export async function updateMemory(chatData, apiKey) {
-  const { platform, rounds } = chatData;
-  if (rounds.length === 0) return;
+  const { platform, rounds: rawRounds } = chatData;
+  if (rawRounds.length === 0) return;
+
+  // 超长对话截取最后 N 轮（最近的对话对记忆更新价值最高）
+  const rounds = rawRounds.length > MAX_ROUNDS_PER_CONV
+    ? rawRounds.slice(-MAX_ROUNDS_PER_CONV)
+    : rawRounds;
 
   const state = await _loadState();
   const episodeId = crypto.randomUUID().slice(0, 8);
