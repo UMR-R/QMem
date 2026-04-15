@@ -555,10 +555,14 @@ async function handleImportFile(file) {
     }
   }
 
-  showResult(
-    `已导入 ${imported} 条对话（${skipped} 条已存在跳过）\n` +
-    `点击"同步"按钮提取 episode 并保存到文件`
-  );
+  if (imported === 0) {
+    showResult(`所有 ${skipped} 条对话均已存在，无需重复导入`);
+    return;
+  }
+
+  // 自动触发分批提取 + 同步
+  showResult(`已导入 ${imported} 条对话（${skipped} 条已存在跳过），开始提取 episode...`);
+  await _extractAndSync();
 }
 
 /**
@@ -1262,52 +1266,7 @@ document.getElementById("selectDirBtn").addEventListener("click", async () => {
     await updateDirDisplay();
     document.getElementById("importPanel").classList.add("hidden");
 
-    // 有未处理的 RAW 数据时，先提取 episode 再同步
-    let extractResult = null;
-    const apiSettings = await new Promise(r => chrome.storage.local.get("deepseek_api_key", r));
-    if (apiSettings["deepseek_api_key"]) {
-      showResult("正在从 RAW 对话提取 episode...");
-
-      // 轮询进度，每秒更新一次状态文字
-      const progressTimer = setInterval(async () => {
-        const pd = await new Promise(r => chrome.storage.local.get("_raw_progress", r));
-        const prog = pd["_raw_progress"];
-        if (prog) {
-          const pct = prog.total > 0 ? Math.round((prog.current / prog.total) * 100) : 0;
-          const bar = "█".repeat(Math.floor(pct / 5)) + "░".repeat(20 - Math.floor(pct / 5));
-          showResult(`提取 episode 中...\n[${bar}] ${prog.current}/${prog.total}`);
-        }
-      }, 1000);
-
-      try {
-        extractResult = await new Promise((resolve, reject) => {
-          chrome.runtime.sendMessage({ type: "PROCESS_ALL_RAW", limit: 10 }, res => {
-            if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
-            else if (!res?.ok) reject(new Error(res?.error ?? "处理失败"));
-            else resolve(res);
-          });
-        });
-        if (extractResult.processed > 0) {
-          console.log(`[Popup] 已从 ${extractResult.processed} 条对话提取 episode，还剩 ${extractResult.remaining}`);
-        }
-      } catch (err) {
-        console.warn("[Popup] episode 提取失败（跳过，继续同步）:", err.message);
-      } finally {
-        clearInterval(progressTimer);
-      }
-    }
-
-    // 同步 chrome.storage → 文件
-    showResult("正在同步记忆到文件...");
-    await _syncStorageToFiles();
-
-    const allData = await new Promise(r => chrome.storage.local.get(null, r));
-    const count = Object.keys(allData).filter(k => k.startsWith("mw:")).length;
-    const remaining = extractResult?.remaining ?? 0;
-    const baseMsg = count > 0 ? `已同步 ${count} 条记忆到文件` : "目录已授权（暂无记忆数据）";
-    showResult(remaining > 0
-      ? `${baseMsg}\n还有 ${remaining} 条对话待提取，再次点击同步继续`
-      : baseMsg);
+    await _extractAndSync();
   } catch (err) {
     if (err.name !== "AbortError") showResult("操作失败：" + err.message, true);
   }
@@ -1381,6 +1340,62 @@ document.getElementById("realtimeUpdateToggle").addEventListener("change", async
   await chrome.storage.local.set({ realtimeUpdate: e.target.checked });
   showResult(e.target.checked ? "实时更新已开启（每轮对话后自动构建记忆）" : "实时更新已关闭");
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// 提取 episode + 同步到文件（同步按钮 & 导入完成后共用）
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function _extractAndSync() {
+  // 1. 有 API Key 时先提取 episode
+  let extractResult = null;
+  const apiSettings = await new Promise(r => chrome.storage.local.get("deepseek_api_key", r));
+  if (apiSettings["deepseek_api_key"]) {
+    showResult("正在提取 episode...");
+
+    const progressTimer = setInterval(async () => {
+      const pd = await new Promise(r => chrome.storage.local.get("_raw_progress", r));
+      const prog = pd["_raw_progress"];
+      if (prog) {
+        const pct = prog.total > 0 ? Math.round((prog.current / prog.total) * 100) : 0;
+        const bar = "█".repeat(Math.floor(pct / 5)) + "░".repeat(20 - Math.floor(pct / 5));
+        showResult(`提取 episode 中...\n[${bar}] ${prog.current}/${prog.total}`);
+      }
+    }, 1000);
+
+    try {
+      extractResult = await new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage({ type: "PROCESS_ALL_RAW", limit: 10 }, res => {
+          if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+          else if (!res?.ok) reject(new Error(res?.error ?? "处理失败"));
+          else resolve(res);
+        });
+      });
+      if (extractResult.processed > 0) {
+        console.log(`[Popup] 已提取 ${extractResult.processed} 条 episode，还剩 ${extractResult.remaining}`);
+      }
+    } catch (err) {
+      console.warn("[Popup] episode 提取失败（跳过，继续同步）:", err.message);
+    } finally {
+      clearInterval(progressTimer);
+    }
+  }
+
+  // 2. 同步 chrome.storage → 文件
+  if (dirHandle && await ensureDirPermission()) {
+    showResult("正在同步记忆到文件...");
+    await _syncStorageToFiles();
+  }
+
+  // 3. 汇报结果
+  const allData = await new Promise(r => chrome.storage.local.get(null, r));
+  const count = Object.keys(allData).filter(k => k.startsWith("mw:")).length;
+  const remaining = extractResult?.remaining ?? 0;
+  const baseMsg = count > 0 ? `已同步 ${count} 条记忆到文件` : "已完成提取（暂无目录，未写文件）";
+  showResult(remaining > 0
+    ? `${baseMsg}\n还有 ${remaining} 条对话待提取，再次点击同步继续`
+    : baseMsg);
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 同步 chrome.storage.local → 文件系统

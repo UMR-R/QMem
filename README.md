@@ -57,9 +57,9 @@ Once enabled, you can chat normally. Memory is built automatically without any m
 
 Click **同步** (the button showing your directory name) to flush all memory from browser storage to your local folder. This also removes any duplicate conversation rounds that may have been captured.
 
-If your DeepSeek API key is configured, clicking 同步 also automatically extracts episodes from any conversations that were captured while **实时更新** was off. You don't need to enable 实时更新 retroactively — just click 同步 and episodes will be generated in the background before the files are written.
+If your DeepSeek API key is configured, clicking 同步 also automatically extracts episodes from any conversations that were captured while **实时更新** was off. You don't need to enable 实时更新 retroactively — just click 同步 and episodes will be generated in the background before the files are written. Each conversation is processed in a single API call (batch mode), regardless of how many rounds it contains.
 
-**Batch processing:** To avoid long waits and browser extension timeouts, each sync processes at most **10 conversations** at a time. If there are more remaining, the result area will show "还有 N 条对话待提取，再次点击同步继续" — just keep clicking 同步 until all conversations are processed. Each click takes roughly 30–60 seconds depending on conversation length.
+**Batch processing:** Each sync processes at most **10 conversations** at a time. If there are more remaining, the result area will show "还有 N 条对话待提取，再次点击同步继续" — just keep clicking 同步 until all conversations are processed.
 
 Files written:
 
@@ -89,6 +89,18 @@ For a higher-quality, structured memory snapshot of the current conversation:
 3. The extension sends a structured extraction prompt to the AI, waits for the reply, then calls DeepSeek to update your persistent memory nodes
 
 Use this when you want a careful, complete capture of an important conversation.
+
+---
+
+### Import conversation history from file
+
+You can import exported conversation files from ChatGPT or DeepSeek to build memory from your past conversations.
+
+1. Click the extension icon → **导入历史记录文件**
+2. Select a JSON file (ChatGPT: extract `conversations.json` from the export ZIP first; DeepSeek: use the exported file directly)
+3. The extension auto-detects the platform and parses all conversations
+4. Episode extraction starts automatically — a progress bar shows the current batch
+5. After each batch (10 conversations), results are synced to files. If more remain, click **导入历史记录文件** again with the same file to continue (already-imported conversations are skipped)
 
 ---
 
@@ -145,6 +157,10 @@ Daily chatting
 
 After each session
   └─ Click 同步 → files updated in your directory
+
+Importing past conversations
+  └─ Click 导入历史记录文件 → select file → extraction starts automatically
+  └─ If remaining, click 导入历史记录文件 again with same file to continue
 
 Periodically
   └─ Click 从历史对话重建记忆节点 → distill new episodes into persistent nodes

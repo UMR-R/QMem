@@ -201,9 +201,11 @@ async function processAllRaw(limit = 10) {
       const newRounds = chatData.rounds.slice(lastIdx);
 
       try {
+        // batchMode: 整条对话一次 API 调用（比逐轮快 N 倍）
         await updateMemory(
           { platform: chatData.platform, url: chatData.url, rounds: newRounds },
-          apiKey
+          apiKey,
+          { batchMode: true }
         );
         // 成功后更新索引（读最新，避免覆盖并发写入）
         const toUpdate = await chrome.storage.local.get(storageKey);

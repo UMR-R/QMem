@@ -24,25 +24,29 @@ const KEY = {
  * @param {object} chatData  { platform, url, rounds: [{timestamp, user, assistant}] }
  * @param {string} apiKey
  */
-// 每次对话最多处理的轮数。超过时取最后 MAX_ROUNDS_PER_CONV 轮，
-// 避免极长对话导致 Service Worker 超时（Chrome MV3 限制 ~5 分钟）。
-const MAX_ROUNDS_PER_CONV = 20;
+/**
+ * 对一批 rounds 执行增量记忆更新。
+ * @param {object} chatData  { platform, url, rounds: [{timestamp, user, assistant}] }
+ * @param {string} apiKey
+ * @param {object} [opts]
+ * @param {boolean} [opts.batchMode=false]  true = 整条对话拼接后一次 API 调用（历史导入用，快 5-10 倍）
+ */
+export async function updateMemory(chatData, apiKey, { batchMode = false } = {}) {
+  if (batchMode) return _updateMemoryBatch(chatData, apiKey);
+  return _updateMemoryPerRound(chatData, apiKey);
+}
 
-export async function updateMemory(chatData, apiKey) {
-  const { platform, rounds: rawRounds } = chatData;
-  if (rawRounds.length === 0) return;
+// ── 逐轮模式（实时捕获用）─────────────────────────────────────────────────────
 
-  // 超长对话截取最后 N 轮（最近的对话对记忆更新价值最高）
-  const rounds = rawRounds.length > MAX_ROUNDS_PER_CONV
-    ? rawRounds.slice(-MAX_ROUNDS_PER_CONV)
-    : rawRounds;
+async function _updateMemoryPerRound(chatData, apiKey) {
+  const { platform, rounds } = chatData;
+  if (rounds.length === 0) return;
 
   const state = await _loadState();
   const episodeId = crypto.randomUUID().slice(0, 8);
   const firstTimestamp = rounds[0].timestamp;
   const lastTimestamp  = rounds[rounds.length - 1].timestamp;
 
-  // 汇总所有 rounds 的 episode 内容，最终生成一个 episode
   const epParts = { topics: [], summaries: [], decisions: [], issues: [], projects: [] };
   let hasContent = false;
 
@@ -66,10 +70,8 @@ ${convText.slice(0, 4000)}`;
     if (!delta || delta.is_noise) continue;
     hasContent = true;
 
-    // 每轮独立更新 profile / prefs / projects / workflows
     _applyStateUpdates(delta, episodeId, round.timestamp, platform, state);
 
-    // 累积 episode 内容
     const ed = delta.episode ?? {};
     if (ed.topic)   epParts.topics.push(ed.topic);
     if (ed.summary) epParts.summaries.push(ed.summary);
@@ -79,11 +81,61 @@ ${convText.slice(0, 4000)}`;
   }
 
   if (!hasContent) return;
+  await _saveState(state);
+  await _buildAndSaveEpisode(episodeId, platform, firstTimestamp, lastTimestamp, epParts, apiKey);
+}
 
-  // 状态只保存一次
+// ── 批量模式（历史导入用）──────────────────────────────────────────────────────
+// 把整条对话拼成一段文本，一次 API 调用提取全部更新。
+// 比逐轮模式快 N 倍（N = 轮数），适合 processAllRaw 批量处理。
+
+async function _updateMemoryBatch(chatData, apiKey) {
+  const { platform, rounds: rawRounds } = chatData;
+  if (rawRounds.length === 0) return;
+
+  const state = await _loadState();
+  const episodeId = crypto.randomUUID().slice(0, 8);
+  const firstTimestamp = rawRounds[0].timestamp;
+  const lastTimestamp  = rawRounds[rawRounds.length - 1].timestamp;
+
+  const allText = rawRounds.map((r, i) =>
+    `[Round ${i + 1}] (${r.timestamp ?? ""})\nUser: ${r.user}\nAssistant: ${r.assistant}`
+  ).join("\n\n");
+
+  const stateSummary = _buildStateSummary(state);
+  const userPrompt =
+`CURRENT MEMORY STATE:
+${stateSummary}
+
+FULL CONVERSATION (${platform}, ${rawRounds.length} rounds):
+${allText}`;
+
+  let delta;
+  try {
+    delta = await extractJson(_getDeltaSystem(), userPrompt, apiKey);
+  } catch (err) {
+    console.error("[memory_engine] Batch LLM call failed:", err.message);
+    return;
+  }
+  if (!delta || delta.is_noise) return;
+
+  _applyStateUpdates(delta, episodeId, lastTimestamp, platform, state);
   await _saveState(state);
 
-  // 整批对话生成一个 episode
+  const ed = delta.episode ?? {};
+  const epParts = {
+    topics:    ed.topic   ? [ed.topic]   : [],
+    summaries: ed.summary ? [ed.summary] : [],
+    decisions: ed.key_decisions ?? [],
+    issues:    ed.open_issues   ?? [],
+    projects:  ed.related_project ? [ed.related_project] : [],
+  };
+  await _buildAndSaveEpisode(episodeId, platform, firstTimestamp, lastTimestamp, epParts, apiKey);
+}
+
+// ── 共用：构建并保存 episode ──────────────────────────────────────────────────
+
+async function _buildAndSaveEpisode(episodeId, platform, firstTs, lastTs, epParts, apiKey) {
   const ep = newEpisode();
   ep.episode_id          = episodeId;
   ep.platform            = platform ?? "unknown";
@@ -92,10 +144,10 @@ ${convText.slice(0, 4000)}`;
   ep.key_decisions       = [...new Set(epParts.decisions)];
   ep.open_issues         = [...new Set(epParts.issues)];
   ep.relates_to_projects = [...new Set(epParts.projects)];
-  ep.time_range_start    = firstTimestamp;
-  ep.time_range_end      = lastTimestamp;
-  ep.created_at          = firstTimestamp;
-  ep.updated_at          = lastTimestamp;
+  ep.time_range_start    = firstTs;
+  ep.time_range_end      = lastTs;
+  ep.created_at          = firstTs;
+  ep.updated_at          = lastTs;
 
   await _saveEpisode(episodeId, ep);
 
