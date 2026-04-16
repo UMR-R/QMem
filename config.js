@@ -269,3 +269,28 @@ description 描述规律本身，而非触发该规律的具体事件。`,
 注意：简练专业，不要复述所有 JSON 细节。`,
 
 }; // end CONFIG
+
+// ── Prompt loader ──────────────────────────────────────────────────────────────
+// Fetches each prompt from prompts/*.txt and overwrites the corresponding field.
+// Call once on popup init; falls back to the hardcoded strings above if a file
+// cannot be fetched.
+CONFIG.loadPrompts = async function () {
+  const base = chrome.runtime.getURL("prompts/");
+  const files = [
+    ["architecture",   s => { CONFIG.skills.architecture     = s; }],
+    ["episodic_tag",   s => { CONFIG.skills.episodicTag       = s; }],
+    ["persistent_distill", s => { CONFIG.skills.persistentDistill = s; }],
+    ["load",           s => { CONFIG.load                    = s; }],
+  ];
+  await Promise.all(files.map(async ([name, apply]) => {
+    try {
+      const text = await fetch(base + name + ".txt").then(r => {
+        if (!r.ok) throw new Error(r.status);
+        return r.text();
+      });
+      apply(text.trimEnd());
+    } catch (e) {
+      console.warn(`[config] prompt file ${name}.txt not loaded, using default:`, e.message);
+    }
+  }));
+};

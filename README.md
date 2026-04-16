@@ -132,20 +132,29 @@ The extension uploads a memory package (selected nodes + supporting episode evid
 
 ## Customizing prompts
 
-All prompts used by the extension are plain text and can be edited directly in the source files — no build step required.
+All prompts live as plain-text files in the `prompts/` directory. Edit them directly — no JS changes or build step required.
 
-| Prompt | File | Purpose |
-|---|---|---|
-| Export prompt | `config.js` → `CONFIG.skills.episodicTag` | Injected into the target AI during **导出并保存记忆**. Instructs the AI to output a structured JSON summary of the conversation. Edit this to change what fields are captured or how the AI is asked to summarize. |
-| Persistent distill prompt | `config.js` → `CONFIG.skills.persistentDistill` | Sent to DeepSeek after export to extract cross-session patterns (persistent nodes). Edit this to change how nodes are named, merged, or prioritized. |
-| Architecture context | `config.js` → `CONFIG.skills.architecture` | Shared preamble prepended to both prompts above. Describes the two-layer memory structure (episodic + persistent). |
-| Import cold-start prompt | `config.js` → `CONFIG.load` | Sent to the target AI after uploading the memory package during **确认导入选中节点**. Edit this to change how the AI is instructed to use the imported memory. |
-| Auto-capture delta prompt | `background/memory_engine.js` → `_getDeltaSystem()` | Used during **实时更新** to extract incremental changes (profile, preferences, projects) from each conversation round. Edit this to tune what the background processor picks up. |
+### Files
+
+| File | Purpose |
+|---|---|
+| `prompts/episodic_tag.txt` | Injected into the target AI on **Export**. Controls what fields are captured and how the AI summarizes the conversation. |
+| `prompts/architecture.txt` | Shared preamble describing the two-layer memory structure (episodic + persistent). Prepended to the export and distill prompts. |
+| `prompts/persistent_distill.txt` | Sent to DeepSeek from the popup after export. Controls how persistent nodes are named, merged, and prioritized. |
+| `prompts/persistent_distill_background.txt` | Same purpose but used by the background Service Worker during realtime updates — edited independently. |
+| `prompts/delta_system.txt` | Used during **Realtime Update** to extract incremental changes (profile, preferences, projects, workflows) from each conversation round. |
+| `prompts/load.txt` | Cold-start instruction sent to the target AI when importing a memory package. Controls how the AI is asked to use the loaded memories. |
+
+### How to edit
+
+1. Open the `.txt` file you want to change in any text editor and save it.
+2. Go to `chrome://extensions/` and click the reload icon on the extension card.
+3. Reopen the extension popup — changes take effect immediately.
 
 **Notes:**
-- `config.js` is loaded by the popup. `memory_engine.js` runs in the Service Worker — these are separate contexts, so each maintains its own copy of the distill prompt.
-- The export prompt contains a `{{EXISTING_TAGS}}` placeholder that is replaced at runtime with your current tag list. Keep this placeholder if you edit the prompt.
-- After editing any file, reload the extension at `chrome://extensions/` for changes to take effect.
+- `episodic_tag.txt` contains a `{{EXISTING_TAGS}}` placeholder replaced at runtime with your current tag list. Keep it when editing.
+- If a file fails to load the extension falls back to the hardcoded default and logs a warning to the console.
+- The popup and the Service Worker are separate contexts, so `persistent_distill.txt` and `persistent_distill_background.txt` must be edited independently.
 
 ---
 

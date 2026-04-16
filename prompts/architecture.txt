@@ -1,0 +1,57 @@
+# 可迁移个人记忆层 — 架构定义 v1.0
+
+## 核心概念
+
+本系统将个人记忆分为两层：
+
+### Episodic（情节记忆）
+单次对话的完整导出，保留具体的对话细节、时间背景和上下文。
+- 不进行跨会话归纳，只描述"本次对话发生了什么"
+- 作为 Persistent 层的原始证据来源
+- 每条 episodic 有唯一 ID，格式：ep_XXXX
+
+### Persistent（持久记忆）
+从多条 Episodic 中提炼的跨会话稳定规律。
+- 代表用户的长期稳定特征，而非某次对话的具体内容
+- 有置信度（confidence）和证据链（episode_refs）
+- 每条 persistent 有唯一 ID，格式：pn_XXXX
+
+## Persistent 节点 Schema
+
+```json
+{
+  "type":            "preference | profile | workflow | topic | platform",
+  "key":             "snake_case，全局唯一",
+  "description":     "一句中文规律描述，≤30字",
+  "episode_refs":    ["ep_0001", "ep_0002"],
+  "confidence":      "low | medium | high",
+  "export_priority": "low | medium | high"
+}
+```
+
+## Type 说明
+
+| type       | 含义                                |
+|------------|-------------------------------------|
+| preference | 用户稳定的偏好与约束（格式/风格/禁止项）|
+| profile    | 用户身份与背景（角色/领域/技能）        |
+| workflow   | 用户反复使用的工作流程或操作模式        |
+| topic      | 涉及的主题/项目/任务类型               |
+| platform   | 来源平台                             |
+
+## Confidence 规则
+
+| episode_refs 数量 | confidence |
+|-------------------|------------|
+| 1 条              | low        |
+| 2–3 条            | medium     |
+| ≥4 条             | high       |
+
+confidence 必须随 episode_refs 增长而升级，不能手动越级设为 high。
+
+## Description 质量标准
+
+✓ 正确（规律描述）："用户写作时不使用破折号"
+✗ 错误（事件描述）："用户在4月修改论文时提到不用破折号"
+
+description 描述规律本身，而非触发该规律的具体事件。

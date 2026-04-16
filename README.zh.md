@@ -130,20 +130,30 @@
 
 ## 自定义 Prompt
 
-扩展使用的所有 prompt 都是纯文本，可以直接在源文件中编辑，无需构建工具。
+所有 prompt 单独存放在 `prompts/` 目录下，每个文件对应一个纯文本 prompt，无需修改任何 JS 代码。
 
-| Prompt | 文件 | 用途 |
-|---|---|---|
-| 导出 prompt | `config.js` → `CONFIG.skills.episodicTag` | 点击「导出并保存记忆」时注入目标 AI，让 AI 输出结构化 JSON 摘要。可修改捕获字段或调整 AI 的总结方式。 |
-| 持久节点提炼 prompt | `config.js` → `CONFIG.skills.persistentDistill` | 导出后发给 DeepSeek，用于从 episodes 中提炼跨会话稳定规律（persistent 节点）。可修改节点命名、合并或优先级策略。 |
-| 架构说明前缀 | `config.js` → `CONFIG.skills.architecture` | 以上两个 prompt 共享的前置说明，描述两层记忆结构（episodic + persistent）。 |
-| 导入冷启动 prompt | `config.js` → `CONFIG.load` | 点击「确认导入选中节点」上传记忆包后，发给目标 AI 的初始化指令。可修改 AI 如何利用导入的记忆。 |
-| 自动捕获 delta prompt | `background/memory_engine.js` → `_getDeltaSystem()` | 「实时更新」模式下，每轮对话后调用 DeepSeek 提取增量变化（profile、偏好、项目）。可调整后台处理的关注点。 |
+### 文件说明
+
+| 文件 | 用途 |
+|---|---|
+| `prompts/episodic_tag.txt` | 点击「导出并保存记忆」时注入目标 AI，让 AI 输出结构化 JSON 摘要。可修改捕获字段或调整总结方式。 |
+| `prompts/architecture.txt` | 两层记忆架构的共享前置说明（episodic + persistent），随导出 prompt 和提炼 prompt 一起发送。 |
+| `prompts/persistent_distill.txt` | popup 侧：导出后发给 DeepSeek，从 episodes 中提炼跨会话稳定规律（persistent 节点）。可调整节点命名、合并和优先级策略。 |
+| `prompts/persistent_distill_background.txt` | 后台侧：「实时更新」触发持久节点更新时使用，与 popup 侧独立。 |
+| `prompts/delta_system.txt` | 「实时更新」模式下，每轮对话后提取增量变化（profile、偏好、项目、workflow）。 |
+| `prompts/load.txt` | 点击「确认导入选中节点」上传记忆包后，发给目标 AI 的冷启动指令。可修改 AI 如何利用导入的记忆。 |
+
+### 修改步骤
+
+1. 用任意文本编辑器打开 `prompts/` 目录下对应的 `.txt` 文件
+2. 直接编辑内容并保存
+3. 打开 `chrome://extensions/`，点击扩展右下角的刷新图标重新加载
+4. 重新打开扩展弹窗，修改即生效
 
 **注意事项：**
-- `config.js` 由 popup 加载，`memory_engine.js` 在 Service Worker 中运行，两者是独立上下文，各自维护一份提炼 prompt。
-- 导出 prompt 中包含 `{{EXISTING_TAGS}}` 占位符，运行时会自动替换为当前标签列表。编辑时请保留此占位符。
-- 修改文件后，在 `chrome://extensions/` 重新加载扩展才能生效。
+- `episodic_tag.txt` 中包含 `{{EXISTING_TAGS}}` 占位符，运行时会自动替换为当前标签列表，编辑时请保留此占位符。
+- 若某个 txt 文件加载失败，扩展会回落到代码中的默认 prompt，并在控制台输出警告。
+- `persistent_distill.txt`（popup）和 `persistent_distill_background.txt`（后台 Service Worker）是两个独立上下文，需分别修改。
 
 ---
 

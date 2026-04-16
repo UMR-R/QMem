@@ -1500,6 +1500,7 @@ async function _syncStorageToFiles() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 (async () => {
+  await CONFIG.loadPrompts();
   await loadApiKey();
   updateApiKeyDisplay();
   dirHandle = await loadSavedDir();
