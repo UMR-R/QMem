@@ -990,12 +990,15 @@ function showResult(text, isError = false) {
 async function updateDirDisplay() {
   const dirNameEl = document.getElementById("dirName");
   const selectBtn = document.getElementById("selectDirBtn");
+  const syncBtn   = document.getElementById("syncBtn");
   if (!dirHandle) {
     dirNameEl.textContent = "未选择目录";
     selectBtn.textContent = "选择目录";
+    syncBtn.disabled = true;
   } else {
     dirNameEl.textContent = dirHandle.name;
-    selectBtn.textContent = "同步";
+    selectBtn.textContent = "更换";
+    syncBtn.disabled = false;
   }
 }
 
@@ -1255,20 +1258,22 @@ document.getElementById("apiKeySaveBtn").addEventListener("click", async () => {
 
 document.getElementById("selectDirBtn").addEventListener("click", async () => {
   try {
-    if (dirHandle) {
-      // 目录已选：只重新授权（user gesture 可用），无需重新选择
-      const perm = await dirHandle.requestPermission({ mode: "readwrite" });
-      if (perm !== "granted") { showResult("权限被拒绝", true); return; }
-    } else {
-      // 第一次选目录
-      dirHandle = await pickDirectory();
-    }
+    dirHandle = await pickDirectory();
     await updateDirDisplay();
     document.getElementById("importPanel").classList.add("hidden");
-
-    await _extractAndSync();
+    showResult("目录已设置：" + dirHandle.name);
   } catch (err) {
     if (err.name !== "AbortError") showResult("操作失败：" + err.message, true);
+  }
+});
+
+document.getElementById("syncBtn").addEventListener("click", async () => {
+  try {
+    const perm = await dirHandle.requestPermission({ mode: "readwrite" });
+    if (perm !== "granted") { showResult("权限被拒绝", true); return; }
+    await _extractAndSync();
+  } catch (err) {
+    showResult("同步失败：" + err.message, true);
   }
 });
 
@@ -1309,6 +1314,74 @@ document.getElementById("confirmImportBtn").addEventListener("click", async () =
     showResult("此页面不支持注入", true); return;
   }
   handleConfirmImport(tab);
+});
+
+// ── Bootstrap 导出 ───────────────────────────────────────────────────────────
+
+function _downloadText(filename, text) {
+  const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function _buildBootstrapPrompt(target, persistentNodes, episodicEvidence) {
+  const pkg = JSON.stringify({
+    memory_package: {
+      generated_at: new Date().toISOString(),
+      target_platform: target,
+      persistent_nodes: persistentNodes,
+      episodic_evidence: episodicEvidence,
+    }
+  }, null, 2);
+
+  const instruction = CONFIG.load;
+
+  if (target === "claude") {
+    return `<memory_package>\n<instructions>\n${instruction}\n</instructions>\n<data>\n${pkg}\n</data>\n</memory_package>`;
+  }
+  // chatgpt / deepseek / generic：指令在前，数据在后
+  return `${instruction}\n\n---\n\n${pkg}`;
+}
+
+async function handleExportBootstrap() {
+  const selectedIds = getSelectedNodeIds();
+  if (selectedIds.length === 0) { showResult("请至少选中一个记忆节点", true); return; }
+
+  const target = document.getElementById("exportTargetSelect").value;
+
+  const persistentNodes = selectedIds.map(id => {
+    const n = _cachedPnData.nodes[id];
+    return {
+      type: n.type, key: n.key, description: n.description,
+      confidence: n.confidence, export_priority: n.export_priority,
+      episode_refs: n.episode_refs,
+    };
+  });
+
+  const epIds = new Set(persistentNodes.flatMap(n => n.episode_refs || []));
+  const episodicEvidence = [];
+  for (const epId of epIds) {
+    const ep = await _loadEpisodeById(epId);
+    if (!ep) continue;
+    episodicEvidence.push({
+      id: ep.episode_id, topic: ep.topic, created_at: ep.created_at,
+      summary: ep.summary, key_decisions: ep.key_decisions,
+      open_issues: ep.open_issues, relates_to_projects: ep.relates_to_projects,
+    });
+  }
+
+  const prompt = _buildBootstrapPrompt(target, persistentNodes, episodicEvidence);
+  const date = new Date().toISOString().slice(0, 10);
+  _downloadText(`memory_bootstrap_${target}_${date}.txt`, prompt);
+  showResult(`已导出 ${persistentNodes.length} 个节点 + ${episodicEvidence.length} 条记录到文件`);
+}
+
+document.getElementById("exportBootstrapBtn").addEventListener("click", () => {
+  handleExportBootstrap();
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

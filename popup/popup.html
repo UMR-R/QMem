@@ -13,13 +13,12 @@
       <h2>Memory Assistant</h2>
     </div>
 
-    <!-- Directory selector -->
+    <!-- Config -->
     <div class="dir-row">
       <span id="dirName" class="dir-name">未选择目录</span>
       <button id="selectDirBtn" class="btn-sm">选择目录</button>
+      <button id="syncBtn" class="btn-sm btn-confirm" disabled>同步</button>
     </div>
-
-    <!-- API Key -->
     <div class="dir-row">
       <span id="apiKeyStatus" class="dir-name">API Key: 未配置</span>
       <button id="apiKeyBtn" class="btn-sm">设置</button>
@@ -29,51 +28,58 @@
       <button id="apiKeySaveBtn" class="btn-sm btn-confirm">保存</button>
     </div>
 
-    <!-- Keep Updated / Realtime Update toggles -->
-    <div class="toggle-row">
-      <span class="toggle-label">保持更新</span>
-      <label class="toggle-switch">
-        <input type="checkbox" id="keepUpdatedToggle">
-        <span class="toggle-slider"></span>
-      </label>
-    </div>
-    <div class="toggle-row" id="realtimeRow" style="display:none">
-      <span class="toggle-label">实时更新</span>
-      <label class="toggle-switch">
-        <input type="checkbox" id="realtimeUpdateToggle">
-        <span class="toggle-slider"></span>
-      </label>
+    <!-- Section 1: 历史导入 -->
+    <div class="section">
+      <div class="section-title">历史导入</div>
+      <input type="file" id="importFileInput" accept=".json">
+      <button id="importFileBtn" class="btn-full">导入 ChatGPT / DeepSeek 历史文件</button>
+      <div class="import-hint">支持 ChatGPT / DeepSeek 导出格式，自动识别平台<br>ChatGPT：先从导出 ZIP 中解压 conversations.json</div>
     </div>
 
-    <hr class="divider">
+    <!-- Section 2: 实时捕获 -->
+    <div class="section">
+      <div class="section-title">实时捕获</div>
+      <div class="toggle-row">
+        <span class="toggle-label">保持更新</span>
+        <label class="toggle-switch">
+          <input type="checkbox" id="keepUpdatedToggle">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="toggle-row" id="realtimeRow" style="display:none">
+        <span class="toggle-label">实时更新</span>
+        <label class="toggle-switch">
+          <input type="checkbox" id="realtimeUpdateToggle">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <button id="exportMemoryBtn" class="btn-full">手动导出当前对话</button>
+    </div>
 
-    <!-- Export -->
-    <button id="exportMemoryBtn" class="btn-full">导出并保存记忆</button>
-
-    <hr class="divider">
-
-    <!-- Import from exported file -->
-    <input type="file" id="importFileInput" accept=".json">
-    <button id="importFileBtn" class="btn-full btn-consolidate">导入历史记录文件</button>
-    <div class="import-hint">支持 ChatGPT / DeepSeek 导出格式，自动识别平台<br>ChatGPT：先从导出 ZIP 中解压 conversations.json</div>
-
-    <hr class="divider">
-
-    <!-- Rebuild persistent nodes from captured episodes -->
-    <button id="rebuildBtn" class="btn-full btn-consolidate">从历史对话重建记忆节点</button>
-
-    <!-- Consolidate persistent nodes -->
-    <button id="consolidateBtn" class="btn-full btn-consolidate">整理节点（合并相似）</button>
-
-    <hr class="divider">
-
-    <!-- Import by tags -->
-    <button id="importMemoryBtn" class="btn-full">按标签导入记忆</button>
-
-    <!-- Persistent node panel (hidden until import clicked) -->
-    <div id="importPanel" class="import-panel hidden">
-      <div id="persistentList" class="persistent-list"></div>
-      <button id="confirmImportBtn" class="btn-full btn-confirm">确认导入选中节点</button>
+    <!-- Section 3: 记忆管理与导出 -->
+    <div class="section">
+      <div class="section-title">记忆管理与导出</div>
+      <button id="importMemoryBtn" class="btn-full">选择记忆节点</button>
+      <div id="importPanel" class="import-panel hidden">
+        <div id="persistentList" class="persistent-list"></div>
+        <div class="export-target-row">
+          <span class="export-target-label">目标平台</span>
+          <select id="exportTargetSelect">
+            <option value="claude">Claude</option>
+            <option value="chatgpt">ChatGPT</option>
+            <option value="deepseek">DeepSeek</option>
+            <option value="generic">通用</option>
+          </select>
+        </div>
+        <div class="btn-row">
+          <button id="confirmImportBtn" class="btn-half btn-confirm">注入当前对话</button>
+          <button id="exportBootstrapBtn" class="btn-half">导出文件</button>
+        </div>
+      </div>
+      <div class="btn-row">
+        <button id="rebuildBtn" class="btn-half btn-muted">重建记忆节点</button>
+        <button id="consolidateBtn" class="btn-half btn-muted">整理节点</button>
+      </div>
     </div>
 
     <div id="result" class="result hidden"></div>
