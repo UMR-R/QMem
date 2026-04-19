@@ -58,7 +58,7 @@ function saveApiKey(key) {
 
 function updateApiKeyDisplay() {
   const el = document.getElementById("apiKeyStatus");
-  el.textContent = _apiKey ? "API Key: " + "●".repeat(8) : "API Key: 未配置";
+  el.textContent = _apiKey ? "API Key: " + "●".repeat(8) : "API Key: Not set";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -310,7 +310,7 @@ function _guessPlatform(url) {
 function buildExportPrompt(existingTagPaths) {
   const tagsList = existingTagPaths.length > 0
     ? existingTagPaths.join("\n")
-    : "（暂无已有标签，请按规范新建）";
+    : "(No existing tags — create new ones following the convention)";
   return CONFIG.skills.episodicTag.replace("{{EXISTING_TAGS}}", tagsList);
 }
 
@@ -346,7 +346,7 @@ function mergeEpisodicTagsPN(pnData, tagsResult) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function callDeepSeekForPersistent(memoryText, existingNodes) {
-  if (!_apiKey) throw new Error("未配置 DeepSeek API Key，请点击「设置」按钮填写");
+  if (!_apiKey) throw new Error("DeepSeek API Key not configured — click Configure to add it");
   const memStr = (typeof memoryText === "string" ? memoryText : JSON.stringify(memoryText)).slice(0, 3000);
 
   const existingSummary = Object.entries(existingNodes).map(([id, n]) => ({
@@ -354,12 +354,13 @@ async function callDeepSeekForPersistent(memoryText, existingNodes) {
     confidence: n.confidence, refs: n.episode_refs.length,
   }));
 
-  const userMsg = `【现有 Persistent 节点】
+  const userMsg = `[Existing Persistent Nodes]
 ${JSON.stringify(existingSummary, null, 2)}
 
-【新 Episodic 记忆内容】
+[New Episodic Memory Content]
 ${memStr}`;
 
+  const t0 = performance.now();
   const resp = await fetch(CONFIG.deepseek.endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json", "Authorization": `Bearer ${_apiKey}` },
@@ -373,16 +374,26 @@ ${memStr}`;
       max_tokens: 2000,
     }),
   });
+  const networkTime = performance.now() - t0;
 
   if (!resp.ok) {
     const err = await resp.text().catch(() => "");
-    throw new Error(`DeepSeek 请求失败 ${resp.status}: ${err.slice(0, 80)}`);
+    throw new Error(`DeepSeek request failed ${resp.status}: ${err.slice(0, 80)}`);
   }
+
+  const t1 = performance.now();
   const data = await resp.json();
+  const parseTime = performance.now() - t1;
+
+  console.log(
+    `[DeepSeek/persistent] network: ${networkTime.toFixed(0)}ms  parse: ${parseTime.toFixed(0)}ms` +
+    `  prompt_tokens: ${data.usage?.prompt_tokens ?? "?"}  completion_tokens: ${data.usage?.completion_tokens ?? "?"}`
+  );
+
   const raw = data.choices[0].message.content.trim();
   try { return JSON.parse(raw); } catch { /* fall through */ }
   const m = raw.match(/\{[\s\S]*\}/);
-  if (!m) throw new Error("DeepSeek 返回格式异常（可能被截断）：" + raw.slice(0, 120));
+  if (!m) throw new Error("DeepSeek response format error (possibly truncated): " + raw.slice(0, 120));
   return JSON.parse(m[0]);
 }
 
@@ -446,20 +457,20 @@ function applyPersistentResult(pnData, result, epId) {
 
 // Consolidation-only call: ask DeepSeek to find merges in existing nodes
 async function callDeepSeekForConsolidate(existingNodes) {
-  if (!_apiKey) throw new Error("未配置 DeepSeek API Key，请点击「设置」按钮填写");
+  if (!_apiKey) throw new Error("DeepSeek API Key not configured — click Configure to add it");
   const allNodes = Object.entries(existingNodes).map(([id, n]) => ({
     id, type: n.type, key: n.key, description: n.description,
     confidence: n.confidence, refs: n.episode_refs.length,
   }));
 
-  const userMsg = `【整合任务】
-请审视以下全部 Persistent 节点，给出合并建议。只返回 merges 列表，updates 和 new_nodes 留空数组。
+  const userMsg = `[Consolidation Task]
+Review all existing Persistent nodes and suggest merges. Return only the merges list; leave updates and new_nodes as empty arrays.
 
-需要处理两种情况：
-1. **语义重复**：两个节点描述几乎相同的规律 → 合并为一个
-2. **子话题聚合**（重点）：topic 类型下，若多个节点是同一课程/项目/领域的具体子话题（如"良序原理"和"容斥原理"都属于"离散数学"），应合并为一个领域级节点，description 改写为概括性描述，merged_from 可以是数组
+Handle two cases:
+1. **Semantic duplicates**: two nodes describing almost the same pattern → merge into one
+2. **Sub-topic aggregation** (important): for topic-type nodes, if multiple nodes are sub-topics of the same course/project/domain (e.g. "Well-ordering principle" and "Inclusion-exclusion" both belong to "Discrete Mathematics"), merge them into one domain-level node with a generalized description; merged_from may be an array
 
-如无需合并，merges 留空数组。
+If no merges are needed, leave merges as an empty array.
 
 ${JSON.stringify(allNodes, null, 2)}`;
 
@@ -479,27 +490,26 @@ ${JSON.stringify(allNodes, null, 2)}`;
 
   if (!resp.ok) {
     const err = await resp.text().catch(() => "");
-    throw new Error(`DeepSeek 请求失败 ${resp.status}: ${err.slice(0, 80)}`);
+    throw new Error(`DeepSeek request failed ${resp.status}: ${err.slice(0, 80)}`);
   }
   const data = await resp.json();
   const raw = data.choices[0].message.content.trim();
-  // 先尝试整体解析，再尝试提取 {...}，最后提取 [...] 作为 merges 列表
   try { return JSON.parse(raw); } catch { /* fall through */ }
   const objM = raw.match(/\{[\s\S]*\}/);
   if (objM) { try { return JSON.parse(objM[0]); } catch { /* fall through */ } }
-  throw new Error("DeepSeek 返回格式异常（可能被截断）：" + raw.slice(0, 120));
+  throw new Error("DeepSeek response format error (possibly truncated): " + raw.slice(0, 120));
 }
 
 // ── 导入历史记录文件（ChatGPT / DeepSeek 导出格式）──────────────────────────────
 
 async function handleImportFile(file) {
-  showResult("正在解析文件...");
+  showResult("Parsing file...");
 
   let json;
   try {
     json = JSON.parse(await file.text());
   } catch (err) {
-    showResult("JSON 解析失败：" + err.message, true);
+    showResult("JSON parse error: " + err.message, true);
     return;
   }
 
@@ -507,17 +517,17 @@ async function handleImportFile(file) {
   try {
     conversations = _parseExportedConversations(json);
   } catch (err) {
-    showResult("格式不支持：" + err.message, true);
+    showResult("Unsupported format: " + err.message, true);
     return;
   }
 
   if (conversations.length === 0) {
-    showResult("未找到可导入的对话", true);
+    showResult("No conversations found in file.", true);
     return;
   }
 
   const detectedPlatform = conversations[0]?.platform ?? "unknown";
-  showResult(`识别为 ${detectedPlatform}，解析到 ${conversations.length} 条对话，正在写入存储...`);
+  showResult(`Detected ${detectedPlatform}, parsed ${conversations.length} conversations. Writing to storage...`);
 
   let imported = 0;
   let skipped = 0;
@@ -556,12 +566,11 @@ async function handleImportFile(file) {
   }
 
   if (imported === 0) {
-    showResult(`所有 ${skipped} 条对话均已存在，无需重复导入`);
+    showResult(`All ${skipped} conversations already exist, nothing to import.`);
     return;
   }
 
-  // 自动触发分批提取 + 同步
-  showResult(`已导入 ${imported} 条对话（${skipped} 条已存在跳过），开始提取 episode...`);
+  showResult(`Imported ${imported} conversations (${skipped} skipped). Extracting episodes...`);
   await _extractAndSync();
 }
 
@@ -603,7 +612,7 @@ function _parseExportedConversations(json, _platformHint) {
   const list = Array.isArray(json) ? json
     : Array.isArray(json.conversations) ? json.conversations
     : null;
-  if (!list) throw new Error("顶层应为数组或含 conversations 字段的对象");
+  if (!list) throw new Error("Expected a top-level array or an object with a conversations field");
 
   const platform = _detectPlatform(list);
 
@@ -736,7 +745,7 @@ function _pairMessages(messages, defaultTs) {
 // ── 从已有 episodes 重建 persistent nodes ─────────────────────────────────────
 
 async function handleRebuildFromEpisodes() {
-  if (!_apiKey) { showResult("请先配置 DeepSeek API Key", true); return; }
+  if (!_apiKey) { showResult("Please configure your DeepSeek API key first.", true); return; }
 
   const btn = document.getElementById("rebuildBtn");
   btn.disabled = true;
@@ -771,11 +780,11 @@ async function handleRebuildFromEpisodes() {
       .sort((a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? ""));
 
     if (episodes.length === 0) {
-      showResult("没有找到历史 episodes，请先进行对话（需开启实时更新）", true);
+      showResult("No episodes found. Start chatting with Realtime Update enabled.", true);
       return;
     }
 
-    showResult(`找到 ${episodes.length} 条 episodes，开始逐条提炼...`);
+    showResult(`Found ${episodes.length} episodes. Distilling...`);
 
     // 2. 读取当前 persistent nodes
     const pnData = await readPersistentNodes();
@@ -788,13 +797,17 @@ async function handleRebuildFromEpisodes() {
 
     const toProcess = episodes.filter(ep => ep.episode_id && !processedEpIds.has(ep.episode_id));
     if (toProcess.length === 0) {
-      showResult(`所有 ${episodes.length} 条 episodes 均已处理，无新内容`);
+      showResult(`All ${episodes.length} episodes already processed. Nothing new.`);
       return;
     }
-    showResult(`跳过 ${episodes.length - toProcess.length} 条已处理，处理 ${toProcess.length} 条新 episodes...`);
+    showResult(`Skipping ${episodes.length - toProcess.length} already processed. Processing ${toProcess.length} new episodes...`);
 
     // 3. 只处理未曾提炼过的 episodes
     let processed = 0;
+    let totalApiTime = 0;
+    let totalApplyTime = 0;
+    const tRebuildStart = performance.now();
+
     for (const ep of toProcess) {
       const memText = [
         `topic: ${ep.topic ?? ""}`,
@@ -807,10 +820,18 @@ async function handleRebuildFromEpisodes() {
       if (!memText.trim()) continue;
 
       try {
+        const t0 = performance.now();
         const result = await callDeepSeekForPersistent(memText, pnData.nodes);
+        const apiTime = performance.now() - t0;
+
+        const t1 = performance.now();
         applyPersistentResult(pnData, result, ep.episode_id);
+        const applyTime = performance.now() - t1;
+
+        totalApiTime += apiTime;
+        totalApplyTime += applyTime;
         processed++;
-        showResult(`已处理 ${processed}/${toProcess.length}...`);
+        showResult(`Processed ${processed}/${toProcess.length}  API: ${apiTime.toFixed(0)}ms`);
       } catch (err) {
         console.warn("[rebuild] episode", ep.episode_id, "失败:", err.message);
       }
@@ -819,37 +840,43 @@ async function handleRebuildFromEpisodes() {
     // 4. 保存
     await writePersistentNodes(pnData);
 
+    const totalTime = performance.now() - tRebuildStart;
     const nodeCount = Object.keys(pnData.nodes).length;
-    showResult(`完成：新处理 ${processed} 条 episodes，共 ${nodeCount} 个记忆节点`);
+    console.log(
+      `[rebuild] 总耗时: ${totalTime.toFixed(0)}ms` +
+      `  API: ${totalApiTime.toFixed(0)}ms (avg ${processed ? (totalApiTime / processed).toFixed(0) : 0}ms/ep)` +
+      `  apply: ${totalApplyTime.toFixed(0)}ms`
+    );
+    showResult(`Done: processed ${processed} episodes, ${nodeCount} nodes total.`);
   } catch (err) {
-    showResult("重建失败：" + err.message, true);
+    showResult("Rebuild failed: " + err.message, true);
   } finally {
     btn.disabled = false;
   }
 }
 
 async function handleConsolidate() {
-  if (!dirHandle) { showResult("请先选择保存目录", true); return; }
-  if (!await ensureDirPermission()) { showResult("目录访问权限被拒绝，请重新选择目录", true); return; }
+  if (!dirHandle) { showResult("Please select a save folder first.", true); return; }
+  if (!await ensureDirPermission()) { showResult("Folder access denied. Please reselect the folder.", true); return; }
 
   const btn = document.getElementById("consolidateBtn");
   btn.disabled = true;
-  showResult("正在分析节点相似度...");
+  showResult("Analyzing node similarity...");
 
   try {
     const pnData = await readPersistentNodes();
     const nodeCount = Object.keys(pnData.nodes).length;
-    if (nodeCount < 2) { showResult("节点数量不足，无需整合"); return; }
+    if (nodeCount < 2) { showResult("Not enough nodes to consolidate."); return; }
 
     const result = await callDeepSeekForConsolidate(pnData.nodes);
     const { merged } = applyPersistentResult(pnData, result, null);
     await writePersistentNodes(pnData);
 
     showResult(merged.length
-      ? `已合并 ${merged.length} 组节点：\n${merged.join("\n")}`
-      : "无需合并，所有节点语义已足够清晰");
+      ? `Merged ${merged.length} node group(s):\n${merged.join("\n")}`
+      : "No merges needed. All nodes are semantically distinct.");
   } catch (err) {
-    showResult("整合失败：" + err.message, true);
+    showResult("Consolidation failed: " + err.message, true);
   } finally {
     btn.disabled = false;
   }
@@ -860,11 +887,11 @@ async function handleConsolidate() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const TYPE_LABELS = {
-  preference: "偏好与约束",
-  profile:    "用户画像",
-  workflow:   "工作流程",
-  topic:      "主题与项目",
-  platform:   "来源平台",
+  preference: "Preferences",
+  profile:    "Profile",
+  workflow:   "Workflows",
+  topic:      "Topics & Projects",
+  platform:   "Platform",
 };
 
 const CONF_DOTS = { high: "●●●", medium: "●●○", low: "●○○" };
@@ -875,7 +902,7 @@ function renderPersistentNodes(nodes) {
 
   const entries = Object.entries(nodes);
   if (entries.length === 0) {
-    container.innerHTML = '<div class="pn-empty">暂无记忆节点，请先保存记忆</div>';
+    container.innerHTML = '<div class="pn-empty">No memory nodes yet — export a conversation to get started</div>';
     return;
   }
 
@@ -902,11 +929,11 @@ function renderPersistentNodes(nodes) {
 
     const btnAll = document.createElement("button");
     btnAll.className = "pn-btn-sel";
-    btnAll.textContent = "全选";
+    btnAll.textContent = "All";
 
     const btnNone = document.createElement("button");
     btnNone.className = "pn-btn-sel";
-    btnNone.textContent = "全不选";
+    btnNone.textContent = "None";
 
     const toggleEl = document.createElement("span");
     toggleEl.className = "pn-toggle";
@@ -943,7 +970,7 @@ function renderPersistentNodes(nodes) {
 
       const metaEl = document.createElement("div");
       metaEl.className = "pn-meta";
-      metaEl.textContent = `${CONF_DOTS[node.confidence] || "●○○"} · ${node.episode_refs.length} 条记录`;
+      metaEl.textContent = `${CONF_DOTS[node.confidence] || "●○○"} · ${node.episode_refs.length} episodes`;
 
       infoEl.append(keyEl, descEl, metaEl);
       nodeEl.append(cb, infoEl);
@@ -992,12 +1019,12 @@ async function updateDirDisplay() {
   const selectBtn = document.getElementById("selectDirBtn");
   const syncBtn   = document.getElementById("syncBtn");
   if (!dirHandle) {
-    dirNameEl.textContent = "未选择目录";
-    selectBtn.textContent = "选择目录";
+    dirNameEl.textContent = "No folder selected";
+    selectBtn.textContent = "Choose Folder";
     syncBtn.disabled = true;
   } else {
     dirNameEl.textContent = dirHandle.name;
-    selectBtn.textContent = "更换";
+    selectBtn.textContent = "Change";
     syncBtn.disabled = false;
   }
 }
@@ -1018,7 +1045,7 @@ function pollJobResult(jobId, timeoutMs = 180000) {
         } else if (Date.now() < deadline) {
           setTimeout(check, 800);
         } else {
-          reject(new Error("等待超时"));
+          reject(new Error("Timed out waiting for AI response"));
         }
       });
     };
@@ -1062,12 +1089,12 @@ function injectInput(tabId, text) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function handleExport(tab) {
-  if (!dirHandle) { showResult("请先选择保存目录", true); return; }
-  if (!await ensureDirPermission()) { showResult("目录访问权限被拒绝，请重新选择目录", true); return; }
+  if (!dirHandle) { showResult("Please select a save folder first", true); return; }
+  if (!await ensureDirPermission()) { showResult("Folder access denied, please re-select the folder", true); return; }
 
   const btn = document.getElementById("exportMemoryBtn");
   btn.disabled = true;
-  showResult("正在向 AI 发送记忆请求...");
+  showResult("Sending memory request to AI...");
 
   try {
     // 1. Read persistent nodes (for existing tags)
@@ -1076,15 +1103,15 @@ async function handleExport(tab) {
     // 2. Build prompt with existing episodic tags, then send to target AI
     const exportPrompt = buildExportPrompt(pnData.episodic_tag_paths ?? []);
     await injectInput(tab.id, exportPrompt);
-    showResult("等待 AI 回复（导出 prompt 较长，可能需要 1-3 分钟）...");
+    showResult("Waiting for AI reply (prompt is long, may take 1–3 minutes)...");
     const res = await submitAndWait(tab.id, exportPrompt, true, true, 300000); // 5 min
-    if (!res.text) throw new Error("未获取到 AI 回复内容");
+    if (!res.text) throw new Error("No AI reply received");
 
     // 3. Split AI response into memory content + episodic tags
     const { memoryContent, tags: episodicTags } = extractEpisodicTags(res.text);
     mergeEpisodicTagsPN(pnData, episodicTags);
 
-    showResult("AI 已回复，正在提炼持久化记忆节点...");
+    showResult("AI replied — distilling persistent memory nodes...");
 
     // 4. Call DeepSeek to distill persistent nodes
     const result = await callDeepSeekForPersistent(memoryContent, pnData.nodes);
@@ -1095,10 +1122,20 @@ async function handleExport(tab) {
       parsed = typeof memoryContent === "string" ? JSON.parse(memoryContent) : memoryContent;
     } catch { /* raw text — skip structured merge */ }
 
+    // Inject system-known fields the LLM no longer outputs
+    const platform = _guessPlatform(tab.url);
+    if (parsed) {
+      parsed.manifest = {
+        version:    "1.0",
+        platform,
+        exported_at: new Date().toISOString(),
+      };
+    }
+
     // 6. Build and save EpisodicMemory (Python-compatible)
     const ep = _newEpisode();
-    ep.platform          = _guessPlatform(tab.url);
-    ep.topic             = (parsed?.conversation_summary ?? memoryContent ?? "").slice(0, 60);
+    ep.platform          = platform;
+    ep.topic             = parsed?.topic ?? (parsed?.conversation_summary ?? "").slice(0, 60);
     ep.summary           = parsed?.conversation_summary ?? "";
     ep.relates_to_projects = (parsed?.active_projects ?? []).map(p => p.project_name).filter(Boolean);
     ep.key_decisions     = (parsed?.active_projects ?? []).flatMap(p =>
@@ -1127,14 +1164,14 @@ async function handleExport(tab) {
     await writePersistentNodes(pnData);
 
     const summary = [
-      `已保存：${ep.episode_id}`,
-      updated.length ? `更新节点：${updated.join(", ")}` : "",
-      created.length ? `新建节点：${created.join(", ")}` : "",
-      merged.length  ? `合并节点：${merged.join(", ")}` : "",
+      `Saved: ${ep.episode_id}`,
+      updated.length ? `Updated nodes: ${updated.join(", ")}` : "",
+      created.length ? `New nodes: ${created.join(", ")}` : "",
+      merged.length  ? `Merged nodes: ${merged.join(", ")}` : "",
     ].filter(Boolean).join("\n");
     showResult(summary);
   } catch (err) {
-    showResult("保存失败：" + err.message, true);
+    showResult("Save failed: " + err.message, true);
   } finally {
     btn.disabled = false;
   }
@@ -1155,26 +1192,26 @@ async function handleShowPanel() {
     return;
   }
 
-  if (!dirHandle) { showResult("请先选择保存目录", true); return; }
-  if (!await ensureDirPermission()) { showResult("目录访问权限被拒绝，请重新选择目录", true); return; }
+  if (!dirHandle) { showResult("Please select a save folder first", true); return; }
+  if (!await ensureDirPermission()) { showResult("Folder access denied, please re-select the folder", true); return; }
 
-  showResult("正在读取记忆节点...");
+  showResult("Loading memory nodes...");
   try {
     _cachedPnData = await readPersistentNodes();
     renderPersistentNodes(_cachedPnData.nodes);
     panel.classList.remove("hidden");
     document.getElementById("result").classList.add("hidden");
   } catch (err) {
-    showResult("读取失败：" + err.message, true);
+    showResult("Load failed: " + err.message, true);
   }
 }
 
 async function handleConfirmImport(tab) {
   const selectedIds = getSelectedNodeIds();
-  if (selectedIds.length === 0) { showResult("请至少选中一个记忆节点", true); return; }
+  if (selectedIds.length === 0) { showResult("Please select at least one memory node", true); return; }
 
   document.getElementById("confirmImportBtn").disabled = true;
-  showResult("正在加载记忆内容...");
+  showResult("Loading memory content...");
 
   try {
     // 1. Full persistent node data for selected nodes
@@ -1221,16 +1258,16 @@ async function handleConfirmImport(tab) {
       res => {
         document.getElementById("confirmImportBtn").disabled = false;
         if (chrome.runtime.lastError || !res?.ok) {
-          showResult("注入失败：" + (res?.error ?? chrome.runtime.lastError?.message), true);
+          showResult("Inject failed: " + (res?.error ?? chrome.runtime.lastError?.message), true);
           return;
         }
         document.getElementById("importPanel").classList.add("hidden");
-        showResult(`已导入 ${persistentNodes.length} 个节点 + ${episodicEvidence.length} 条原始记录`);
+        showResult(`Injected ${persistentNodes.length} node(s) + ${episodicEvidence.length} episode(s)`);
       }
     );
   } catch (err) {
     document.getElementById("confirmImportBtn").disabled = false;
-    showResult("导入失败：" + err.message, true);
+    showResult("Import failed: " + err.message, true);
   }
 }
 
@@ -1253,7 +1290,7 @@ document.getElementById("apiKeySaveBtn").addEventListener("click", async () => {
   await saveApiKey(key);
   updateApiKeyDisplay();
   document.getElementById("apiKeyPanel").classList.add("hidden");
-  showResult(key ? "API Key 已保存" : "API Key 已清除");
+  showResult(key ? "API Key saved" : "API Key cleared");
 });
 
 document.getElementById("selectDirBtn").addEventListener("click", async () => {
@@ -1261,26 +1298,26 @@ document.getElementById("selectDirBtn").addEventListener("click", async () => {
     dirHandle = await pickDirectory();
     await updateDirDisplay();
     document.getElementById("importPanel").classList.add("hidden");
-    showResult("目录已设置：" + dirHandle.name);
+    showResult("Folder set: " + dirHandle.name);
   } catch (err) {
-    if (err.name !== "AbortError") showResult("操作失败：" + err.message, true);
+    if (err.name !== "AbortError") showResult("Operation failed: " + err.message, true);
   }
 });
 
 document.getElementById("syncBtn").addEventListener("click", async () => {
   try {
     const perm = await dirHandle.requestPermission({ mode: "readwrite" });
-    if (perm !== "granted") { showResult("权限被拒绝", true); return; }
+    if (perm !== "granted") { showResult("Permission denied", true); return; }
     await _extractAndSync();
   } catch (err) {
-    showResult("同步失败：" + err.message, true);
+    showResult("Sync failed: " + err.message, true);
   }
 });
 
 document.getElementById("exportMemoryBtn").addEventListener("click", async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.url || /^(chrome|chrome-extension|about|edge):\/\//.test(tab.url)) {
-    showResult("此页面不支持注入", true); return;
+    showResult("Injection not supported on this page", true); return;
   }
   handleExport(tab);
 });
@@ -1311,7 +1348,7 @@ document.getElementById("importMemoryBtn").addEventListener("click", () => {
 document.getElementById("confirmImportBtn").addEventListener("click", async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.url || /^(chrome|chrome-extension|about|edge):\/\//.test(tab.url)) {
-    showResult("此页面不支持注入", true); return;
+    showResult("Injection not supported on this page", true); return;
   }
   handleConfirmImport(tab);
 });
@@ -1349,7 +1386,7 @@ function _buildBootstrapPrompt(target, persistentNodes, episodicEvidence) {
 
 async function handleExportBootstrap() {
   const selectedIds = getSelectedNodeIds();
-  if (selectedIds.length === 0) { showResult("请至少选中一个记忆节点", true); return; }
+  if (selectedIds.length === 0) { showResult("Please select at least one memory node", true); return; }
 
   const target = document.getElementById("exportTargetSelect").value;
 
@@ -1377,7 +1414,7 @@ async function handleExportBootstrap() {
   const prompt = _buildBootstrapPrompt(target, persistentNodes, episodicEvidence);
   const date = new Date().toISOString().slice(0, 10);
   _downloadText(`memory_bootstrap_${target}_${date}.txt`, prompt);
-  showResult(`已导出 ${persistentNodes.length} 个节点 + ${episodicEvidence.length} 条记录到文件`);
+  showResult(`Exported ${persistentNodes.length} node(s) + ${episodicEvidence.length} episode(s) to file`);
 }
 
 document.getElementById("exportBootstrapBtn").addEventListener("click", () => {
@@ -1406,12 +1443,12 @@ document.getElementById("keepUpdatedToggle").addEventListener("change", async (e
     chrome.tabs.sendMessage(tab.id, { type: "TOGGLE_CAPTURE", enabled }).catch(() => {});
   }
 
-  showResult(enabled ? "保持更新已开启" : "保持更新已关闭");
+  showResult(enabled ? "Keep Updated enabled" : "Keep Updated disabled");
 });
 
 document.getElementById("realtimeUpdateToggle").addEventListener("change", async (e) => {
   await chrome.storage.local.set({ realtimeUpdate: e.target.checked });
-  showResult(e.target.checked ? "实时更新已开启（每轮对话后自动构建记忆）" : "实时更新已关闭");
+  showResult(e.target.checked ? "Realtime Update enabled (memory built after each turn)" : "Realtime Update disabled");
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1424,7 +1461,7 @@ async function _extractAndSync() {
   let extractResult = null;
   const apiSettings = await new Promise(r => chrome.storage.local.get("deepseek_api_key", r));
   if (apiSettings["deepseek_api_key"]) {
-    showResult("正在提取 episode...");
+    showResult("Extracting episodes...");
 
     const progressTimer = setInterval(async () => {
       const pd = await new Promise(r => chrome.storage.local.get("_raw_progress", r));
@@ -1432,7 +1469,7 @@ async function _extractAndSync() {
       if (prog) {
         const pct = prog.total > 0 ? Math.round((prog.current / prog.total) * 100) : 0;
         const bar = "█".repeat(Math.floor(pct / 5)) + "░".repeat(20 - Math.floor(pct / 5));
-        showResult(`提取 episode 中...\n[${bar}] ${prog.current}/${prog.total}`);
+        showResult(`Extracting episodes...\n[${bar}] ${prog.current}/${prog.total}`);
       }
     }, 1000);
 
@@ -1440,7 +1477,7 @@ async function _extractAndSync() {
       extractResult = await new Promise((resolve, reject) => {
         chrome.runtime.sendMessage({ type: "PROCESS_ALL_RAW", limit: 10 }, res => {
           if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
-          else if (!res?.ok) reject(new Error(res?.error ?? "处理失败"));
+          else if (!res?.ok) reject(new Error(res?.error ?? "Processing failed"));
           else resolve(res);
         });
       });
@@ -1456,17 +1493,17 @@ async function _extractAndSync() {
 
   // 2. 同步 chrome.storage → 文件
   if (dirHandle && await ensureDirPermission()) {
-    showResult("正在同步记忆到文件...");
+    showResult("Syncing memory to files...");
     await _syncStorageToFiles();
   }
 
-  // 3. 汇报结果
+  // 3. Report result
   const allData = await new Promise(r => chrome.storage.local.get(null, r));
   const count = Object.keys(allData).filter(k => k.startsWith("mw:")).length;
   const remaining = extractResult?.remaining ?? 0;
-  const baseMsg = count > 0 ? `已同步 ${count} 条记忆到文件` : "已完成提取（暂无目录，未写文件）";
+  const baseMsg = count > 0 ? `Synced ${count} memory item(s) to files` : "Extraction complete (no folder set, files not written)";
   showResult(remaining > 0
-    ? `${baseMsg}\n还有 ${remaining} 条对话待提取，再次点击同步继续`
+    ? `${baseMsg}\n${remaining} conversation(s) pending — click Sync again to continue`
     : baseMsg);
 }
 

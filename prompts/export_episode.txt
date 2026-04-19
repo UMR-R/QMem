@@ -5,7 +5,10 @@
 
 ## 记忆提取规则
 
-### 1. conversation_summary（本次对话详细总结）⭐ 重点字段
+### 1. topic（对话主题）
+用一句话概括本次对话的核心主题，≤ 15 词，不含平台或时间信息。
+
+### 2. conversation_summary（本次对话详细总结）⭐ 重点字段
 对本次对话做完整、详细的叙述性总结，作为日后回溯的原始证据。要求：
 - 覆盖对话的完整过程：背景、问题、讨论过程、结论
 - 有特定文件路径、URL、代码片段的，逐一列出
@@ -14,7 +17,7 @@
 - 不做省略或概括，尽可能保留具体细节
 - 格式：自由叙述文本（string），允许换行
 
-### 2. user_profile（用户画像）
+### 3. user_profile（用户画像）
 提取用户的稳定背景信息：
 - name_or_alias
 - role_identity（如：研究生、工程师、教授）
@@ -22,14 +25,14 @@
 - common_languages
 - primary_task_types
 
-### 3. preferences（偏好与约束）
+### 4. preferences（偏好与约束）
 提取对输出风格、术语、排版的稳定偏好：
 - style_preference
 - terminology_preference
 - formatting_constraints（如：公式必须提供未渲染的 LaTeX 源码）
 - forbidden_expressions（如：不使用破折号）
 
-### 4. active_projects（活跃项目）
+### 5. active_projects（活跃项目）
 提取当前有进展的长期项目，需有对话内容作为支撑：
 - project_name
 - project_goal
@@ -37,9 +40,8 @@
 - key_terms
 - finished_decisions
 - unresolved_questions
-- evidence_links
 
-### 5. key_workflows（工作流程）
+### 6. key_workflows（工作流程）
 提取在对话中反复出现的任务模式或操作流程：
 - workflow_name
 - trigger_condition
@@ -52,11 +54,8 @@
 ## 输出格式（只返回合法 JSON，不包含任何解释）
 
 {
-  "manifest": {
-    "version": "1.0",
-    "generated_from_platform": "Platform {Your name}"
-  },
-  "conversation_summary": "对本次对话的完整详细叙述，包含所有具体细节、文件路径、代码、公式（LaTeX 源码）、待解决问题等",
+  "topic": "本次对话的核心主题，≤15词",
+  "conversation_summary": "完整详细叙述，包含所有具体细节、文件路径、代码、公式（LaTeX 源码）、待解决问题等",
   "user_profile": { ... },
   "preferences": { ... },
   "active_projects": [ ... ],

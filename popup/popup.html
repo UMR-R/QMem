@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -15,70 +15,70 @@
 
     <!-- Config -->
     <div class="dir-row">
-      <span id="dirName" class="dir-name">未选择目录</span>
-      <button id="selectDirBtn" class="btn-sm">选择目录</button>
-      <button id="syncBtn" class="btn-sm btn-confirm" disabled>同步</button>
+      <span id="dirName" class="dir-name">No folder selected</span>
+      <button id="selectDirBtn" class="btn-sm">Choose Folder</button>
+      <button id="syncBtn" class="btn-sm btn-confirm" disabled>Sync</button>
     </div>
     <div class="dir-row">
-      <span id="apiKeyStatus" class="dir-name">API Key: 未配置</span>
-      <button id="apiKeyBtn" class="btn-sm">设置</button>
+      <span id="apiKeyStatus" class="dir-name">API Key: Not set</span>
+      <button id="apiKeyBtn" class="btn-sm">Configure</button>
     </div>
     <div id="apiKeyPanel" class="api-key-panel hidden">
       <input type="password" id="apiKeyInput" placeholder="sk-..." />
-      <button id="apiKeySaveBtn" class="btn-sm btn-confirm">保存</button>
+      <button id="apiKeySaveBtn" class="btn-sm btn-confirm">Save</button>
     </div>
 
-    <!-- Section 1: 历史导入 -->
+    <!-- Section 1: History Import -->
     <div class="section">
-      <div class="section-title">历史导入</div>
+      <div class="section-title">History Import</div>
       <input type="file" id="importFileInput" accept=".json">
-      <button id="importFileBtn" class="btn-full">导入 ChatGPT / DeepSeek 历史文件</button>
-      <div class="import-hint">支持 ChatGPT / DeepSeek 导出格式，自动识别平台<br>ChatGPT：先从导出 ZIP 中解压 conversations.json</div>
+      <button id="importFileBtn" class="btn-full">Import ChatGPT / DeepSeek History</button>
+      <div class="import-hint">Supports ChatGPT / DeepSeek export format, platform auto-detected<br>ChatGPT: unzip the export archive and use conversations.json</div>
     </div>
 
-    <!-- Section 2: 实时捕获 -->
+    <!-- Section 2: Live Capture -->
     <div class="section">
-      <div class="section-title">实时捕获</div>
+      <div class="section-title">Live Capture</div>
       <div class="toggle-row">
-        <span class="toggle-label">保持更新</span>
+        <span class="toggle-label">Keep Updated</span>
         <label class="toggle-switch">
           <input type="checkbox" id="keepUpdatedToggle">
           <span class="toggle-slider"></span>
         </label>
       </div>
       <div class="toggle-row" id="realtimeRow" style="display:none">
-        <span class="toggle-label">实时更新</span>
+        <span class="toggle-label">Realtime Update</span>
         <label class="toggle-switch">
           <input type="checkbox" id="realtimeUpdateToggle">
           <span class="toggle-slider"></span>
         </label>
       </div>
-      <button id="exportMemoryBtn" class="btn-full">手动导出当前对话</button>
+      <button id="exportMemoryBtn" class="btn-full">Export Current Conversation</button>
     </div>
 
-    <!-- Section 3: 记忆管理与导出 -->
+    <!-- Section 3: Memory Management & Export -->
     <div class="section">
-      <div class="section-title">记忆管理与导出</div>
-      <button id="importMemoryBtn" class="btn-full">选择记忆节点</button>
+      <div class="section-title">Memory Management &amp; Export</div>
+      <button id="importMemoryBtn" class="btn-full">Browse Memory Nodes</button>
       <div id="importPanel" class="import-panel hidden">
         <div id="persistentList" class="persistent-list"></div>
         <div class="export-target-row">
-          <span class="export-target-label">目标平台</span>
+          <span class="export-target-label">Target Platform</span>
           <select id="exportTargetSelect">
             <option value="claude">Claude</option>
             <option value="chatgpt">ChatGPT</option>
             <option value="deepseek">DeepSeek</option>
-            <option value="generic">通用</option>
+            <option value="generic">Generic</option>
           </select>
         </div>
         <div class="btn-row">
-          <button id="confirmImportBtn" class="btn-half btn-confirm">注入当前对话</button>
-          <button id="exportBootstrapBtn" class="btn-half">导出文件</button>
+          <button id="confirmImportBtn" class="btn-half btn-confirm">Inject into Chat</button>
+          <button id="exportBootstrapBtn" class="btn-half">Export File</button>
         </div>
       </div>
       <div class="btn-row">
-        <button id="rebuildBtn" class="btn-half btn-muted">重建记忆节点</button>
-        <button id="consolidateBtn" class="btn-half btn-muted">整理节点</button>
+        <button id="rebuildBtn" class="btn-half btn-muted">Rebuild Nodes</button>
+        <button id="consolidateBtn" class="btn-half btn-muted">Consolidate Nodes</button>
       </div>
     </div>
 

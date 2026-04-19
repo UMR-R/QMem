@@ -278,9 +278,9 @@ CONFIG.loadPrompts = async function () {
   const base = chrome.runtime.getURL("prompts/");
   const files = [
     ["architecture",   s => { CONFIG.skills.architecture     = s; }],
-    ["episodic_tag",   s => { CONFIG.skills.episodicTag       = s; }],
-    ["persistent_distill", s => { CONFIG.skills.persistentDistill = s; }],
-    ["load",           s => { CONFIG.load                    = s; }],
+    ["export_episode", s => { CONFIG.skills.episodicTag       = s; }],
+    ["distill_nodes",  s => { CONFIG.skills.persistentDistill = s; }],
+    ["load_memory",    s => { CONFIG.load                    = s; }],
   ];
   await Promise.all(files.map(async ([name, apply]) => {
     try {

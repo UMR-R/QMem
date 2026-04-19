@@ -1,5 +1,7 @@
 # Memory Assistant
 
+[English](README.md)
+
 一个 Chrome 扩展，自动捕获 AI 对话、构建分层记忆，并支持将记忆导出到任意平台。
 
 ## 支持平台
@@ -30,8 +32,8 @@
 ### 3. 首次配置
 
 1. 点击扩展图标，打开弹窗
-2. 点击 **设置** → 填入 DeepSeek API Key → 点击 **保存**
-3. 点击 **选择目录** → 选择一个本地文件夹用于保存记忆文件
+2. 点击 **Configure** → 填入 DeepSeek API Key → 点击 **Save**
+3. 点击 **Choose Folder** → 选择一个本地文件夹用于保存记忆文件
 
 ---
 
@@ -39,11 +41,11 @@
 
 弹窗分为三个区块：
 
-**历史导入** — 从 ChatGPT / DeepSeek 导出文件批量构建记忆
+**History Import**（历史导入）— 从 ChatGPT / DeepSeek 导出文件批量构建记忆
 
-**实时捕获** — 在日常使用 AI 时自动或手动积累记忆
+**Live Capture**（实时捕获）— 在日常使用 AI 时自动或手动积累记忆
 
-**记忆管理与导出** — 查看、维护节点，并导入或导出到目标平台
+**Memory Management & Export**（记忆管理与导出）— 查看、维护节点，并导入或导出到目标平台
 
 ---
 
@@ -56,33 +58,33 @@
 1. 导出历史文件
    - **ChatGPT**：设置 → 数据控制 → 导出数据 → 下载 ZIP → 解压取出 `conversations.json`
    - **DeepSeek**：直接使用导出文件
-2. 点击扩展图标 → **历史导入** → **导入 ChatGPT / DeepSeek 历史文件**
+2. 点击扩展图标 → **History Import** → **Import ChatGPT / DeepSeek History**
 3. 选择文件后自动解析并提取 episode，进度显示在状态栏
-4. 每批处理 10 条对话，有剩余时状态栏提示"还有 N 条待提取"——重复点击导入同一文件继续，已导入的对话自动跳过
-5. 点击 **同步** 将结果写出到本地文件夹
-6. （可选）点击 **重建记忆节点** 将 episodes 提炼为持久节点；点击 **整理节点** 合并语义重复的节点
+4. 每批处理 10 条对话，有剩余时状态栏会提示剩余数量——重复点击导入同一文件继续，已导入的对话自动跳过
+5. 点击 **Sync** 将结果写出到本地文件夹
+6. （可选）点击 **Rebuild Nodes** 将 episodes 提炼为持久节点；点击 **Consolidate Nodes** 合并语义重复的节点
 
 ---
 
 ### 场景二：日常使用时实时维护记忆
 
-1. 点击扩展图标 → **实时捕获**
-2. 开启 **保持更新** — 扩展开始在所有支持的平台上捕获对话
-3. 开启 **实时更新** — 每轮 AI 回复后，自动调用 DeepSeek 更新记忆（画像、偏好、项目、情节）
+1. 点击扩展图标 → **Live Capture**
+2. 开启 **Keep Updated** — 扩展开始在所有支持的平台上捕获对话
+3. 开启 **Realtime Update** — 每轮 AI 回复后，自动调用 DeepSeek 更新记忆（画像、偏好、项目、情节）
 
-> **提示：** 后台记忆暂存于浏览器存储中。点击顶部的 **同步** 按钮随时写出到本地文件夹。
+> **提示：** 后台记忆暂存于浏览器存储中。点击顶部的 **Sync** 按钮随时写出到本地文件夹。
 
-对于重要对话，也可以点击 **手动导出当前对话**，让 AI 生成一份结构化摘要后由 DeepSeek 更新持久节点。
+对于重要对话，也可以点击 **Export Current Conversation**，让 AI 生成一份结构化摘要后由 DeepSeek 更新持久节点。
 
 ---
 
 ### 同步到文件
 
-点击顶部的 **同步** 按钮，将浏览器存储中的全部记忆写出到本地文件夹。同步时会自动清理重复的对话记录。
+点击顶部的 **Sync** 按钮，将浏览器存储中的全部记忆写出到本地文件夹。同步时会自动清理重复的对话记录。
 
-如果已配置 DeepSeek API Key，同步时还会自动从「**实时更新**」关闭期间捕获的对话中提取 episode，无需手动操作。每条对话整体发一次 API 调用（batch 模式）。
+如果已配置 DeepSeek API Key，同步时还会自动从 **Realtime Update** 关闭期间捕获的对话中提取 episode，无需手动操作。每条对话整体发一次 API 调用（batch 模式）。
 
-**分批处理：** 每次同步最多处理 **10 条对话**。如还有更多，状态栏会提示"还有 N 条对话待提取，再次点击同步继续"。
+**分批处理：** 每次同步最多处理 **10 条对话**。如还有更多，状态栏会提示剩余数量，再次点击 Sync 继续。
 
 写出的文件结构：
 
@@ -107,15 +109,15 @@
 
 #### 查看与选择节点
 
-点击 **选择记忆节点**，弹出所有持久节点列表，按类型分组（偏好、画像、主题等），置信度高或导出优先级高的节点默认勾选。
+点击 **Browse Memory Nodes**，弹出所有持久节点列表，按类型分组（偏好、画像、主题等），置信度高或导出优先级高的节点默认勾选。
 
 #### 注入当前对话
 
-勾选节点后，选择目标平台，点击 **注入当前对话**：扩展将选中的节点及其对应的原始 episode 证据打包上传给当前页面的 AI，并发送冷启动指令，使 AI 获得完整的历史上下文。
+勾选节点后，选择目标平台，点击 **Inject into Chat**：扩展将选中的节点及其对应的原始 episode 证据打包上传给当前页面的 AI，并发送冷启动指令，使 AI 获得完整的历史上下文。
 
 #### 导出文件（跨平台迁移）
 
-勾选节点后，选择目标平台，点击 **导出文件**：扩展生成一个包含记忆数据和冷启动指令的 `.txt` 文件，可直接粘贴到任意平台的 system prompt 或自定义指令中。
+勾选节点后，选择目标平台，点击 **Export File**：扩展生成一个包含记忆数据和冷启动指令的 `.txt` 文件，可直接粘贴到任意平台的 system prompt 或自定义指令中。
 
 支持的目标平台格式：
 
@@ -128,8 +130,8 @@
 
 #### 维护节点
 
-- **重建记忆节点**：扫描所有尚未提炼的历史 episodes，逐一调用 DeepSeek 生成或更新持久节点。适合关闭实时更新期间积累了大量对话后使用。
-- **整理节点**：让 DeepSeek 审视现有节点，合并语义重复或同属一个主题/课程的子话题节点。
+- **Rebuild Nodes**：扫描所有尚未提炼的历史 episodes，逐一调用 DeepSeek 生成或更新持久节点。适合关闭 Realtime Update 期间积累了大量对话后使用。
+- **Consolidate Nodes**：让 DeepSeek 审视现有节点，合并语义重复或同属一个主题/课程的子话题节点。
 
 ---
 
@@ -141,22 +143,18 @@
 
 | 文件 | 发给谁 | 触发场景 |
 |---|---|---|
-| `episodic_tag.txt` | 目标 AI（当前页面） | 手动导出当前对话 |
-| `architecture.txt` | 拼接在 `episodic_tag.txt` 前 | 同上（前置背景说明） |
-| `persistent_distill.txt` | DeepSeek API（popup 侧） | 手动导出当前对话完成后 / 重建记忆节点 / 整理节点 |
-| `persistent_distill_background.txt` | DeepSeek API（后台 Service Worker） | 实时更新每轮触发 / 同步按钮 |
-| `delta_system.txt` | DeepSeek API（后台 Service Worker） | 实时更新每轮触发 / 同步按钮 |
-| `load.txt` | 目标 AI | 注入当前对话 / 导出文件 |
+| `export_episode.txt` | 目标 AI（当前页面） | Export Current Conversation |
+| `architecture.txt` | 拼接在 `distill_nodes.txt` 前 | Export Current Conversation 完成后 / Rebuild Nodes / Consolidate Nodes |
+| `distill_nodes.txt` | DeepSeek API（popup 侧） | Export Current Conversation 完成后 / Rebuild Nodes / Consolidate Nodes |
+| `distill_nodes_bg.txt` | DeepSeek API（后台 Service Worker） | Realtime Update 每轮触发 / Sync |
+| `extract_delta.txt` | DeepSeek API（后台 Service Worker） | Realtime Update 每轮触发 / Sync |
+| `load_memory.txt` | 目标 AI | Inject into Chat / Export File |
 
 ### 修改步骤
 
 1. 用任意文本编辑器打开对应 `.txt` 文件并保存
 2. 打开 `chrome://extensions/`，点击扩展右下角的刷新图标
 3. 重新打开弹窗，修改即生效
-
-**注意：**
-- `episodic_tag.txt` 中的 `{{EXISTING_TAGS}}` 占位符在运行时自动替换，编辑时请保留
-- `persistent_distill.txt`（popup）和 `persistent_distill_background.txt`（后台）是独立的两个上下文，需分别修改
 
 ---
 
@@ -165,18 +163,18 @@
 ```
 场景一：从历史记录构建记忆
   └─ 导入 ChatGPT / DeepSeek 历史文件 → 自动提取 episode
-  └─ 点击「同步」→ 写出到本地文件夹
-  └─ （可选）点击「重建记忆节点」→ 提炼持久节点
-  └─ （可选）点击「整理节点」→ 合并重复节点
+  └─ 点击 Sync → 写出到本地文件夹
+  └─ （可选）点击 Rebuild Nodes → 提炼持久节点
+  └─ （可选）点击 Consolidate Nodes → 合并重复节点
 
 场景二：日常使用时维护记忆
-  └─ 开启「保持更新」+「实时更新」→ 记忆自动积累
-  └─ 每次聊天后点击「同步」→ 写出到本地文件夹
+  └─ 开启 Keep Updated + Realtime Update → 记忆自动积累
+  └─ 每次聊天后点击 Sync → 写出到本地文件夹
 
 在新平台开始对话
-  └─ 点击「选择记忆节点」→ 勾选节点 → 选择目标平台
-  └─ 「注入当前对话」：直接注入当前页面的 AI
-  └─ 「导出文件」：生成 .txt 文件，粘贴到任意平台
+  └─ 点击 Browse Memory Nodes → 勾选节点 → 选择目标平台
+  └─ Inject into Chat：直接注入当前页面的 AI
+  └─ Export File：生成 .txt 文件，粘贴到任意平台
 ```
 
 ---
@@ -185,11 +183,11 @@
 
 | 问题 | 解决方法 |
 |---|---|
-| 捕获没有触发 | 开启「保持更新」后刷新页面，扩展需要重新注入到页面中 |
+| 捕获没有触发 | 开启 Keep Updated 后刷新页面，扩展需要重新注入到页面中 |
 | 按钮点击无响应 | 目标平台可能更新了页面结构，尝试重新加载扩展后再试 |
-| 提示"API Key 未配置" | 点击「设置」重新填入 DeepSeek API Key |
-| 目录访问权限被拒绝 | 再次点击「选择目录」重新授权，浏览器重启后可能撤销权限 |
+| 提示"API Key not configured" | 点击 Configure 重新填入 DeepSeek API Key |
+| 目录访问权限被拒绝 | 再次点击 Choose Folder 重新授权，浏览器重启后可能撤销权限 |
 | DeepSeek 接口报错 | 检查 API Key 是否有效，以及账户余额是否充足 |
-| 文件中有重复对话记录 | 点击「同步」，同步时会自动去重并写出干净的数据 |
-| 同步后没有生成 episode | 确认 DeepSeek API Key 已配置；配置后点同步会自动提取 |
-| 手动删除 episodes 目录后重新同步内容不变 | 删文件不会清除浏览器存储。需在 Service Worker 控制台（`chrome://extensions/` → Service Worker → 检查）执行重置命令，再点同步 |
+| 文件中有重复对话记录 | 点击 Sync，同步时会自动去重并写出干净的数据 |
+| 同步后没有生成 episode | 确认 DeepSeek API Key 已配置；配置后点 Sync 会自动提取 |
+| 手动删除 episodes 目录后重新同步内容不变 | 删文件不会清除浏览器存储。需在 Service Worker 控制台（`chrome://extensions/` → Service Worker → 检查）执行重置命令，再点 Sync |

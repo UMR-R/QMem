@@ -91,7 +91,7 @@ ${convText.slice(0, 4000)}`;
     if (!delta || delta.is_noise) continue;
     hasContent = true;
 
-    _applyStateUpdates(delta, episodeId, round.timestamp, platform, state);
+    _applyStateUpdates(delta, episodeId, round.timestamp, state);
 
     const ed = delta.episode ?? {};
     if (ed.topic)   epParts.topics.push(ed.topic);
@@ -140,7 +140,7 @@ ${allText}`;
   }
   if (!delta || delta.is_noise) return;
 
-  _applyStateUpdates(delta, episodeId, lastTimestamp, platform, state);
+  _applyStateUpdates(delta, episodeId, lastTimestamp, state);
   await _saveState(state);
 
   const ed = delta.episode ?? {};
@@ -319,7 +319,7 @@ function _applyPersistentResult(pnData, result, epId) {
 // ── 应用 delta 中的状态更新（profile / prefs / projects / workflows） ──────────
 // 不保存 episode，episode 由 updateMemory 在所有 rounds 处理完后统一生成。
 
-function _applyStateUpdates(delta, episodeId, timestamp, platform, state) {
+function _applyStateUpdates(delta, episodeId, timestamp, state) {
   // Profile
   if (delta.profile_updates && Object.keys(delta.profile_updates).length > 0) {
     state.profile = { ...state.profile, ...delta.profile_updates };
@@ -415,11 +415,13 @@ function _buildStateSummary(state) {
 }
 
 async function _getDeltaSystem() {
-  return await _loadPromptFile("delta_system");
+  return await _loadPromptFile("extract_delta");
 }
 
 async function _getPersistentDistillSystem() {
-  return await _loadPromptFile("persistent_distill_background");
+  const arch   = await _loadPromptFile("architecture");
+  const distill = await _loadPromptFile("distill_nodes_bg");
+  return arch + "\n\n" + distill;
 }
 
 function _appendEntries(existing, newTexts, timestamp) {
