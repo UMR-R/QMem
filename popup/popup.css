@@ -200,11 +200,10 @@ body {
   justify-content: center;
 }
 
-/* ── Circle button (selectDirBtn) ──
-   JS sets textContent on this button. The ::before pseudo-element
-   (CSS-generated, not a real DOM node) survives textContent rewrites,
-   so the sync icon always stays visible. */
-#selectDirBtn {
+/* ── Circle button (#syncBtn) ──
+   JS only toggles disabled on this button; text "同步" is static.
+   ::before supplies the icon as a CSS data-URI so it's always present. */
+#syncBtn {
   width: 174px;
   height: 174px;
   border-radius: 50%;
@@ -232,7 +231,7 @@ body {
 }
 
 /* Sync icon via CSS — survives JS textContent rewrites */
-#selectDirBtn::before {
+#syncBtn::before {
   content: "";
   display: block;
   width: 40px;
@@ -245,7 +244,7 @@ body {
   background-size: contain;
 }
 
-#selectDirBtn:hover {
+#syncBtn:hover {
   transform: scale(1.05);
   box-shadow:
     0 14px 50px rgba(107, 99, 255, 0.28),
@@ -253,19 +252,19 @@ body {
     inset 0 1px 0 rgba(255, 255, 255, 1);
 }
 
-#selectDirBtn:active {
+#syncBtn:active {
   transform: scale(0.96);
   transition: transform 0.1s;
 }
 
-#selectDirBtn:disabled {
+#syncBtn:disabled {
   opacity: 0.65;
   cursor: not-allowed;
   transform: none !important;
 }
 
 /* Spin the icon while disabled (= syncing) */
-#selectDirBtn:disabled::before {
+#syncBtn:disabled::before {
   animation: spin-icon 1.1s linear infinite;
 }
 
@@ -299,6 +298,27 @@ body {
   text-overflow: ellipsis;
 }
 
+
+/* ── Dir change button (#selectDirBtn inside .dir-badge) ── */
+#selectDirBtn {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+  letter-spacing: 0;
+  text-transform: none;
+  width: auto;
+  flex: none;
+  opacity: 0.75;
+  transition: opacity 0.15s;
+}
+#selectDirBtn:hover  { opacity: 1; background: none; }
+#selectDirBtn:active { background: none; }
 
 /* ── Toggle card ─────────────────────────────────────────── */
 .toggle-card {
@@ -664,3 +684,84 @@ body {
   user-select: none;
   line-height: 1;
 }
+
+/* ── Platform selector row (inside import panel) ── */
+.target-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 12px;
+  background: var(--card);
+  border-radius: var(--radius-btn);
+  border: 1.5px solid rgba(107, 99, 255, 0.12);
+}
+
+.target-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-2);
+}
+
+.target-select {
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--accent-light) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236B63FF' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E") no-repeat right 8px center;
+  border: 1.5px solid var(--accent-border);
+  border-radius: 8px;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  padding: 5px 26px 5px 10px;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.18s;
+}
+
+.target-select:focus { border-color: var(--accent); }
+
+/* ── Two-button row (注入 + 导出文件) ── */
+.btn-pair {
+  display: flex;
+  gap: 8px;
+}
+
+.btn-inject {
+  flex: 1;
+  padding: 12px;
+  background: var(--accent);
+  border: none;
+  border-radius: var(--radius-btn);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  letter-spacing: 0;
+  text-transform: none;
+  transition: background 0.18s, transform 0.12s;
+}
+
+.btn-inject:hover    { background: #5A52EE; }
+.btn-inject:active   { transform: scale(0.97); }
+.btn-inject:disabled { background: #C4C1F0; cursor: not-allowed; transform: none; }
+
+.btn-export-bs {
+  flex: 1;
+  padding: 12px;
+  background: var(--card);
+  border: 1.5px solid var(--accent-border);
+  border-radius: var(--radius-btn);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  letter-spacing: 0;
+  text-transform: none;
+  transition: background 0.18s, border-color 0.18s, transform 0.12s;
+}
+
+.btn-export-bs:hover    { background: var(--accent-light); border-color: var(--accent); }
+.btn-export-bs:active   { transform: scale(0.97); }
+.btn-export-bs:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }

@@ -44,19 +44,20 @@
   <!-- ── Main ── -->
   <main class="main">
 
-    <!-- Big circle -->
+    <!-- Big circle = #syncBtn -->
     <div class="circle-scene">
       <div class="dashed-ring">
-        <button id="selectDirBtn" class="circle-btn">同步</button>
+        <button id="syncBtn" class="circle-btn" disabled>同步</button>
       </div>
     </div>
 
-    <!-- Dir badge -->
+    <!-- Dir badge + #selectDirBtn -->
     <div class="dir-badge">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
         <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
       </svg>
       <span id="dirName">未选择目录</span>
+      <button id="selectDirBtn" class="dir-change-btn">选择目录</button>
     </div>
 
     <!-- Toggles card -->
@@ -105,7 +106,21 @@
     <!-- Tag-based import panel -->
     <div id="importPanel" class="import-panel hidden">
       <div id="persistentList" class="persistent-list"></div>
-      <button id="confirmImportBtn" class="btn-confirm">确认导入选中节点</button>
+      <!-- Platform selector for bootstrap export -->
+      <div class="target-row">
+        <span class="target-label">目标平台</span>
+        <select id="exportTargetSelect" class="target-select">
+          <option value="claude">Claude</option>
+          <option value="chatgpt">ChatGPT</option>
+          <option value="deepseek">DeepSeek</option>
+          <option value="generic">通用</option>
+        </select>
+      </div>
+      <!-- Inject into tab OR download as file -->
+      <div class="btn-pair">
+        <button id="confirmImportBtn" class="btn-inject">注入当前对话</button>
+        <button id="exportBootstrapBtn" class="btn-export-bs">导出文件</button>
+      </div>
     </div>
 
   </main>
