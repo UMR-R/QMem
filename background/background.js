@@ -3,7 +3,7 @@
 // 注意：File System Access API 写操作无法在 Service Worker 中执行，
 //       文件同步由 popup.js 在打开时自动完成。
 
-import { updateMemory } from "./memory_engine.js";
+import { updateMemory, processConversationsBatch } from "./memory_engine.js";
 
 // ── 消息监听 ──────────────────────────────────────────────────────────────────
 
@@ -148,85 +148,84 @@ async function flushPending() {
 let _processAllRawRunning = false;
 
 async function processAllRaw(limit = 10) {
-  if (_processAllRawRunning) throw new Error("episode 提取已在运行中，请稍候");
+  if (_processAllRawRunning) throw new Error("Episode extraction is already running, please wait");
   const settings = await chrome.storage.local.get(["deepseek_api_key"]);
   const apiKey = settings["deepseek_api_key"];
-  if (!apiKey) throw new Error("DeepSeek API Key 未配置");
+  if (!apiKey) throw new Error("DeepSeek API Key not configured");
 
   _processAllRawRunning = true;
-
-  // 清除上次可能残留的进度（SW 被杀时 finally 未能执行）
   await chrome.storage.local.remove(["_raw_progress", "_sw_keepalive"]);
 
   const allData = await chrome.storage.local.get(null);
   const chatKeys = Object.keys(allData).filter(k => k.startsWith("chat:"));
 
-  // 用缓存数据快速筛出有待处理 rounds 的 key，不做额外 storage 读取
   const pendingKeys = chatKeys.filter(k => {
     const d = allData[k];
     if (!d?.rounds?.length) return false;
     return (d.last_processed_idx ?? 0) < d.rounds.length;
   });
 
-  const batchKeys  = pendingKeys.slice(0, limit);
-  const remaining  = pendingKeys.length - batchKeys.length;
-  const total      = batchKeys.length;
+  const batchKeys = pendingKeys.slice(0, limit);
+  const remaining = pendingKeys.length - batchKeys.length;
 
-  let processed = 0, skipped = 0;
-
-  // Chrome MV3 Service Worker 会在无活动约 30s 后休眠。
-  // 每次 storage 写入会重置计时，但 API 调用耗时较长时额外加一个 keepalive ping。
   const _keepaliveTimer = setInterval(
     () => chrome.storage.local.set({ _sw_keepalive: Date.now() }),
     20000
   );
 
   try {
-    for (let i = 0; i < batchKeys.length; i++) {
-      const storageKey = batchKeys[i];
+    // Read fresh data for each key and build items array
+    const items = (await Promise.all(
+      batchKeys.map(async storageKey => {
+        const res = await chrome.storage.local.get(storageKey);
+        const chatData = res[storageKey];
+        if (!chatData?.rounds?.length) return null;
+        const lastIdx = chatData.last_processed_idx ?? 0;
+        if (lastIdx >= chatData.rounds.length) return null;
+        return {
+          storageKey,
+          originalRoundCount: chatData.rounds.length,
+          chatData: { platform: chatData.platform, url: chatData.url, rounds: chatData.rounds.slice(lastIdx) },
+        };
+      })
+    )).filter(Boolean);
 
-      // 写进度（popup 轮询读取）；total 是本批次大小，让进度条不超出
-      await chrome.storage.local.set({
-        _raw_progress: { current: i, total, storageKey },
-      });
+    const skippedUpfront = batchKeys.length - items.length;
+    if (!items.length) return { processed: 0, skipped: skippedUpfront, remaining };
 
-      // 重新读最新数据，防止并发写入导致索引过时
-      const fresh = await chrome.storage.local.get(storageKey);
-      const chatData = fresh[storageKey];
-      if (!chatData?.rounds?.length) { skipped++; continue; }
+    // Process all conversations in parallel (4 concurrent LLM calls)
+    // @ts-ignore — TS can't infer async return type from plain JS module
+    const { processed, skipped, succeededIndices } = await processConversationsBatch(items, apiKey, {
+      concurrency: 4,
+      onProgress: (done, total) => {
+        chrome.storage.local.set({
+          _raw_progress: { current: done, total, storageKey: items[Math.min(done, items.length - 1)].storageKey },
+        }).catch(() => {});
+      },
+    });
 
-      const lastIdx = chatData.last_processed_idx ?? 0;
-      if (lastIdx >= chatData.rounds.length) { skipped++; continue; }
-
-      const newRounds = chatData.rounds.slice(lastIdx);
-
-      try {
-        // batchMode: 整条对话一次 API 调用（比逐轮快 N 倍）
-        await updateMemory(
-          { platform: chatData.platform, url: chatData.url, rounds: newRounds },
-          apiKey,
-          { batchMode: true }
-        );
-        // 成功后更新索引（读最新，避免覆盖并发写入）
-        const toUpdate = await chrome.storage.local.get(storageKey);
-        if (toUpdate[storageKey]) {
-          toUpdate[storageKey].last_processed_idx = chatData.rounds.length;
-          await chrome.storage.local.set({ [storageKey]: toUpdate[storageKey] });
+    // Update last_processed_idx for succeeded conversations only
+    if (succeededIndices.length) {
+      const updates = {};
+      await Promise.all(succeededIndices.map(async i => {
+        const { storageKey, originalRoundCount } = items[i];
+        const fresh = await chrome.storage.local.get(storageKey);
+        if (fresh[storageKey]) {
+          fresh[storageKey].last_processed_idx = originalRoundCount;
+          updates[storageKey] = fresh[storageKey];
         }
-        processed++;
-        console.log(`[Background] processAllRaw: ${storageKey} 处理了 ${newRounds.length} 条 rounds → 1 个 episode`);
-      } catch (err) {
-        console.error(`[Background] processAllRaw 处理失败 (${storageKey}):`, err.message);
-        skipped++;
-      }
+      }));
+      if (Object.keys(updates).length) await chrome.storage.local.set(updates);
     }
+
+    console.log(`[Background] processAllRaw: processed=${processed} skipped=${skippedUpfront + skipped} remaining=${remaining}`);
+    return { processed, skipped: skippedUpfront + skipped, remaining };
+
   } finally {
     _processAllRawRunning = false;
     clearInterval(_keepaliveTimer);
     await chrome.storage.local.remove(["_raw_progress", "_sw_keepalive"]);
   }
-
-  return { processed, skipped, remaining };
 }
 
 // ── 调试入口 ──────────────────────────────────────────────────────────────────

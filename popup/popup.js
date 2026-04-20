@@ -500,6 +500,26 @@ ${JSON.stringify(allNodes, null, 2)}`;
   throw new Error("DeepSeek response format error (possibly truncated): " + raw.slice(0, 120));
 }
 
+// ── Concurrency helper ────────────────────────────────────────────────────────
+
+function _withConcurrency(items, limit, fn) {
+  return new Promise(resolve => {
+    if (!items.length) { resolve([]); return; }
+    const out = new Array(items.length).fill(null);
+    let idx = 0, done = 0;
+    const n = items.length;
+    function next() {
+      if (idx >= n) return;
+      const i = idx++;
+      Promise.resolve().then(() => fn(items[i], i))
+        .then(v  => { out[i] = { ok: true,  value: v }; })
+        .catch(e => { out[i] = { ok: false, error: e.message }; })
+        .finally(() => { if (++done === n) resolve(out); else next(); });
+    }
+    for (let k = 0; k < Math.min(limit, n); k++) next();
+  });
+}
+
 // ── 导入历史记录文件（ChatGPT / DeepSeek 导出格式）──────────────────────────────
 
 async function handleImportFile(file) {
@@ -802,51 +822,40 @@ async function handleRebuildFromEpisodes() {
     }
     showResult(`Skipping ${episodes.length - toProcess.length} already processed. Processing ${toProcess.length} new episodes...`);
 
-    // 3. 只处理未曾提炼过的 episodes
-    let processed = 0;
-    let totalApiTime = 0;
-    let totalApplyTime = 0;
-    const tRebuildStart = performance.now();
+    // 3. Phase 1: fetch all results in parallel (4 concurrent API calls)
+    let fetchedCount = 0;
+    showResult(`Fetching ${toProcess.length} episodes (4 in parallel)...`);
 
-    for (const ep of toProcess) {
+    const apiResults = await _withConcurrency(toProcess, 4, async ep => {
       const memText = [
         `topic: ${ep.topic ?? ""}`,
         `summary: ${ep.summary ?? ""}`,
-        ep.key_decisions?.length  ? `key_decisions: ${ep.key_decisions.join("; ")}` : "",
-        ep.open_issues?.length    ? `open_issues: ${ep.open_issues.join("; ")}` : "",
+        ep.key_decisions?.length       ? `key_decisions: ${ep.key_decisions.join("; ")}` : "",
+        ep.open_issues?.length         ? `open_issues: ${ep.open_issues.join("; ")}` : "",
         ep.relates_to_projects?.length ? `projects: ${ep.relates_to_projects.join(", ")}` : "",
       ].filter(Boolean).join("\n");
+      if (!memText.trim()) return null;
+      const result = await callDeepSeekForPersistent(memText, pnData.nodes);
+      showResult(`Fetching... ${++fetchedCount}/${toProcess.length}`);
+      return result;
+    });
 
-      if (!memText.trim()) continue;
-
-      try {
-        const t0 = performance.now();
-        const result = await callDeepSeekForPersistent(memText, pnData.nodes);
-        const apiTime = performance.now() - t0;
-
-        const t1 = performance.now();
-        applyPersistentResult(pnData, result, ep.episode_id);
-        const applyTime = performance.now() - t1;
-
-        totalApiTime += apiTime;
-        totalApplyTime += applyTime;
-        processed++;
-        showResult(`Processed ${processed}/${toProcess.length}  API: ${apiTime.toFixed(0)}ms`);
-      } catch (err) {
-        console.warn("[rebuild] episode", ep.episode_id, "失败:", err.message);
+    // 4. Phase 2: apply results sequentially
+    let processed = 0;
+    for (let i = 0; i < apiResults.length; i++) {
+      const r = apiResults[i];
+      if (!r?.ok || !r.value) {
+        if (r && !r.ok) console.warn("[rebuild] episode", toProcess[i].episode_id, "failed:", r.error);
+        continue;
       }
+      applyPersistentResult(pnData, r.value, toProcess[i].episode_id);
+      processed++;
     }
 
-    // 4. 保存
+    // 5. Save once
     await writePersistentNodes(pnData);
 
-    const totalTime = performance.now() - tRebuildStart;
     const nodeCount = Object.keys(pnData.nodes).length;
-    console.log(
-      `[rebuild] 总耗时: ${totalTime.toFixed(0)}ms` +
-      `  API: ${totalApiTime.toFixed(0)}ms (avg ${processed ? (totalApiTime / processed).toFixed(0) : 0}ms/ep)` +
-      `  apply: ${totalApplyTime.toFixed(0)}ms`
-    );
     showResult(`Done: processed ${processed} episodes, ${nodeCount} nodes total.`);
   } catch (err) {
     showResult("Rebuild failed: " + err.message, true);

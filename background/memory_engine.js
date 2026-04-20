@@ -433,3 +433,104 @@ function _appendEntries(existing, newTexts, timestamp) {
 function _dedup(arr) {
   return [...new Set(arr)];
 }
+
+// ── Parallel batch processing ──────────────────────────────────────────────────
+
+function _withConcurrency(items, limit, fn) {
+  return new Promise(resolve => {
+    if (!items.length) { resolve([]); return; }
+    const out = new Array(items.length).fill(null);
+    let idx = 0, done = 0;
+    const n = items.length;
+    function next() {
+      if (idx >= n) return;
+      const i = idx++;
+      Promise.resolve().then(() => fn(items[i], i))
+        .then(v  => { out[i] = { ok: true,  value: v }; })
+        .catch(e => { out[i] = { ok: false, error: e.message }; })
+        .finally(() => { if (++done === n) resolve(out); else next(); });
+    }
+    for (let k = 0; k < Math.min(limit, n); k++) next();
+  });
+}
+
+/**
+ * Process multiple conversations in parallel, then apply results sequentially.
+ * Speedup ≈ min(concurrency, n) × vs. sequential.
+ * Phase 1: LLM calls in parallel (all see a state snapshot taken at call time).
+ * Phase 2: Load fresh state, apply all deltas in order, save state once.
+ * Phase 3: Save episodes (fire persistent node updates in background).
+ * @param {Array<{ chatData: {platform, url, rounds}, storageKey?: string }>} items
+ * @param {string} apiKey
+ * @param {{ concurrency?: number, onProgress?: (done: number, total: number) => void }} opts
+ * @returns {{ processed: number, skipped: number, succeededIndices: number[] }}
+ */
+export async function processConversationsBatch(items, apiKey, { concurrency = 4, onProgress } = {}) {
+  if (!items.length) return { processed: 0, skipped: 0, succeededIndices: [] };
+
+  const deltaSystem = await _getDeltaSystem();
+
+  // Snapshot current state for context — all parallel calls use the same summary.
+  const snapshot = await _loadState();
+  const stateSummary = _buildStateSummary(snapshot);
+
+  let fetched = 0;
+
+  // Phase 1: parallel LLM calls
+  const rawResults = await _withConcurrency(items, concurrency, async ({ chatData }) => {
+    const { platform, rounds } = chatData;
+    const allText = rounds.map((r, j) =>
+      `[Round ${j + 1}] (${r.timestamp ?? ""})\nUser: ${r.user}\nAssistant: ${r.assistant}`
+    ).join("\n\n");
+
+    const userPrompt =
+`CURRENT MEMORY STATE:
+${stateSummary}
+
+FULL CONVERSATION (${platform}, ${rounds.length} rounds):
+${allText}`;
+
+    const delta = await extractJson(deltaSystem, userPrompt, apiKey);
+    onProgress?.(++fetched, items.length);
+    return delta;
+  });
+
+  // Phase 2: re-load state, apply all deltas sequentially, save once
+  const state = await _loadState();
+  const episodes = [];
+  const succeededIndices = [];
+
+  for (let i = 0; i < rawResults.length; i++) {
+    const r = rawResults[i];
+    if (!r?.ok || !r.value || r.value.is_noise) continue;
+    const { chatData } = items[i];
+    const delta = r.value;
+    const episodeId = crypto.randomUUID().slice(0, 8);
+    const firstTimestamp = chatData.rounds[0]?.timestamp;
+    const lastTimestamp  = chatData.rounds[chatData.rounds.length - 1]?.timestamp;
+
+    _applyStateUpdates(delta, episodeId, lastTimestamp, state);
+
+    const ed = delta.episode ?? {};
+    episodes.push({
+      episodeId, platform: chatData.platform, firstTimestamp, lastTimestamp,
+      epParts: {
+        topics:    ed.topic           ? [ed.topic]           : [],
+        summaries: ed.summary         ? [ed.summary]         : [],
+        decisions: ed.key_decisions   ?? [],
+        issues:    ed.open_issues     ?? [],
+        projects:  ed.related_project ? [ed.related_project] : [],
+      },
+    });
+    succeededIndices.push(i);
+  }
+
+  if (episodes.length > 0) {
+    await _saveState(state);
+    for (const ep of episodes) {
+      await _buildAndSaveEpisode(ep.episodeId, ep.platform, ep.firstTimestamp, ep.lastTimestamp, ep.epParts, apiKey);
+    }
+  }
+
+  return { processed: episodes.length, skipped: items.length - episodes.length, succeededIndices };
+}
