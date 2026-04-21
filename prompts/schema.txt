@@ -20,12 +20,13 @@
 
 ```json
 {
-  "type":            "preference | profile | workflow | topic | platform",
+  "type":            "preference | profile | workflow | topic",
   "key":             "snake_case，全局唯一",
   "description":     "一句中文规律描述，≤30字",
   "episode_refs":    ["ep_0001", "ep_0002"],
   "confidence":      "low | medium | high",
-  "export_priority": "low | medium | high"
+  "export_priority": "low | medium | high",
+  "platform":        ["来源平台"]
 }
 ```
 
@@ -37,7 +38,6 @@
 | profile    | 用户身份与背景（角色/领域/技能）        |
 | workflow   | 用户反复使用的工作流程或操作模式        |
 | topic      | 涉及的主题/项目/任务类型               |
-| platform   | 来源平台                             |
 
 ## Confidence 规则
 

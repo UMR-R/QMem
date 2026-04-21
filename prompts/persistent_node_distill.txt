@@ -13,7 +13,6 @@
 **new_nodes**（需要新建时）
 - 只对有明确证据的规律建节点，不推断
 - 新建前确认与现有节点无语义重复
-- 单条 episodic 新建的节点 confidence 必须为 low
 - key 全局唯一，snake_case
 
 **merges**（节点合并/聚合）
@@ -40,17 +39,15 @@
   "updates": [
     {
       "id":          "pn_XXXX",
-      "add_ref":     true,
       "description": "可选：更新后的规律描述",
       "confidence":  "可选：升级后的置信度"
     }
   ],
   "new_nodes": [
     {
-      "type":            "preference | profile | workflow | topic | platform",
+      "type":            "preference | profile | workflow | topic",
       "key":             "snake_case_key",
       "description":     "一句中文，≤30字",
-      "confidence":      "low",
       "export_priority": "low | medium | high"
     }
   ],

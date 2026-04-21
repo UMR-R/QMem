@@ -91,7 +91,7 @@ ${convText.slice(0, 4000)}`;
     if (!delta || delta.is_noise) continue;
     hasContent = true;
 
-    _applyStateUpdates(delta, episodeId, round.timestamp, platform, state);
+    _applyStateUpdates(delta, episodeId, round.timestamp, state);
 
     const ed = delta.episode ?? {};
     if (ed.topic)   epParts.topics.push(ed.topic);
@@ -140,7 +140,7 @@ ${allText}`;
   }
   if (!delta || delta.is_noise) return;
 
-  _applyStateUpdates(delta, episodeId, lastTimestamp, platform, state);
+  _applyStateUpdates(delta, episodeId, lastTimestamp, state);
   await _saveState(state);
 
   const ed = delta.episode ?? {};
@@ -262,12 +262,12 @@ ${JSON.stringify(epSummary, null, 2)}`;
 
   if (!result || Object.keys(result).length === 0) return;
 
-  _applyPersistentResult(pnData, result, episode.episode_id);
+  _applyPersistentResult(pnData, result, episode.episode_id, episode.platform);
   await _savePersistentNodes(pnData);
   console.log("[memory_engine] persistent nodes updated, episode:", episode.episode_id);
 }
 
-function _applyPersistentResult(pnData, result, epId) {
+function _applyPersistentResult(pnData, result, epId, platform = null) {
   const now = new Date().toISOString();
   const nodes = pnData.nodes;
 
@@ -276,6 +276,9 @@ function _applyPersistentResult(pnData, result, epId) {
     if (!node) continue;
     if (epId && !(node.episode_refs ?? []).includes(epId)) {
       node.episode_refs = [...(node.episode_refs ?? []), epId];
+    }
+    if (platform && !(node.platform ?? []).includes(platform)) {
+      node.platform = [...(node.platform ?? []), platform];
     }
     if (upd.description) node.description = upd.description;
     if (upd.confidence)  node.confidence  = upd.confidence;
@@ -288,7 +291,8 @@ function _applyPersistentResult(pnData, result, epId) {
     nodes[pnId] = {
       type: nn.type, key: nn.key, description: nn.description,
       episode_refs: epId ? [epId] : [],
-      confidence: nn.confidence || "low",
+      platform: platform ? [platform] : [],
+      confidence: "low",
       export_priority: nn.export_priority || "medium",
       created_at: now, updated_at: now,
     };
@@ -306,6 +310,11 @@ function _applyPersistentResult(pnData, result, epId) {
           target.episode_refs = [...(target.episode_refs ?? []), ref];
         }
       }
+      for (const p of (source.platform ?? [])) {
+        if (!(target.platform ?? []).includes(p)) {
+          target.platform = [...(target.platform ?? []), p];
+        }
+      }
       delete nodes[srcId];
     }
     const refCount = (target.episode_refs ?? []).length;
@@ -319,7 +328,7 @@ function _applyPersistentResult(pnData, result, epId) {
 // ── 应用 delta 中的状态更新（profile / prefs / projects / workflows） ──────────
 // 不保存 episode，episode 由 updateMemory 在所有 rounds 处理完后统一生成。
 
-function _applyStateUpdates(delta, episodeId, timestamp, platform, state) {
+function _applyStateUpdates(delta, episodeId, timestamp, state) {
   // Profile
   if (delta.profile_updates && Object.keys(delta.profile_updates).length > 0) {
     state.profile = { ...state.profile, ...delta.profile_updates };
@@ -415,11 +424,15 @@ function _buildStateSummary(state) {
 }
 
 async function _getDeltaSystem() {
-  return await _loadPromptFile("delta_system");
+  return await _loadPromptFile("delta_extract");
 }
 
 async function _getPersistentDistillSystem() {
-  return await _loadPromptFile("persistent_distill_background");
+  const [schema, distill] = await Promise.all([
+    _loadPromptFile("schema"),
+    _loadPromptFile("persistent_node_distill_bg"),
+  ]);
+  return `${schema}\n\n${distill}`;
 }
 
 function _appendEntries(existing, newTexts, timestamp) {

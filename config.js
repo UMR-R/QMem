@@ -46,12 +46,13 @@ const CONFIG = {
 
 \`\`\`json
 {
-  "type":            "preference | profile | workflow | topic | platform",
+  "type":            "preference | profile | workflow | topic",
   "key":             "snake_case，全局唯一",
   "description":     "一句中文规律描述，≤30字",
   "episode_refs":    ["ep_0001", "ep_0002"],
   "confidence":      "low | medium | high",
-  "export_priority": "low | medium | high"
+  "export_priority": "low | medium | high",
+  "platform":        ["来源平台"]
 }
 \`\`\`
 
@@ -63,7 +64,6 @@ const CONFIG = {
 | profile    | 用户身份与背景（角色/领域/技能）        |
 | workflow   | 用户反复使用的工作流程或操作模式        |
 | topic      | 涉及的主题/项目/任务类型               |
-| platform   | 来源平台                             |
 
 ## Confidence 规则
 
@@ -277,10 +277,10 @@ description 描述规律本身，而非触发该规律的具体事件。`,
 CONFIG.loadPrompts = async function () {
   const base = chrome.runtime.getURL("prompts/");
   const files = [
-    ["architecture",   s => { CONFIG.skills.architecture     = s; }],
-    ["episodic_tag",   s => { CONFIG.skills.episodicTag       = s; }],
-    ["persistent_distill", s => { CONFIG.skills.persistentDistill = s; }],
-    ["load",           s => { CONFIG.load                    = s; }],
+    ["schema",                    s => { CONFIG.skills.architecture     = s; }],
+    ["episode_extract",           s => { CONFIG.skills.episodicTag       = s; }],
+    ["persistent_node_distill",   s => { CONFIG.skills.persistentDistill = s; }],
+    ["cold_start",                s => { CONFIG.load                    = s; }],
   ];
   await Promise.all(files.map(async ([name, apply]) => {
     try {

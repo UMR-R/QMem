@@ -2,7 +2,7 @@
 
 [中文文档](README_zh.md)
 
-A Chrome extension that automatically captures AI conversations, builds layered memories, and lets you import them into any supported platform.
+A Chrome extension that automatically captures AI conversations, builds a two-layer memory system (episodic + persistent), and lets you inject or export your memory into any supported platform.
 
 ## Supported platforms
 
@@ -12,6 +12,16 @@ A Chrome extension that automatically captures AI conversations, builds layered 
 | Google Gemini | gemini.google.com |
 | DeepSeek | chat.deepseek.com |
 | Doubao (豆包) | www.doubao.com |
+
+---
+
+## Memory architecture
+
+The extension organises memory in two layers:
+
+**Episodic memory** — a structured export of a single conversation: summary, user profile snapshot, active projects, preferences, and workflows observed in that session. Each record has a unique `ep_XXXX` ID and is stored per-conversation. This is the raw evidence layer.
+
+**Persistent nodes** — cross-session patterns distilled from multiple episodic records by DeepSeek. Each node has a type (`preference`, `profile`, `workflow`, `topic`, `platform`), a confidence level (`low` → `medium` → `high` based on how many episodes support it), and back-links to the episodes that contributed to it. These are what you inject or export when moving to a new platform.
 
 ---
 
@@ -165,16 +175,19 @@ All prompts live as plain-text files in the `prompts/` directory. Edit them dire
 
 | File | Sent to | Triggered by |
 |---|---|---|
-| `prompts/episodic_tag.txt` | Target AI (current page) | 导出并保存记忆 |
-| `prompts/architecture.txt` | Prepended to `episodic_tag.txt` | Same (shared preamble) |
-| `prompts/persistent_distill.txt` | DeepSeek API (popup) | After 导出并保存记忆 / 重建节点 / 整理节点 |
-| `prompts/persistent_distill_background.txt` | DeepSeek API (Service Worker) | 实时更新 per-round / 同步 |
-| `prompts/delta_system.txt` | DeepSeek API (Service Worker) | 实时更新 per-round / 同步 |
-| `prompts/load.txt` | Target AI | 注入当前对话 / 导出文件 |
+| `prompts/episode_extract.txt` | Target AI (current page) | 导出并保存记忆 |
+| `prompts/schema.txt` | Prepended to `persistent_node_distill.txt` as DeepSeek system prompt | 导出并保存记忆 / 重建节点 / 整理节点 |
+| `prompts/persistent_node_distill.txt` | DeepSeek API (popup) — full ruleset | After 导出并保存记忆 / 重建节点 / 整理节点 |
+| `prompts/persistent_node_distill_bg.txt` | DeepSeek API (Service Worker) — compact, self-contained | 实时更新 per-round / 同步 |
+| `prompts/delta_extract.txt` | DeepSeek API (Service Worker) — incremental delta per round | 实时更新 per-round / 同步 |
+| `prompts/cold_start.txt` | Target AI | 注入当前对话 / 导出文件 |
 
 To apply edits: save the file → go to `chrome://extensions/` → click the reload icon → reopen the popup.
 
-**Note:** `episodic_tag.txt` contains a `{{EXISTING_TAGS}}` placeholder replaced at runtime — keep it when editing.
+**Notes:**
+- `episode_extract.txt` contains a `{{EXISTING_TAGS}}` placeholder that is replaced at runtime with your existing tag list — keep it when editing.
+- `schema.txt` defines the two-layer memory schema. It is prepended to `persistent_node_distill.txt` for popup calls, but **not** to `episode_extract.txt` — the target AI only needs to know how to extract, not the full schema.
+- `persistent_node_distill.txt` vs `persistent_node_distill_bg.txt`: the popup version is combined with `schema.txt` at runtime and contains the full ruleset (detailed merge logic, sub-topic aggregation, granularity rules). The background version is self-contained — it embeds the schema definition directly — and uses a compact format suited for automatic per-round processing by the Service Worker.
 
 ---
 

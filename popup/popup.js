@@ -388,7 +388,7 @@ ${memStr}`;
 
 // Apply DeepSeek result to pnData.nodes; returns { updated, created, merged }
 // epId may be null when called from consolidation-only flow
-function applyPersistentResult(pnData, result, epId) {
+function applyPersistentResult(pnData, result, epId, platform = null) {
   const now = new Date().toISOString();
   const nodes = pnData.nodes;
   const updated = [];
@@ -399,6 +399,9 @@ function applyPersistentResult(pnData, result, epId) {
     const node = nodes[upd.id];
     if (!node) continue;
     if (epId && !node.episode_refs.includes(epId)) node.episode_refs.push(epId);
+    if (platform && !(node.platform ?? []).includes(platform)) {
+      node.platform = [...(node.platform ?? []), platform];
+    }
     if (upd.description) node.description = upd.description;
     if (upd.confidence)  node.confidence  = upd.confidence;
     node.updated_at = now;
@@ -411,7 +414,8 @@ function applyPersistentResult(pnData, result, epId) {
     nodes[pnId] = {
       type: nn.type, key: nn.key, description: nn.description,
       episode_refs: epId ? [epId] : [],
-      confidence: nn.confidence || "low",
+      platform: platform ? [platform] : [],
+      confidence: "low",
       export_priority: nn.export_priority || "medium",
       created_at: now, updated_at: now,
     };
@@ -428,6 +432,11 @@ function applyPersistentResult(pnData, result, epId) {
       if (!source) continue;
       for (const ref of source.episode_refs) {
         if (!target.episode_refs.includes(ref)) target.episode_refs.push(ref);
+      }
+      for (const p of (source.platform ?? [])) {
+        if (!(target.platform ?? []).includes(p)) {
+          target.platform = [...(target.platform ?? []), p];
+        }
       }
       sourceKeys.push(source.key);
       delete nodes[srcId];
@@ -808,7 +817,7 @@ async function handleRebuildFromEpisodes() {
 
       try {
         const result = await callDeepSeekForPersistent(memText, pnData.nodes);
-        applyPersistentResult(pnData, result, ep.episode_id);
+        applyPersistentResult(pnData, result, ep.episode_id, ep.platform);
         processed++;
         showResult(`已处理 ${processed}/${toProcess.length}...`);
       } catch (err) {
@@ -1121,7 +1130,7 @@ async function handleExport(tab) {
     }
 
     // 8. Apply DeepSeek result to persistent nodes
-    const { updated, created, merged } = applyPersistentResult(pnData, result, ep.episode_id);
+    const { updated, created, merged } = applyPersistentResult(pnData, result, ep.episode_id, ep.platform);
 
     // 9. Persist js_persistent_nodes.json
     await writePersistentNodes(pnData);
