@@ -103,14 +103,23 @@
         <div class="section-block">
           <h3>整理记忆</h3>
           <p>归并、去重并生成可迁移的记忆包</p>
-          <button id="organizeBtn" class="mid-primary-btn" type="button">
-            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M12 3l8 4.5-8 4.5-8-4.5L12 3z"></path>
-              <path d="M4 12l8 4.5 8-4.5"></path>
-              <path d="M4 16.5L12 21l8-4.5"></path>
-            </svg>
-            <span>整理</span>
-          </button>
+          <div class="stacked-actions">
+            <button id="organizeBtn" class="mid-primary-btn" type="button">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M12 3l8 4.5-8 4.5-8-4.5L12 3z"></path>
+                <path d="M4 12l8 4.5 8-4.5"></path>
+                <path d="M4 16.5L12 21l8-4.5"></path>
+              </svg>
+              <span>整理</span>
+            </button>
+            <button id="addCurrentConversationBtn" class="mid-secondary-btn" type="button">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M12 6v12"></path>
+                <path d="M6 12h12"></path>
+              </svg>
+              <span>加入当前对话</span>
+            </button>
+          </div>
         </div>
 
         <div class="section-divider"></div>
@@ -205,7 +214,7 @@
         <div class="settings-card">
           <h3>本地目录</h3>
           <div class="field-row">
-            <input id="storageDirInput" class="text-input" type="text" placeholder="请选择本地存储目录" readonly>
+            <input id="storageDirInput" class="text-input" type="text" placeholder="请输入或选择本地存储目录">
             <button id="selectDirBtn" class="outline-mini-btn" type="button">选择目录</button>
           </div>
         </div>
@@ -249,6 +258,7 @@
   </div>
 
   <script src="../config.js"></script>
+  <script src="api/backend.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

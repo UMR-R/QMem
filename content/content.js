@@ -236,15 +236,35 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   if (message.type === "SCRAPE") {
     sendResponse({ data: scrapePage() });
+    return false;
+
+  } else if (message.type === "SCRAPE_CONVERSATION") {
+    if (!config) {
+      sendResponse({ ok: false, error: "当前页面不支持对话抓取" });
+      return false;
+    }
+    sendResponse({
+      ok: true,
+      data: {
+        title: document.title,
+        url: location.href,
+        platform: config.name,
+        chatId: config.getChatId?.() ?? "",
+        messages: scrapeFullConversation(config),
+      },
+    });
+    return false;
 
   } else if (message.type === "TOGGLE_CAPTURE") {
     if (message.enabled) startCapture();
     else stopCapture();
     sendResponse({ ok: true });
+    return false;
 
   } else if (message.type === "INJECT_INPUT") {
     const result = injectInput(message.text, false, config);
     sendResponse(result);
+    return false;
 
   } else if (message.type === "SUBMIT_AND_WAIT") {
     const el = findInputElement(config);
@@ -268,14 +288,18 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         chrome.storage.local.set({ [jobId]: { ok: false, error: err.message } });
       });
 
+    return true;
+
   } else if (message.type === "UPLOAD_FILE") {
     uploadFile(message.fileBuffer, message.fileName, message.promptText, config)
       .then(result => sendResponse(result))
       .catch(err => sendResponse({ ok: false, error: err.message }));
 
+    return true;
+
   }
 
-  return true;
+  return false;
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -597,6 +621,7 @@ let _capturePhase = "idle";   // idle → wait-stop | wait-stable → idle
 let _prevMsgCount = 0;        // 上次捕获时的消息数，用于识别新增消息
 let _stableCount = 0;         // 内容连续稳定的轮次
 let _lastStableContent = null;// 稳定性检测用的上一次内容快照
+let _lastChatId = null;       // 当前捕获中的会话 ID，用于识别新建对话
 
 const STABLE_TICKS = 5;       // 5 × 600ms = 3s 内容不变则判定完成
 
@@ -613,6 +638,7 @@ function startCapture() {
   _prevMsgCount = _countMessages(config);
   _stableCount = 0;
   _lastStableContent = null;
+  _lastChatId = config.getChatId?.() ?? null;
   console.log("[MemAssist] 开始捕获，平台:", config.name, "，初始消息数:", _prevMsgCount);
 
   // 用轮询替代 MutationObserver，复用 findStopButton 的逻辑
@@ -625,12 +651,23 @@ function stopCapture() {
     _captureObserver = null;
   }
   _capturePhase = "idle";
+  _lastChatId = null;
   console.log("[MemAssist] 已停止捕获");
 }
 
 function _captureStep(config) {
   const stopBtn = findStopButton(config);
   const currentCount = _countMessages(config);
+  const currentChatId = config.getChatId?.() ?? null;
+
+  if (currentChatId && currentChatId !== _lastChatId) {
+    console.log("[MemAssist] 检测到新会话，重置捕获基线:", currentChatId);
+    _lastChatId = currentChatId;
+    _prevMsgCount = 0;
+    _stableCount = 0;
+    _lastStableContent = null;
+    _capturePhase = "idle";
+  }
 
   if (_capturePhase === "idle") {
     if (stopBtn) {
@@ -706,15 +743,19 @@ async function _onRoundComplete(config) {
   }
   console.log("[MemAssist] 发送 ROUND_CAPTURED，chatId:", chatId, "，用户消息前50字:", userText.slice(0, 50));
 
-  chrome.runtime.sendMessage({
-    type: "ROUND_CAPTURED",
-    chatId,
-    platform: config.name,
-    url: location.href,
-    userText,
-    assistantText,
-    timestamp: new Date().toISOString(),
-  });
+  try {
+    await chrome.runtime.sendMessage({
+      type: "ROUND_CAPTURED",
+      chatId,
+      platform: config.name,
+      url: location.href,
+      userText,
+      assistantText,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.warn("[MemAssist] ROUND_CAPTURED 发送失败:", err?.message ?? err);
+  }
 }
 
 function _getLastMessage(selectors) {

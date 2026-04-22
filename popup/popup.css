@@ -384,6 +384,38 @@ button {
   font-size: 15px;
 }
 
+.stacked-actions {
+  display: grid;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.mid-secondary-btn {
+  width: 58%;
+  min-width: 180px;
+  height: 42px;
+  margin: 0 auto;
+  border-radius: 16px;
+  border: 1px solid var(--line-strong);
+  background: #ffffff;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.mid-secondary-btn svg {
+  width: 18px;
+  height: 18px;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 .section-divider {
   height: 1px;
   background: #edf1f8;
@@ -486,7 +518,7 @@ button {
 .skill-item {
   padding: 12px;
   display: grid;
-  grid-template-columns: 48px 1fr 24px;
+  grid-template-columns: 48px 1fr auto;
   gap: 12px;
   align-items: start;
 }
@@ -516,15 +548,45 @@ button {
 }
 
 .skill-check {
-  width: 22px;
-  height: 22px;
+  width: 18px;
+  height: 18px;
   accent-color: var(--primary);
-  margin-top: 6px;
 }
 
 .skill-check-placeholder {
   width: 22px;
   height: 22px;
+}
+
+.skill-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.skill-delete-btn {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  border: 1px solid #d9e0f0;
+  background: #ffffff;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.skill-empty-meta {
+  align-self: center;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+  max-width: 72px;
+  text-align: right;
 }
 
 .settings-card {

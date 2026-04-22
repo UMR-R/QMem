@@ -14,6 +14,7 @@ const STORAGE_KEYS = {
 const state = {
   dirHandle: null,
   apiKey: "",
+  apiKeyConfigured: false,
   backendUrl: "http://127.0.0.1:8765",
   keepUpdated: false,
   realtimeUpdate: false,
@@ -22,6 +23,7 @@ const state = {
   currentSkillTab: "my",
   selectedSkillIds: new Set(),
   selectedRecommendedIds: new Set(),
+  storagePath: "",
   categories: {
     profile: 0,
     preferences: 0,
@@ -86,6 +88,13 @@ function storageGet(keys) {
 
 function storageSet(obj) {
   return new Promise(resolve => chrome.storage.local.set(obj, resolve));
+}
+
+function backendApi() {
+  if (!window.BackendAPI) {
+    throw new Error("BackendAPI 未加载");
+  }
+  return window.BackendAPI;
 }
 
 function runtimeSendMessage(message) {
@@ -203,10 +212,25 @@ function setView(viewName) {
 function renderSync() {
   const syncBtn = document.getElementById("syncBtn");
   const dot = document.getElementById("syncDot");
-  document.getElementById("syncStatusText").textContent = state.keepUpdated ? "同步中" : "同步已暂停";
-  document.getElementById("syncHintText").textContent = state.keepUpdated
-    ? "持续记录你与大模型的对话"
-    : "点击开启后，持续记录你与大模型的对话";
+
+  let statusText = "同步已暂停";
+  let hintText = "点击开启后，持续记录你与大模型的对话";
+
+  if (state.keepUpdated) {
+    if (state.apiKeyConfigured && state.realtimeUpdate) {
+      statusText = "同步中";
+      hintText = "正在记录对话，并自动增量更新记忆";
+    } else if (state.apiKeyConfigured) {
+      statusText = "记录中";
+      hintText = "正在记录原始对话，可稍后在迁移页整理记忆";
+    } else {
+      statusText = "记录中";
+      hintText = "正在记录原始对话，尚未开启记忆提取";
+    }
+  }
+
+  document.getElementById("syncStatusText").textContent = statusText;
+  document.getElementById("syncHintText").textContent = hintText;
   syncBtn.classList.toggle("is-active", state.keepUpdated);
   syncBtn.setAttribute("aria-pressed", String(state.keepUpdated));
   dot.classList.toggle("is-active", state.keepUpdated);
@@ -219,9 +243,9 @@ function renderStats(summary) {
 }
 
 function renderDirectory() {
-  const name = state.dirHandle?.name ?? "";
-  document.getElementById("storageDirInput").value = name ? name : "";
-  document.getElementById("storageDirInput").placeholder = name ? "" : "请选择本地存储目录";
+  const value = state.storagePath || state.dirHandle?.name || "";
+  document.getElementById("storageDirInput").value = value;
+  document.getElementById("storageDirInput").placeholder = value ? "" : "请输入或选择本地存储目录";
 }
 
 function renderSettings() {
@@ -268,8 +292,8 @@ function deriveMySkills(allData, pnData) {
     skills.push({
       id: "skill:empty",
       icon: "空",
-      title: "你的 Skill 会显示在这里",
-      description: "先开启同步或整理记忆，系统会逐步从工作流和长期记忆里提炼 Skill。",
+      title: "还没有提取出 Skill",
+      description: "我的 Skill 会从已整理的 memory 中自动提取。先开启同步或整理记忆，系统会逐步生成可复用的 Skill。",
       selectable: false,
     });
   }
@@ -277,23 +301,61 @@ function deriveMySkills(allData, pnData) {
   return skills;
 }
 
-function renderSkillList(items, selectedSet) {
+function getSkillIcon(item) {
+  if (item?.icon && String(item.icon).trim() && String(item.icon) !== "undefined") {
+    return String(item.icon).trim().slice(0, 1);
+  }
+  const fallback = item?.title?.trim()?.slice(0, 1);
+  return fallback || "技";
+}
+
+function buildEmptySkillCard() {
+  return {
+    id: "skill:empty",
+    icon: "空",
+    title: "还没有提取出 Skill",
+    description: "我的 Skill 会从已整理的 memory 中自动提取。先开启同步或整理记忆，系统会逐步生成可复用的 Skill。",
+    selectable: false,
+  };
+}
+
+async function deleteMySkill(skillId) {
+  try {
+    await backendApi().deleteSkills(state.backendUrl, { skill_ids: [skillId] });
+    state.selectedSkillIds.delete(skillId);
+    const result = await backendApi().getMySkills(state.backendUrl);
+    renderSkillList(result.items || [], state.selectedSkillIds, { showDelete: true });
+    toast("Skill 已从我的列表中移除");
+  } catch (err) {
+    toast(`删除失败：${err.message}`, true);
+  }
+}
+
+function renderSkillList(items, selectedSet, options = {}) {
+  const { showDelete = false } = options;
   const listEl = document.getElementById("skillList");
   listEl.innerHTML = "";
+  const safeItems = items.length === 0 && showDelete ? [buildEmptySkillCard()] : items;
 
-  items.forEach(item => {
-    const wrapper = document.createElement("label");
+  safeItems.forEach(item => {
+    const wrapper = document.createElement("div");
     wrapper.className = "skill-item";
-    const selectionNode = item.selectable === false
+    const iconText = getSkillIcon(item);
+    const actionNodes = item.selectable === false
       ? `<div class="skill-check-placeholder"></div>`
-      : `<input class="skill-check" type="checkbox" ${selectedSet.has(item.id) ? "checked" : ""}>`;
+      : `
+        <div class="skill-actions">
+          <input class="skill-check" type="checkbox" ${selectedSet.has(item.id) ? "checked" : ""}>
+          ${showDelete ? '<button class="skill-delete-btn" type="button" aria-label="删除 Skill">×</button>' : ""}
+        </div>
+      `;
     wrapper.innerHTML = `
-      <div class="skill-icon">${item.icon}</div>
+      <div class="skill-icon">${iconText}</div>
       <div class="skill-copy">
         <h4>${item.title}</h4>
         <p>${item.description}</p>
       </div>
-      ${selectionNode}
+      ${actionNodes}
     `;
     const checkbox = wrapper.querySelector("input");
     if (checkbox) {
@@ -302,11 +364,46 @@ function renderSkillList(items, selectedSet) {
         else selectedSet.delete(item.id);
       });
     }
+    const deleteBtn = wrapper.querySelector(".skill-delete-btn");
+    if (deleteBtn) {
+      deleteBtn.addEventListener("click", event => {
+        event.preventDefault();
+        deleteMySkill(item.id);
+      });
+    }
     listEl.appendChild(wrapper);
   });
 }
 
 async function refreshSummary() {
+  try {
+    const [summary, categories] = await Promise.all([
+      backendApi().getSummary(state.backendUrl),
+      backendApi().getMemoryCategories(state.backendUrl),
+    ]);
+
+    state.categories.profile = categories.categories.find(item => item.id === "profile")?.count ?? 0;
+    state.categories.preferences = categories.categories.find(item => item.id === "preferences")?.count ?? 0;
+    state.categories.projects = categories.categories.find(item => item.id === "projects")?.count ?? 0;
+    state.categories.workflows = categories.categories.find(item => item.id === "workflows")?.count ?? 0;
+    state.categories.persistent = categories.categories.find(item => item.id === "persistent")?.count ?? 0;
+
+    renderCategoryCounts();
+    renderStats({
+      lastSyncAt: summary.last_sync_at,
+      conversationCount: summary.conversation_count,
+      memoryItemCount: summary.memory_item_count,
+    });
+
+    if (state.currentSkillTab === "my") {
+      const skillResponse = await backendApi().getMySkills(state.backendUrl);
+      renderSkillList(skillResponse.items || [], state.selectedSkillIds, { showDelete: true });
+    }
+    return;
+  } catch {
+    // Fallback to local extension storage before backend is fully wired.
+  }
+
   const allData = await storageGet(null);
   const pnData = allData["mw:persistent_nodes"] ?? { nodes: {} };
   const workflows = allData["mw:workflows"] ?? [];
@@ -336,28 +433,49 @@ async function refreshSummary() {
 
   renderStats(summary);
   const mySkills = deriveMySkills(allData, pnData);
-  if (state.currentSkillTab === "my") renderSkillList(mySkills, state.selectedSkillIds);
+  if (state.currentSkillTab === "my") renderSkillList(mySkills, state.selectedSkillIds, { showDelete: true });
 }
 
 async function saveSettings() {
   state.apiKey = document.getElementById("apiKeyInput").value.trim();
+  state.apiKeyConfigured = !!state.apiKey;
   state.backendUrl = document.getElementById("backendUrlInput").value.trim() || "http://127.0.0.1:8765";
+  state.storagePath = document.getElementById("storageDirInput").value.trim();
   await storageSet({
     [STORAGE_KEYS.apiKey]: state.apiKey,
     [STORAGE_KEYS.backendUrl]: state.backendUrl,
   });
+  const backendSettings = await backendApi().saveSettings(state.backendUrl, {
+    api_provider: "deepseek",
+    api_key: state.apiKey,
+    storage_path: state.storagePath,
+    keep_updated: state.keepUpdated,
+    realtime_update: state.realtimeUpdate,
+    backend_url: state.backendUrl,
+  });
+  state.apiKeyConfigured = backendSettings.api_key_configured;
+  state.storagePath = backendSettings.storage_path || state.storagePath;
   renderSettings();
-  toast("设置已保存");
+  renderSync();
+  toast("设置已保存到本地后端");
 }
 
 async function testConnection() {
-  const url = (document.getElementById("backendUrlInput").value.trim() || state.backendUrl).replace(/\/$/, "");
+  state.backendUrl = document.getElementById("backendUrlInput").value.trim() || state.backendUrl;
   try {
-    const response = await fetch(`${url}/api/health`);
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    toast("本地后端连接正常");
+    const result = await backendApi().testConnection(state.backendUrl, {
+      api_provider: "deepseek",
+      api_key: document.getElementById("apiKeyInput").value.trim(),
+    });
+    if (!result.ok) throw new Error(result.message || "连接失败");
+    toast("API 与本地后端连接正常");
   } catch (err) {
-    toast(`连接失败：${err.message}`, true);
+    try {
+      await backendApi().getHealth(state.backendUrl);
+      toast("本地后端在线，但 API Key 连接失败", true);
+    } catch {
+      toast(`连接失败：${err.message}`, true);
+    }
   }
 }
 
@@ -372,11 +490,28 @@ async function broadcastCaptureToggle(enabled) {
 
 async function toggleSync() {
   state.keepUpdated = !state.keepUpdated;
+  try {
+    const result = await backendApi().toggleSync(state.backendUrl, { enabled: state.keepUpdated });
+    state.lastSyncAt = result.last_sync_at ?? state.lastSyncAt;
+  } catch {
+    // Fallback to local state if backend is offline.
+  }
   await storageSet({ [STORAGE_KEYS.keepUpdated]: state.keepUpdated });
   await broadcastCaptureToggle(state.keepUpdated);
   renderSync();
   renderSettings();
-  toast(state.keepUpdated ? "同步已开启" : "同步已暂停");
+  await refreshSummary();
+  if (state.keepUpdated) {
+    if (state.apiKeyConfigured && state.realtimeUpdate) {
+      toast("同步已开启，将自动增量更新记忆");
+    } else if (state.apiKeyConfigured) {
+      toast("记录已开启，可稍后在迁移页整理记忆");
+    } else {
+      toast("记录已开启，当前仅保存原始对话");
+    }
+  } else {
+    toast("同步已暂停");
+  }
 }
 
 async function runOrganize() {
@@ -385,27 +520,24 @@ async function runOrganize() {
   organizeBtn.style.opacity = "0.65";
 
   try {
-    let extractResult = null;
-    if (state.apiKey) {
-      toast("正在整理记忆...");
-      extractResult = await runtimeSendMessage({ type: "PROCESS_ALL_RAW", limit: 10 });
-      if (!extractResult?.ok) throw new Error(extractResult?.error ?? "整理失败");
+    toast("正在整理记忆...");
+    const response = await backendApi().organizeMemory(state.backendUrl);
+    const jobId = response.job_id;
+    if (jobId) {
+      const job = await backendApi().getJob(state.backendUrl, jobId);
+      if (job.status === "failed") throw new Error(job.error || "整理失败");
+      const built = job.result?.episodes ?? 0;
+      const projects = job.result?.projects ?? 0;
+      const workflows = job.result?.workflows ?? 0;
+      const memorySummary = [`episodes ${built}`, `projects ${projects}`, `workflows ${workflows}`]
+        .join(" · ");
+      toast(`整理完成：${memorySummary}`);
+    } else {
+      toast("整理完成，记忆已更新");
     }
-
-    if (state.dirHandle && await ensureDirPermission()) {
-      await syncStorageToFiles();
-    }
-
     state.lastSyncAt = new Date().toISOString();
     await storageSet({ [STORAGE_KEYS.lastSyncAt]: state.lastSyncAt });
     await refreshSummary();
-
-    const remaining = extractResult?.remaining ?? 0;
-    toast(
-      remaining > 0
-        ? `本轮整理完成，还有 ${remaining} 条对话待继续处理`
-        : "整理完成，记忆已更新"
-    );
   } catch (err) {
     toast(`整理失败：${err.message}`, true);
   } finally {
@@ -470,6 +602,25 @@ function getSelectedCategories() {
     .map(checkbox => checkbox.dataset.category);
 }
 
+async function getSelectedIdsForBackend() {
+  const categories = getSelectedCategories();
+  const ids = [];
+  for (const category of categories) {
+    try {
+      const result = await backendApi().getMemoryItems(state.backendUrl, category);
+      const items = result.items || [];
+      if (items.length > 0) {
+        ids.push(...items.map(item => item.id));
+      } else {
+        ids.push(`${category}:default`);
+      }
+    } catch {
+      ids.push(`${category}:default`);
+    }
+  }
+  return ids;
+}
+
 async function buildMemoryPackage() {
   const selected = getSelectedCategories();
   if (selected.length === 0) throw new Error("请至少勾选一项记忆内容");
@@ -526,13 +677,25 @@ function downloadText(filename, text) {
 
 async function exportPackage() {
   try {
-    const pkg = await buildMemoryPackage();
-    const text = buildMemoryPrompt(pkg);
+    const selectedIds = await getSelectedIdsForBackend();
+    const result = await backendApi().exportPackage(state.backendUrl, {
+      selected_ids: selectedIds,
+      target_format: "generic",
+      include_episodic_evidence: true,
+    });
     const date = new Date().toISOString().slice(0, 10);
-    downloadText(`memory_package_${date}.txt`, text);
+    downloadText(result.filename || `memory_package_${date}.txt`, result.content || "");
     toast("记忆包已导出");
-  } catch (err) {
-    toast(err.message, true);
+  } catch {
+    try {
+      const pkg = await buildMemoryPackage();
+      const text = buildMemoryPrompt(pkg);
+      const date = new Date().toISOString().slice(0, 10);
+      downloadText(`memory_package_${date}.txt`, text);
+      toast("记忆包已导出");
+    } catch (err) {
+      toast(err.message, true);
+    }
   }
 }
 
@@ -548,19 +711,77 @@ async function injectTextIntoTab(text) {
   if (!result?.ok) throw new Error(result?.error ?? "当前页面不支持注入");
 }
 
+async function scrapeCurrentConversationFromTab() {
+  const tab = await getActiveSupportedTab();
+  const result = await tabsSendMessage(tab.id, { type: "SCRAPE_CONVERSATION" });
+  if (!result?.ok) throw new Error(result?.error ?? "当前页面不支持抓取整段对话");
+  if (!result?.data?.messages?.length) throw new Error("当前页面没有可加入的对话内容");
+  return result.data;
+}
+
 async function injectPackage() {
   try {
-    const pkg = await buildMemoryPackage();
-    await injectTextIntoTab(buildMemoryPrompt(pkg));
+    const selectedIds = await getSelectedIdsForBackend();
+    const result = await backendApi().injectPackage(state.backendUrl, {
+      selected_ids: selectedIds,
+      target_platform: "chatgpt",
+    });
+    await injectTextIntoTab(result.text || "");
     toast("记忆内容已注入当前会话输入框");
+  } catch {
+    try {
+      const pkg = await buildMemoryPackage();
+      await injectTextIntoTab(buildMemoryPrompt(pkg));
+      toast("记忆内容已注入当前会话输入框");
+    } catch (err) {
+      toast(`注入失败：${err.message}`, true);
+    }
+  }
+}
+
+async function addCurrentConversation() {
+  const button = document.getElementById("addCurrentConversationBtn");
+  button.disabled = true;
+  button.style.opacity = "0.65";
+
+  try {
+    toast("正在加入当前对话...");
+    const conversation = await scrapeCurrentConversationFromTab();
+    const response = await backendApi().importCurrentConversation(state.backendUrl, {
+      platform: conversation.platform,
+      chat_id: conversation.chatId || crypto.randomUUID().slice(0, 8),
+      url: conversation.url,
+      title: conversation.title || "",
+      messages: conversation.messages,
+      process_now: state.apiKeyConfigured,
+    });
+    const job = response.job_id
+      ? await backendApi().getJob(state.backendUrl, response.job_id)
+      : null;
+    if (job?.status === "failed") throw new Error(job.error || "加入当前对话失败");
+    await refreshSummary();
+    if (job?.result?.processed) {
+      const episodes = job.result?.process_result?.episodes ?? 0;
+      toast(`当前对话已加入记忆，并整理为 ${episodes} 条 episodic 记忆`);
+    } else {
+      toast("当前对话已补录到 raw，可稍后点击整理");
+    }
   } catch (err) {
-    toast(`注入失败：${err.message}`, true);
+    toast(`加入当前对话失败：${err.message}`, true);
+  } finally {
+    button.disabled = false;
+    button.style.opacity = "";
   }
 }
 
 async function saveSkills() {
   const allSkillIds = new Set([...state.selectedSkillIds, ...state.selectedRecommendedIds]);
   await storageSet({ [STORAGE_KEYS.savedSkills]: [...allSkillIds] });
+  try {
+    await backendApi().saveSkills(state.backendUrl, { skill_ids: [...allSkillIds] });
+  } catch {
+    // Keep local save as fallback.
+  }
   toast("Skill 选择已保存");
 }
 
@@ -577,27 +798,43 @@ function buildSkillPrompt(selectedSkills) {
 
 async function injectSkills() {
   try {
-    const allData = await storageGet(null);
-    const pnData = allData["mw:persistent_nodes"] ?? { nodes: {} };
-    const mySkills = deriveMySkills(allData, pnData);
-    const selected = [];
-
-    mySkills.forEach(skill => {
-      if (state.selectedSkillIds.has(skill.id)) selected.push(skill);
+    const selectedIds = [...state.selectedSkillIds, ...state.selectedRecommendedIds];
+    if (selectedIds.length === 0) throw new Error("请至少选择一个 Skill");
+    const result = await backendApi().injectSkills(state.backendUrl, {
+      skill_ids: selectedIds,
+      target_platform: "chatgpt",
     });
-    recommendedSkills.forEach(skill => {
-      if (state.selectedRecommendedIds.has(skill.id)) selected.push(skill);
-    });
-
-    if (selected.length === 0) throw new Error("请至少选择一个 Skill");
-    await injectTextIntoTab(buildSkillPrompt(selected));
+    await injectTextIntoTab(result.text || "");
     toast("Skill 已注入当前会话输入框");
-  } catch (err) {
-    toast(`注入失败：${err.message}`, true);
+  } catch {
+    try {
+      const allData = await storageGet(null);
+      const pnData = allData["mw:persistent_nodes"] ?? { nodes: {} };
+      const mySkills = deriveMySkills(allData, pnData);
+      const selected = [];
+
+      mySkills.forEach(skill => {
+        if (state.selectedSkillIds.has(skill.id)) selected.push(skill);
+      });
+      recommendedSkills.forEach(skill => {
+        if (state.selectedRecommendedIds.has(skill.id)) selected.push(skill);
+      });
+
+      if (selected.length === 0) throw new Error("请至少选择一个 Skill");
+      await injectTextIntoTab(buildSkillPrompt(selected));
+      toast("Skill 已注入当前会话输入框");
+    } catch (err) {
+      toast(`注入失败：${err.message}`, true);
+    }
   }
 }
 
 async function clearCache() {
+  try {
+    await backendApi().clearCache(state.backendUrl, { scope: "temporary" });
+  } catch {
+    // Ignore backend failure and still clear local cache.
+  }
   await new Promise(resolve => chrome.storage.local.remove(["_raw_progress", "_sw_keepalive", "pending_flush"], resolve));
   toast("临时缓存已清理");
 }
@@ -608,9 +845,14 @@ function bindEvents() {
   document.getElementById("gotoSettingsBtn").addEventListener("click", () => setView("settings"));
   document.getElementById("gotoSkillBtn").addEventListener("click", async () => {
     setView("skill");
-    const allData = await storageGet(null);
-    const pnData = allData["mw:persistent_nodes"] ?? { nodes: {} };
-    renderSkillList(deriveMySkills(allData, pnData), state.selectedSkillIds);
+    try {
+      const result = await backendApi().getMySkills(state.backendUrl);
+      renderSkillList(result.items || [], state.selectedSkillIds, { showDelete: true });
+    } catch {
+      const allData = await storageGet(null);
+      const pnData = allData["mw:persistent_nodes"] ?? { nodes: {} };
+      renderSkillList(deriveMySkills(allData, pnData), state.selectedSkillIds, { showDelete: true });
+    }
   });
 
   document.querySelectorAll("[data-back]").forEach(btn => {
@@ -632,6 +874,18 @@ function bindEvents() {
   document.getElementById("keepUpdatedToggle").addEventListener("change", async event => {
     state.keepUpdated = event.target.checked;
     await storageSet({ [STORAGE_KEYS.keepUpdated]: state.keepUpdated });
+    try {
+      await backendApi().saveSettings(state.backendUrl, {
+        api_provider: "deepseek",
+        api_key: state.apiKey,
+        storage_path: state.storagePath,
+        keep_updated: state.keepUpdated,
+        realtime_update: state.realtimeUpdate,
+        backend_url: state.backendUrl,
+      });
+    } catch {
+      // Keep local change when backend is offline.
+    }
     await broadcastCaptureToggle(state.keepUpdated);
     renderSync();
   });
@@ -639,10 +893,24 @@ function bindEvents() {
   document.getElementById("realtimeUpdateToggle").addEventListener("change", async event => {
     state.realtimeUpdate = event.target.checked;
     await storageSet({ [STORAGE_KEYS.realtimeUpdate]: state.realtimeUpdate });
+    try {
+      await backendApi().saveSettings(state.backendUrl, {
+        api_provider: "deepseek",
+        api_key: state.apiKey,
+        storage_path: state.storagePath,
+        keep_updated: state.keepUpdated,
+        realtime_update: state.realtimeUpdate,
+        backend_url: state.backendUrl,
+      });
+    } catch {
+      // Keep local change when backend is offline.
+    }
+    renderSync();
     toast(state.realtimeUpdate ? "实时更新已开启" : "实时更新已关闭");
   });
 
   document.getElementById("organizeBtn").addEventListener("click", runOrganize);
+  document.getElementById("addCurrentConversationBtn").addEventListener("click", addCurrentConversation);
   document.getElementById("exportPackageBtn").addEventListener("click", exportPackage);
   document.getElementById("injectPackageBtn").addEventListener("click", injectPackage);
 
@@ -650,23 +918,50 @@ function bindEvents() {
     state.currentSkillTab = "my";
     document.getElementById("mySkillTab").classList.add("is-active");
     document.getElementById("recommendedSkillTab").classList.remove("is-active");
-    const allData = await storageGet(null);
-    const pnData = allData["mw:persistent_nodes"] ?? { nodes: {} };
-    renderSkillList(deriveMySkills(allData, pnData), state.selectedSkillIds);
+    try {
+      const result = await backendApi().getMySkills(state.backendUrl);
+      renderSkillList(result.items || [], state.selectedSkillIds, { showDelete: true });
+    } catch {
+      const allData = await storageGet(null);
+      const pnData = allData["mw:persistent_nodes"] ?? { nodes: {} };
+      renderSkillList(deriveMySkills(allData, pnData), state.selectedSkillIds, { showDelete: true });
+    }
   });
 
   document.getElementById("recommendedSkillTab").addEventListener("click", () => {
     state.currentSkillTab = "recommended";
     document.getElementById("recommendedSkillTab").classList.add("is-active");
     document.getElementById("mySkillTab").classList.remove("is-active");
-    renderSkillList(recommendedSkills, state.selectedRecommendedIds);
+    backendApi().getRecommendedSkills(state.backendUrl)
+      .then(result => renderSkillList(result.items || [], state.selectedRecommendedIds))
+      .catch(() => renderSkillList(recommendedSkills, state.selectedRecommendedIds));
   });
 
   document.getElementById("saveSkillBtn").addEventListener("click", saveSkills);
   document.getElementById("injectSkillBtn").addEventListener("click", injectSkills);
 
   document.getElementById("importHistoryBtn").addEventListener("click", () => {
-    toast("历史导入会在接入本地 Python 后端后恢复到完整可用版");
+    document.getElementById("importFileInput").click();
+  });
+
+  document.getElementById("importFileInput").addEventListener("change", async event => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      const platform = file.name.toLowerCase().includes("deepseek") ? "deepseek" : "chatgpt";
+      const result = await backendApi().importHistory(state.backendUrl, { platform, file });
+      const job = result.job_id
+        ? await backendApi().getJob(state.backendUrl, result.job_id)
+        : null;
+      if (job?.status === "failed") throw new Error(job.error || "导入失败");
+      const imported = job?.result?.imported_conversations;
+      await refreshSummary();
+      toast(imported ? `历史导入完成：${imported} 条对话` : `历史导入任务已创建：${result.job_id}`);
+    } catch (err) {
+      toast(`导入失败：${err.message}`, true);
+    } finally {
+      event.target.value = "";
+    }
   });
 
   document.getElementById("clearCacheBtn").addEventListener("click", clearCache);
@@ -685,6 +980,7 @@ async function init() {
   ]);
 
   state.apiKey = settings[STORAGE_KEYS.apiKey] || "";
+  state.apiKeyConfigured = !!state.apiKey;
   state.backendUrl = settings[STORAGE_KEYS.backendUrl] || state.backendUrl;
   state.keepUpdated = !!settings[STORAGE_KEYS.keepUpdated];
   state.realtimeUpdate = !!settings[STORAGE_KEYS.realtimeUpdate];
@@ -694,15 +990,31 @@ async function init() {
   state.selectedSkillIds = new Set(savedSkillIds.filter(id => !String(id).startsWith("rec:")));
   state.selectedRecommendedIds = new Set(savedSkillIds.filter(id => String(id).startsWith("rec:")));
 
+  try {
+    const backendSettings = await backendApi().getSettings(state.backendUrl);
+    state.keepUpdated = backendSettings.keep_updated;
+    state.realtimeUpdate = backendSettings.realtime_update;
+    state.lastSyncAt = backendSettings.last_sync_at || state.lastSyncAt;
+    state.storagePath = backendSettings.storage_path || state.storagePath;
+    state.apiKeyConfigured = backendSettings.api_key_configured || state.apiKeyConfigured;
+  } catch {
+    // Keep extension-local settings when backend is offline.
+  }
+
   bindEvents();
   renderDirectory();
   renderSettings();
   renderSync();
   await refreshSummary();
 
-  const allData = await storageGet(null);
-  const pnData = allData["mw:persistent_nodes"] ?? { nodes: {} };
-  renderSkillList(deriveMySkills(allData, pnData), state.selectedSkillIds);
+  try {
+    const result = await backendApi().getMySkills(state.backendUrl);
+    renderSkillList(result.items || [], state.selectedSkillIds, { showDelete: true });
+  } catch {
+    const allData = await storageGet(null);
+    const pnData = allData["mw:persistent_nodes"] ?? { nodes: {} };
+    renderSkillList(deriveMySkills(allData, pnData), state.selectedSkillIds, { showDelete: true });
+  }
 }
 
 init().catch(err => {
