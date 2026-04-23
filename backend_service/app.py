@@ -68,8 +68,10 @@ from llm_memory_transferor.utils.llm_client import LLMClient  # noqa: E402
 JOB_REGISTRY: dict[str, dict[str, Any]] = {}
 
 DEFAULT_SETTINGS = {
-    "api_provider": "deepseek",
+    "api_provider": "openai_compat",
     "api_key": "",
+    "api_base_url": "https://api.deepseek.com/v1",
+    "api_model": "deepseek-chat",
     "storage_path": "",
     "keep_updated": False,
     "realtime_update": False,
@@ -293,6 +295,8 @@ DEFAULT_RECOMMENDED_SKILLS = [
 class SettingsResponse(BaseModel):
     api_provider: str
     api_key_configured: bool
+    api_base_url: str
+    api_model: str
     storage_path: str
     keep_updated: bool
     realtime_update: bool
@@ -301,8 +305,10 @@ class SettingsResponse(BaseModel):
 
 
 class SettingsUpdate(BaseModel):
-    api_provider: str = "deepseek"
+    api_provider: str = "openai_compat"
     api_key: str = ""
+    api_base_url: str = "https://api.deepseek.com/v1"
+    api_model: str = "deepseek-chat"
     storage_path: str = ""
     keep_updated: bool = False
     realtime_update: bool = False
@@ -310,8 +316,10 @@ class SettingsUpdate(BaseModel):
 
 
 class ConnectionTestRequest(BaseModel):
-    api_provider: str = "deepseek"
+    api_provider: str = "openai_compat"
     api_key: str = ""
+    api_base_url: str = "https://api.deepseek.com/v1"
+    api_model: str = "deepseek-chat"
 
 
 class SyncToggleRequest(BaseModel):
@@ -430,7 +438,7 @@ def load_settings() -> dict[str, Any]:
 
     merged = dict(DEFAULT_SETTINGS)
     merged.update(loaded)
-    return merged
+    return _normalize_api_config(merged)
 
 
 def ensure_catalog_dir() -> None:
@@ -955,11 +963,36 @@ def save_settings(data: dict[str, Any]) -> dict[str, Any]:
     incoming_api_key = data.get("api_key", None)
     if isinstance(incoming_api_key, str) and not incoming_api_key.strip() and existing.get("api_key", "").strip():
         merged["api_key"] = existing["api_key"]
+    merged = _normalize_api_config(merged)
     SETTINGS_PATH.write_text(
         json.dumps(merged, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
     return merged
+
+
+def _normalize_api_config(settings: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(settings)
+    provider = str(normalized.get("api_provider") or "").strip() or "openai_compat"
+    base_url = str(normalized.get("api_base_url") or "").strip()
+    model = str(normalized.get("api_model") or "").strip()
+
+    if provider == "deepseek":
+        provider = "openai_compat"
+        if not base_url:
+            base_url = "https://api.deepseek.com/v1"
+        if not model:
+            model = "deepseek-chat"
+
+    if not base_url:
+        base_url = "https://api.deepseek.com/v1"
+    if not model:
+        model = "deepseek-chat"
+
+    normalized["api_provider"] = provider
+    normalized["api_base_url"] = base_url.rstrip("/")
+    normalized["api_model"] = model
+    return normalized
 
 
 def create_job(
@@ -2147,6 +2180,17 @@ def build_display_texts(
             if not isinstance(en_values, list) or len(en_values) != len(value):
                 en_values = value
             zh_values, en_values = _ensure_bilingual_display_value(llm, value, zh_values, en_values)
+            for raw, zh_text, en_text in zip(value, zh_values, en_values):
+                raw_text = str(raw).strip()
+                if not raw_text:
+                    continue
+                item_id = f"preferences:{field}:{_safe_slug(raw_text, 'item')}"
+                cache["preferences"][item_id] = _make_display_entry(
+                    title_zh=title_zh,
+                    title_en=title_en,
+                    desc_zh=str(zh_text).strip() or raw_text,
+                    desc_en=str(en_text).strip() or raw_text,
+                )
             desc_zh = "，".join(str(item).strip() for item in zh_values if str(item).strip())
             desc_en = ", ".join(str(item).strip() for item in en_values if str(item).strip())
             raw_text = ", ".join(str(item).strip() for item in value if str(item).strip())
@@ -2171,12 +2215,14 @@ def build_display_texts(
 def get_llm(settings: dict[str, Any]) -> LLMClient:
     api_key = settings.get("api_key", "").strip()
     if not api_key:
-        raise HTTPException(status_code=400, detail="请先在设置页配置 DeepSeek API Key")
+        raise HTTPException(status_code=400, detail="请先在设置页配置 API Key")
+    base_url = str(settings.get("api_base_url") or "").strip()
+    model = str(settings.get("api_model") or "").strip()
     return LLMClient(
         api_key=api_key,
-        model="deepseek-chat",
-        backend="openai_compat",
-        base_url="https://api.deepseek.com/v1",
+        model=model or "deepseek-chat",
+        backend=str(settings.get("api_provider") or "openai_compat"),
+        base_url=base_url or "https://api.deepseek.com/v1",
     )
 
 
@@ -3121,12 +3167,15 @@ def build_skill_export_text(settings: dict[str, Any], skill_ids: list[str]) -> t
     return filename, json.dumps(payload, ensure_ascii=False, indent=2)
 
 
-def test_deepseek_connection(api_key: str) -> tuple[bool, str]:
+def test_openai_compat_connection(api_key: str, base_url: str) -> tuple[bool, str]:
     if not api_key:
         return False, "API Key 为空"
+    normalized_base = str(base_url or "").strip().rstrip("/")
+    if not normalized_base:
+        return False, "Base URL 为空"
 
     request = urllib.request.Request(
-        "https://api.deepseek.com/v1/models",
+        f"{normalized_base}/models",
         headers={
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
@@ -3689,6 +3738,8 @@ def get_settings() -> SettingsResponse:
     return SettingsResponse(
         api_provider=settings["api_provider"],
         api_key_configured=bool(settings["api_key"]),
+        api_base_url=settings["api_base_url"],
+        api_model=settings["api_model"],
         storage_path=str(get_storage_root(settings)),
         keep_updated=bool(settings["keep_updated"]),
         realtime_update=bool(settings["realtime_update"]),
@@ -3704,6 +3755,8 @@ def update_settings(payload: SettingsUpdate) -> SettingsResponse:
     return SettingsResponse(
         api_provider=settings["api_provider"],
         api_key_configured=bool(settings["api_key"]),
+        api_base_url=settings["api_base_url"],
+        api_model=settings["api_model"],
         storage_path=str(get_storage_root(settings)),
         keep_updated=bool(settings["keep_updated"]),
         realtime_update=bool(settings["realtime_update"]),
@@ -3714,9 +3767,10 @@ def update_settings(payload: SettingsUpdate) -> SettingsResponse:
 
 @app.post("/api/settings/test-connection")
 def settings_test_connection(payload: ConnectionTestRequest) -> dict[str, Any]:
-    if payload.api_provider != "deepseek":
-        return {"ok": False, "message": "当前仅支持 DeepSeek"}
-    ok, message = test_deepseek_connection(payload.api_key)
+    provider = (payload.api_provider or "openai_compat").strip()
+    if provider not in {"openai_compat", "deepseek"}:
+        return {"ok": False, "message": f"暂不支持 {provider}"}
+    ok, message = test_openai_compat_connection(payload.api_key, payload.api_base_url)
     return {"ok": ok, "message": message}
 
 

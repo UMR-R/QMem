@@ -3,7 +3,10 @@ const DB_STORE = "settings";
 const DIR_KEY = "dirHandle";
 
 const STORAGE_KEYS = {
+  apiProvider: "api_provider",
   apiKey: "deepseek_api_key",
+  apiBaseUrl: "api_base_url",
+  apiModel: "api_model",
   backendUrl: "backend_url",
   keepUpdated: "keepUpdated",
   realtimeUpdate: "realtimeUpdate",
@@ -79,6 +82,9 @@ const state = {
   dirHandle: null,
   apiKey: "",
   apiKeyConfigured: false,
+  apiProvider: "openai_compat",
+  apiBaseUrl: "https://api.deepseek.com/v1",
+  apiModel: "deepseek-chat",
   backendUrl: "http://127.0.0.1:8765",
   keepUpdated: false,
   realtimeUpdate: false,
@@ -345,13 +351,13 @@ function renderSettings() {
   document.getElementById("realtimeUpdateToggle").checked = state.realtimeUpdate;
   if (state.apiKey) {
     document.getElementById("apiKeyStatus").textContent = `API Key: ${"●".repeat(8)}`;
-    apiKeyInput.placeholder = "请输入 DeepSeek API Key";
+    apiKeyInput.placeholder = "请输入 API Key";
   } else if (state.apiKeyConfigured) {
     document.getElementById("apiKeyStatus").textContent = "API Key: 已在本地后端配置";
-    apiKeyInput.placeholder = "如需更换，请重新输入新的 DeepSeek API Key";
+    apiKeyInput.placeholder = "如需更换，请重新输入新的 API Key";
   } else {
     document.getElementById("apiKeyStatus").textContent = "API Key: 未配置";
-    apiKeyInput.placeholder = "请输入 DeepSeek API Key";
+    apiKeyInput.placeholder = "请输入 API Key";
   }
 }
 
@@ -879,18 +885,26 @@ async function saveSettings(showToast = true) {
   state.backendUrl = document.getElementById("backendUrlInput").value.trim() || "http://127.0.0.1:8765";
   state.storagePath = document.getElementById("storageDirInput").value.trim();
   await storageSet({
+    [STORAGE_KEYS.apiProvider]: state.apiProvider,
     [STORAGE_KEYS.apiKey]: state.apiKey,
+    [STORAGE_KEYS.apiBaseUrl]: state.apiBaseUrl,
+    [STORAGE_KEYS.apiModel]: state.apiModel,
     [STORAGE_KEYS.backendUrl]: state.backendUrl,
   });
   const backendSettings = await backendApi().saveSettings(state.backendUrl, {
-    api_provider: "deepseek",
+    api_provider: state.apiProvider,
     api_key: state.apiKey,
+    api_base_url: state.apiBaseUrl,
+    api_model: state.apiModel,
     storage_path: state.storagePath,
     keep_updated: state.keepUpdated,
     realtime_update: state.realtimeUpdate,
     backend_url: state.backendUrl,
   });
   state.apiKeyConfigured = backendSettings.api_key_configured;
+  state.apiProvider = backendSettings.api_provider || state.apiProvider;
+  state.apiBaseUrl = backendSettings.api_base_url || state.apiBaseUrl;
+  state.apiModel = backendSettings.api_model || state.apiModel;
   state.storagePath = backendSettings.storage_path || state.storagePath;
   renderSettings();
   renderSync();
@@ -904,8 +918,10 @@ async function testConnection() {
   state.backendUrl = document.getElementById("backendUrlInput").value.trim() || state.backendUrl;
   try {
     const result = await backendApi().testConnection(state.backendUrl, {
-      api_provider: "deepseek",
+      api_provider: state.apiProvider,
       api_key: document.getElementById("apiKeyInput").value.trim(),
+      api_base_url: state.apiBaseUrl,
+      api_model: state.apiModel,
     });
     if (!result.ok) throw new Error(result.message || "连接失败");
     await saveSettings(false);
@@ -963,7 +979,7 @@ async function runOrganize() {
   const organizeBtn = document.getElementById("organizeBtn");
   if (!state.apiKeyConfigured) {
     renderActionAvailability();
-    toast("请先在设置页配置 DeepSeek API Key", true);
+    toast("请先在设置页配置 API Key", true);
     return;
   }
   organizeBtn.disabled = true;
@@ -1429,8 +1445,10 @@ function bindEvents() {
     await storageSet({ [STORAGE_KEYS.keepUpdated]: state.keepUpdated });
     try {
       const backendSettings = await backendApi().saveSettings(state.backendUrl, {
-        api_provider: "deepseek",
+        api_provider: state.apiProvider,
         api_key: state.apiKey,
+        api_base_url: state.apiBaseUrl,
+        api_model: state.apiModel,
         storage_path: state.storagePath,
         keep_updated: state.keepUpdated,
         realtime_update: state.realtimeUpdate,
@@ -1454,8 +1472,10 @@ function bindEvents() {
     await storageSet({ [STORAGE_KEYS.realtimeUpdate]: state.realtimeUpdate });
     try {
       const backendSettings = await backendApi().saveSettings(state.backendUrl, {
-        api_provider: "deepseek",
+        api_provider: state.apiProvider,
         api_key: state.apiKey,
+        api_base_url: state.apiBaseUrl,
+        api_model: state.apiModel,
         storage_path: state.storagePath,
         keep_updated: state.keepUpdated,
         realtime_update: state.realtimeUpdate,
@@ -1549,7 +1569,10 @@ async function init() {
   await CONFIG.loadPrompts();
 
   const settings = await storageGet([
+    STORAGE_KEYS.apiProvider,
     STORAGE_KEYS.apiKey,
+    STORAGE_KEYS.apiBaseUrl,
+    STORAGE_KEYS.apiModel,
     STORAGE_KEYS.backendUrl,
     STORAGE_KEYS.keepUpdated,
     STORAGE_KEYS.realtimeUpdate,
@@ -1557,8 +1580,11 @@ async function init() {
     STORAGE_KEYS.savedSkills,
   ]);
 
+  state.apiProvider = settings[STORAGE_KEYS.apiProvider] || state.apiProvider;
   state.apiKey = settings[STORAGE_KEYS.apiKey] || "";
   state.apiKeyConfigured = !!state.apiKey;
+  state.apiBaseUrl = settings[STORAGE_KEYS.apiBaseUrl] || state.apiBaseUrl;
+  state.apiModel = settings[STORAGE_KEYS.apiModel] || state.apiModel;
   state.backendUrl = settings[STORAGE_KEYS.backendUrl] || state.backendUrl;
   state.keepUpdated = !!settings[STORAGE_KEYS.keepUpdated];
   state.realtimeUpdate = !!settings[STORAGE_KEYS.realtimeUpdate];
@@ -1575,6 +1601,9 @@ async function init() {
     state.lastSyncAt = backendSettings.last_sync_at || state.lastSyncAt;
     state.storagePath = backendSettings.storage_path || state.storagePath;
     state.apiKeyConfigured = backendSettings.api_key_configured || state.apiKeyConfigured;
+    state.apiProvider = backendSettings.api_provider || state.apiProvider;
+    state.apiBaseUrl = backendSettings.api_base_url || state.apiBaseUrl;
+    state.apiModel = backendSettings.api_model || state.apiModel;
   } catch {
     // Keep extension-local settings when backend is offline.
   }
