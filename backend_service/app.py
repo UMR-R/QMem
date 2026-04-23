@@ -898,24 +898,44 @@ def _humanize_remote_skill_title(title: str, folder_name: str, description: str)
 
     if lowered in {"pdf", "pdf processing", "pdf skill"} or (lowered == "pdf" and "pdf" in description_l):
         return "PDF 文档处理"
+    if lowered in {"pdf processing guide"}:
+        return "PDF 文档处理"
     if lowered in {"docx", "word", "word document"} or ".docx" in description_l:
         return "Word 文档处理"
     if lowered in {"pptx", "powerpoint", "slides"} or ".pptx" in description_l:
         return "PPT 演示文稿处理"
-    if lowered in {"mcp builder", "mcp"}:
-        return "MCP 服务构建"
+    if lowered in {"pptx skill"}:
+        return "PPT 演示文稿处理"
+    if lowered in {"mcp builder", "mcp", "mcp server development guide"}:
+        return "MCP 服务开发"
     if lowered in {"claude api", "api"} and "api" in description_l:
         return "Claude API 集成"
-    if lowered == "internal comms":
+    if lowered in {"building llm powered applications with claude", "building llm-powered applications with claude"}:
+        return "Claude 应用开发"
+    if lowered in {"anthropic brand styling"}:
+        return "品牌风格套用"
+    if lowered in {"internal comms", "internal comms"}:
         return "内部沟通写作"
-    if lowered == "frontend design":
+    if lowered in {"frontend design", "frontend-design"}:
         return "前端界面设计"
-    if lowered == "canvas design":
+    if lowered in {"canvas design", "canvas-design"}:
         return "画布与视觉设计"
-    if lowered == "doc coauthoring":
+    if lowered in {"doc coauthoring", "doc co-authoring workflow"}:
         return "文档协作写作"
-    if lowered == "algorithmic art":
+    if lowered in {"algorithmic art", "algorithmic-art"}:
         return "算法艺术创作"
+    if lowered in {"requirements for outputs"}:
+        return "输出要求整理"
+    if lowered in {"skill creator"}:
+        return "技能设计"
+    if lowered in {"theme factory skill"}:
+        return "主题风格生成"
+    if lowered in {"slack gif creator"}:
+        return "Slack GIF 生成"
+    if lowered in {"web application testing"}:
+        return "Web 应用测试"
+    if lowered in {"web artifacts builder"}:
+        return "Web 组件构建"
     if len(normalized) <= 4 and normalized.isupper():
         return f"{normalized} 能力"
     return normalized
@@ -1553,8 +1573,8 @@ def _get_persistent_display_entry(
         return cached
 
     entry = _make_display_entry(
-        title_zh="兴趣发现",
-        title_en="Topics & Habits",
+        title_zh=raw_text,
+        title_en=raw_text,
         desc_zh=raw_text,
         desc_en=raw_text,
     )
@@ -1563,8 +1583,8 @@ def _get_persistent_display_entry(
             llm = get_llm(settings)
             zh_text, en_text = _ensure_bilingual_display_value(llm, raw_text, raw_text, raw_text)
             entry = _make_display_entry(
-                title_zh="兴趣发现",
-                title_en="Topics & Habits",
+                title_zh=str(zh_text).strip() or raw_text,
+                title_en=str(en_text).strip() or raw_text,
                 desc_zh=str(zh_text).strip() or raw_text,
                 desc_en=str(en_text).strip() or raw_text,
             )
@@ -2666,6 +2686,12 @@ def _build_recommended_display_text(item: dict[str, Any]) -> tuple[str, str, str
         (("internal", "comms"), "内部沟通写作", "整理适合团队内部传播的说明、同步与 FAQ 文案", "内部公告 / 沟通稿"),
         (("mcp", "server"), "MCP 服务开发", "创建或整理 MCP 服务的实现、配置与调试步骤", "开发步骤 / 配置说明"),
         (("api",), "API 集成说明", "整理接口接入方式、参数与调用步骤", "接入说明 / 示例代码"),
+        (("web", "application", "testing"), "Web 应用测试", "测试本地 Web 应用并输出可复现的问题与修复建议", "测试步骤 / 调试建议"),
+        (("web", "artifacts", "builder"), "Web 组件构建", "搭建可交互的 Web 页面或小型应用原型", "页面原型 / 实现说明"),
+        (("requirements", "outputs"), "输出要求整理", "把任务要求转成清晰、可检查的输出规范", "输出规范 / 检查清单"),
+        (("skill", "creator"), "技能设计", "把能力整理成可复用的技能结构与说明", "技能草案 / 结构说明"),
+        (("theme", "factory"), "主题风格生成", "生成一套统一的主题风格和配色说明", "主题方案 / 配色说明"),
+        (("slack", "gif"), "Slack GIF 生成", "根据场景生成适合团队沟通的 GIF 创意与制作说明", "GIF 方案 / 制作步骤"),
     ]
     for keywords, mapped_title, short_desc, output in mappings:
         if any(keyword in title_l for keyword in keywords) or all(keyword in text for keyword in keywords):
@@ -2676,24 +2702,54 @@ def _build_recommended_display_text(item: dict[str, Any]) -> tuple[str, str, str
     if short_desc:
         lowered = short_desc.lower()
         if "llm-powered" in lowered or "claude" in lowered:
+            title = "Claude 应用开发"
             short_desc = "构建基于 Claude 的应用能力与调用流程"
             output_format = "开发说明 / 实现方案"
         elif "brand" in lowered and "style" in lowered:
+            title = "品牌风格套用"
             short_desc = "按品牌规范整理视觉与文案风格"
             output_format = "品牌化文案 / 风格说明"
         elif "document" in lowered or "co-author" in lowered:
+            title = "文档协作写作"
             short_desc = "协助多人共同撰写、整理和修订文档"
             output_format = "协作文档 / 修订建议"
         elif "mcp" in lowered:
             short_desc = "创建、配置并调试 MCP 服务"
             output_format = "开发步骤 / 配置说明"
+        elif "web" in lowered and "application" in lowered and "testing" in lowered:
+            title = "Web 应用测试"
+            short_desc = "测试本地 Web 应用并输出可复现的问题与修复建议"
+            output_format = "测试步骤 / 调试建议"
+        elif "web" in lowered and "artifacts" in lowered:
+            title = "Web 组件构建"
+            short_desc = "搭建可交互的 Web 页面或小型应用原型"
+            output_format = "页面原型 / 实现说明"
+        elif "requirements" in lowered and "outputs" in lowered:
+            title = "输出要求整理"
+            short_desc = "把任务要求转成清晰、可检查的输出规范"
+            output_format = "输出规范 / 检查清单"
+        elif "skill" in lowered and "creator" in lowered:
+            title = "技能设计"
+            short_desc = "把能力整理成可复用的技能结构与说明"
+            output_format = "技能草案 / 结构说明"
+        elif "theme" in lowered and "factory" in lowered:
+            title = "主题风格生成"
+            short_desc = "生成一套统一的主题风格和配色说明"
+            output_format = "主题方案 / 配色说明"
+        elif "slack" in lowered and "gif" in lowered:
+            title = "Slack GIF 生成"
+            short_desc = "根据场景生成适合团队沟通的 GIF 创意与制作说明"
+            output_format = "GIF 方案 / 制作步骤"
         elif "frontend" in lowered:
+            title = "前端界面设计"
             short_desc = "规划前端界面结构、交互和设计方向"
             output_format = "界面方案 / 设计说明"
         elif "canvas" in lowered:
+            title = "画布视觉设计"
             short_desc = "生成适合画布场景的视觉设计方案"
             output_format = "视觉方案 / 设计稿"
         elif "internal" in lowered and "comms" in lowered:
+            title = "内部沟通写作"
             short_desc = "撰写适合团队内部同步和传播的文案"
             output_format = "内部公告 / 沟通稿"
     short_desc = (short_desc or "可复用的工作能力")[:36]
@@ -3012,7 +3068,6 @@ def build_summary(settings: dict[str, Any]) -> SummaryResponse:
     wiki = get_wiki(settings)
     episodes_dir = root / "episodes"
     raw_dir = root / "raw"
-    persistent_file = root / "js_persistent_nodes.json"
 
     profile_count = len(memory_items_for_category(settings, "profile"))
     preferences_count = len(memory_items_for_category(settings, "preferences"))
@@ -3023,7 +3078,7 @@ def build_summary(settings: dict[str, Any]) -> SummaryResponse:
     episodes_count = count_json_files(episodes_dir)
     raw_count = count_raw_conversations(raw_dir)
 
-    persistent_data = read_json_file(persistent_file) if persistent_file.exists() else {}
+    persistent_data = load_persistent_nodes(settings)
     persistent_count = (
         len((persistent_data or {}).get("nodes", {}))
         if isinstance(persistent_data, dict)
@@ -3061,12 +3116,103 @@ def build_memory_categories(settings: dict[str, Any], locale: str | None = None)
     ]
 
 
+def _default_persistent_payload() -> dict[str, Any]:
+    return {"version": "1.1", "pn_next_id": 1, "episodic_tag_paths": [], "nodes": {}}
+
+
+def _persistent_root(root: Path) -> Path:
+    return root / "interest_discoveries"
+
+
+def _persistent_index_path(root: Path) -> Path:
+    return _persistent_root(root) / "index.json"
+
+
+def _legacy_persistent_path(root: Path) -> Path:
+    return root / "js_persistent_nodes.json"
+
+
+def _persistent_node_dir(root: Path, node_id: str) -> Path:
+    return _persistent_root(root) / node_id
+
+
+def _persistent_node_markdown(node_id: str, node: dict[str, Any]) -> str:
+    lines = [f"# {node.get('description') or node.get('key') or node_id}", ""]
+    lines.append(f"- ID: `{node_id}`")
+    if node.get("type"):
+        lines.append(f"- 类型: `{node.get('type')}`")
+    if node.get("key"):
+        lines.append(f"- 键: `{node.get('key')}`")
+    if node.get("confidence"):
+        lines.append(f"- 置信度: `{node.get('confidence')}`")
+    if node.get("export_priority"):
+        lines.append(f"- 导出优先级: `{node.get('export_priority')}`")
+    if node.get("platform"):
+        lines.append(f"- 平台: {', '.join(str(item) for item in node.get('platform', []) if str(item).strip())}")
+    if node.get("episode_refs"):
+        lines.append(f"- Episode 引用: {', '.join(str(item) for item in node.get('episode_refs', []) if str(item).strip())}")
+    if node.get("created_at"):
+        lines.append(f"- 创建时间: `{node.get('created_at')}`")
+    if node.get("updated_at"):
+        lines.append(f"- 更新时间: `{node.get('updated_at')}`")
+    lines.append("")
+    lines.append("## 描述")
+    lines.append(str(node.get("description") or "").strip() or "暂无描述")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _load_persistent_nodes_from_directory(root: Path) -> dict[str, Any]:
+    persistent_root = _persistent_root(root)
+    index_path = _persistent_index_path(root)
+    payload = _default_persistent_payload()
+    if not persistent_root.exists():
+        return payload
+
+    index_data = read_json_file(index_path)
+    if isinstance(index_data, dict):
+        payload["version"] = index_data.get("version", payload["version"])
+        payload["pn_next_id"] = index_data.get("pn_next_id", payload["pn_next_id"])
+        payload["episodic_tag_paths"] = index_data.get("episodic_tag_paths", payload["episodic_tag_paths"])
+        items = index_data.get("items", [])
+        if isinstance(items, list):
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                node_id = str(item.get("id") or "").strip()
+                if not node_id:
+                    continue
+                payload["nodes"][node_id] = {k: v for k, v in item.items() if k != "id"}
+
+    for node_json in sorted(persistent_root.glob("*/node.json")):
+        node_data = read_json_file(node_json)
+        if not isinstance(node_data, dict):
+            continue
+        node_id = str(node_data.get("id") or node_json.parent.name).strip()
+        if not node_id:
+            continue
+        payload["nodes"][node_id] = {k: v for k, v in node_data.items() if k != "id"}
+
+    if payload["nodes"]:
+        pn_next = payload.get("pn_next_id", 1)
+        highest = 0
+        for node_id in payload["nodes"]:
+            match = re.search(r"(\d+)$", node_id)
+            if match:
+                highest = max(highest, int(match.group(1)))
+        payload["pn_next_id"] = max(int(pn_next or 1), highest + 1)
+    return payload
+
+
 def load_persistent_nodes(settings: dict[str, Any]) -> dict[str, Any]:
     root = get_storage_root(settings)
-    data = read_json_file(root / "js_persistent_nodes.json")
+    directory_data = _load_persistent_nodes_from_directory(root)
+    if directory_data.get("nodes"):
+        return directory_data
+    data = read_json_file(_legacy_persistent_path(root))
     if isinstance(data, dict):
         return data
-    return {"version": "1.0", "pn_next_id": 1, "episodic_tag_paths": [], "nodes": {}}
+    return _default_persistent_payload()
 
 
 def memory_items_for_category(settings: dict[str, Any], category: str, locale: str | None = None) -> list[dict[str, Any]]:
@@ -3375,8 +3521,9 @@ def derive_my_skills(settings: dict[str, Any]) -> list[dict[str, Any]]:
                 }
             )
 
-    if len(items) < 6 and (root / "js_persistent_nodes.json").exists():
-        nodes = load_persistent_nodes(settings).get("nodes", {})
+    persistent_nodes = load_persistent_nodes(settings).get("nodes", {})
+    if len(items) < 6 and persistent_nodes:
+        nodes = persistent_nodes
         episodes_by_id = {episode.episode_id: episode for episode in wiki.list_episodes()}
         for node_id, node in list(nodes.items()):
             refs = node.get("episode_refs", []) or []
@@ -4185,9 +4332,11 @@ def test_openai_compat_connection(api_key: str, base_url: str) -> tuple[bool, st
     try:
         with urllib.request.urlopen(request, timeout=10) as response:
             if 200 <= response.status < 300:
-                return True, "Connection successful"
+                return True, "可调用"
             return False, f"HTTP {response.status}"
     except urllib.error.HTTPError as exc:
+        if exc.code in {400, 401, 403, 404}:
+            return False, "当前默认配置不匹配这把 key"
         return False, f"HTTP {exc.code}"
     except Exception as exc:  # noqa: BLE001
         return False, str(exc)
@@ -4204,10 +4353,65 @@ def _load_persistent_distill_prompt() -> str:
 
 def save_persistent_nodes(settings: dict[str, Any], data: dict[str, Any]) -> None:
     root = get_storage_root(settings, create=True)
-    (root / "js_persistent_nodes.json").write_text(
-        json.dumps(data, ensure_ascii=False, indent=2),
+    payload = _default_persistent_payload()
+    if isinstance(data, dict):
+        payload.update({
+            "version": data.get("version", payload["version"]),
+            "pn_next_id": data.get("pn_next_id", payload["pn_next_id"]),
+            "episodic_tag_paths": data.get("episodic_tag_paths", payload["episodic_tag_paths"]),
+            "nodes": data.get("nodes", payload["nodes"]),
+        })
+
+    persistent_root = _persistent_root(root)
+    persistent_root.mkdir(parents=True, exist_ok=True)
+    for child in persistent_root.iterdir():
+        if child.is_dir():
+            shutil.rmtree(child)
+        elif child.is_file():
+            child.unlink()
+
+    items: list[dict[str, Any]] = []
+    nodes = payload.get("nodes", {})
+    if isinstance(nodes, dict):
+        for node_id, node in sorted(nodes.items()):
+            if not isinstance(node, dict):
+                continue
+            node_dir = _persistent_node_dir(root, str(node_id))
+            node_dir.mkdir(parents=True, exist_ok=True)
+            node_payload = {"id": node_id, **node}
+            (node_dir / "node.json").write_text(
+                json.dumps(node_payload, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            (node_dir / "node.md").write_text(
+                _persistent_node_markdown(str(node_id), node),
+                encoding="utf-8",
+            )
+            items.append(node_payload)
+
+    index_payload = {
+        "version": payload.get("version", "1.1"),
+        "pn_next_id": payload.get("pn_next_id", 1),
+        "episodic_tag_paths": payload.get("episodic_tag_paths", []),
+        "item_count": len(items),
+        "items": items,
+    }
+    _persistent_index_path(root).write_text(
+        json.dumps(index_payload, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+    (persistent_root / "README.md").write_text(
+        "# Interest Discoveries\n\n"
+        "此目录存放“兴趣发现”层的节点化记忆资产。\n\n"
+        "- `index.json`：索引与汇总\n"
+        "- `<node-id>/node.json`：单条节点结构化数据\n"
+        "- `<node-id>/node.md`：单条节点说明\n",
+        encoding="utf-8",
+    )
+
+    legacy_path = _legacy_persistent_path(root)
+    if legacy_path.exists():
+        legacy_path.unlink()
 
 
 def apply_persistent_result(
@@ -4281,6 +4485,8 @@ def update_persistent_nodes_for_episode(
     llm: LLMClient,
     episode: Any,
 ) -> None:
+    if _is_bootstrap_memory_import_episode(episode):
+        return
     pn_data = load_persistent_nodes(settings)
     existing_summary = [
         {
@@ -4309,6 +4515,38 @@ def update_persistent_nodes_for_episode(
     if isinstance(result, dict) and result:
         apply_persistent_result(pn_data, result, episode.episode_id, episode.platform)
         save_persistent_nodes(settings, pn_data)
+
+
+def _is_bootstrap_memory_import_episode(episode: Any) -> bool:
+    platform = str(getattr(episode, "platform", "") or "").strip().lower()
+    topic = str(getattr(episode, "topic", "") or "").strip().lower()
+    summary = str(getattr(episode, "summary", "") or "").strip().lower()
+    topics = [str(item or "").strip().lower() for item in (getattr(episode, "topics_covered", []) or [])]
+    key_decisions = [str(item or "").strip().lower() for item in (getattr(episode, "key_decisions", []) or [])]
+
+    if platform != "text_import":
+        return False
+
+    marker_hits = 0
+    markers = [
+        "memory import",
+        "cold start",
+        "memory_package",
+        "memory package",
+        "profile setup",
+        "import the provided memory package",
+        "structured cold-start memory package",
+        "冷启动记忆包",
+        "结构化记忆",
+        "导入目标平台",
+    ]
+
+    haystacks = [topic, summary, *topics, *key_decisions]
+    for marker in markers:
+        if any(marker in haystack for haystack in haystacks if haystack):
+            marker_hits += 1
+
+    return marker_hits >= 2
 
 
 def rebuild_persistent_nodes(
@@ -4785,11 +5023,29 @@ def update_settings(payload: SettingsUpdate) -> SettingsResponse:
 
 @app.post("/api/settings/test-connection")
 def settings_test_connection(payload: ConnectionTestRequest) -> dict[str, Any]:
-    provider = (payload.api_provider or "openai_compat").strip()
+    normalized = _normalize_api_config(payload.model_dump())
+    provider = (normalized.get("api_provider") or "openai_compat").strip()
     if provider not in {"openai_compat", "deepseek"}:
         return {"ok": False, "message": f"暂不支持 {provider}"}
-    ok, message = test_openai_compat_connection(payload.api_key, payload.api_base_url)
-    return {"ok": ok, "message": message}
+    ok, message = test_openai_compat_connection(
+        str(normalized.get("api_key") or ""),
+        str(normalized.get("api_base_url") or ""),
+    )
+    if ok:
+        return {
+            "ok": True,
+            "message": "可调用",
+            "provider": provider,
+            "base_url": normalized.get("api_base_url"),
+            "model": normalized.get("api_model"),
+        }
+    return {
+        "ok": False,
+        "message": message or "当前默认配置不匹配这把 key",
+        "provider": provider,
+        "base_url": normalized.get("api_base_url"),
+        "model": normalized.get("api_model"),
+    }
 
 
 @app.get("/api/summary", response_model=SummaryResponse)

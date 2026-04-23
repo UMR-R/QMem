@@ -9,6 +9,7 @@ const STORAGE_KEYS = {
   apiModel: "api_model",
   backendUrl: "backend_url",
   keepUpdated: "keepUpdated",
+  keepUpdatedStrategy: "keepUpdatedStrategy",
   realtimeUpdate: "realtimeUpdate",
   lastSyncAt: "last_sync_at",
   savedSkills: "saved_skill_ids",
@@ -86,9 +87,11 @@ const state = {
   apiBaseUrl: "https://api.deepseek.com/v1",
   apiModel: "deepseek-chat",
   backendUrl: "http://127.0.0.1:8765",
-  keepUpdated: false,
+  keepUpdated: true,
+  syncEnabled: false,
   realtimeUpdate: false,
   lastSyncAt: null,
+  apiConnectionStatus: "",
   currentView: "home",
   currentSkillTab: "my",
   selectedSkillIds: new Set(),
@@ -312,8 +315,8 @@ function renderSync() {
   let statusText = "同步已暂停";
   let hintText = "点击开启后，持续记录你与大模型的对话";
 
-  if (state.keepUpdated) {
-    if (state.apiKeyConfigured && state.realtimeUpdate) {
+  if (state.syncEnabled) {
+    if (state.apiKeyConfigured && state.realtimeUpdate && state.keepUpdated) {
       statusText = "同步中";
       hintText = "正在记录对话，并自动提取记忆";
     } else if (state.apiKeyConfigured) {
@@ -327,9 +330,9 @@ function renderSync() {
 
   document.getElementById("syncStatusText").textContent = statusText;
   document.getElementById("syncHintText").textContent = hintText;
-  syncBtn.classList.toggle("is-active", state.keepUpdated);
-  syncBtn.setAttribute("aria-pressed", String(state.keepUpdated));
-  dot.classList.toggle("is-active", state.keepUpdated);
+  syncBtn.classList.toggle("is-active", state.syncEnabled);
+  syncBtn.setAttribute("aria-pressed", String(state.syncEnabled));
+  dot.classList.toggle("is-active", state.syncEnabled);
 }
 
 function renderStats(summary) {
@@ -346,19 +349,24 @@ function renderDirectory() {
 
 function renderSettings() {
   const apiKeyInput = document.getElementById("apiKeyInput");
+  const apiKeyStatus = document.getElementById("apiKeyStatus");
   apiKeyInput.value = state.apiKey;
   document.getElementById("backendUrlInput").value = state.backendUrl;
   document.getElementById("keepUpdatedToggle").checked = state.keepUpdated;
   document.getElementById("realtimeUpdateToggle").checked = state.realtimeUpdate;
   if (state.apiKey) {
-    document.getElementById("apiKeyStatus").textContent = `API Key: ${"●".repeat(8)}`;
     apiKeyInput.placeholder = "请输入 API Key";
   } else if (state.apiKeyConfigured) {
-    document.getElementById("apiKeyStatus").textContent = "API Key: 已在本地后端配置";
     apiKeyInput.placeholder = "如需更换，请重新输入新的 API Key";
   } else {
-    document.getElementById("apiKeyStatus").textContent = "API Key: 未配置";
     apiKeyInput.placeholder = "请输入 API Key";
+  }
+  if (!state.apiKey && !state.apiKeyConfigured) {
+    apiKeyStatus.textContent = "API 可调用：待配置";
+  } else if (state.apiConnectionStatus) {
+    apiKeyStatus.textContent = state.apiConnectionStatus;
+  } else {
+    apiKeyStatus.textContent = "API 可调用：待验证";
   }
 }
 
@@ -724,6 +732,26 @@ async function deleteSkill(skillId) {
   }
 }
 
+async function deleteSelectedSkills() {
+  const skillIds = Array.from(state.selectedSkillIds);
+  if (!skillIds.length) {
+    toast("请先勾选要删除的 Skill", true);
+    return;
+  }
+  try {
+    await backendApi().deleteSkills(state.backendUrl, { skill_ids: skillIds });
+    skillIds.forEach(id => {
+      state.selectedSkillIds.delete(id);
+      state.selectedRecommendedIds.delete(id);
+    });
+    const result = await backendApi().getMySkills(state.backendUrl);
+    renderSkillList(result.items || [], state.selectedSkillIds, { showDelete: false });
+    toast("已删除选中的 Skill");
+  } catch (err) {
+    toast(`删除失败：${err.message}`, true);
+  }
+}
+
 function renderSkillList(items, selectedSet, options = {}) {
   const { showDelete = false } = options;
   const listEl = document.getElementById("skillList");
@@ -810,8 +838,10 @@ function renderRecommendedSkillMeta(meta) {
   el.classList.remove("hidden");
 }
 function renderSkillActions() {
+  const deleteBtn = document.getElementById("deleteSkillBtn");
   const saveBtn = document.getElementById("saveRecommendedSkillBtn");
-  if (!saveBtn) return;
+  if (!saveBtn || !deleteBtn) return;
+  deleteBtn.classList.toggle("hidden", state.currentSkillTab !== "my");
   saveBtn.classList.toggle("hidden", state.currentSkillTab !== "recommended");
 }
 
@@ -927,7 +957,7 @@ async function saveSettings(showToast = true) {
     api_base_url: state.apiBaseUrl,
     api_model: state.apiModel,
     storage_path: state.storagePath,
-    keep_updated: state.keepUpdated,
+    keep_updated: state.syncEnabled,
     realtime_update: state.realtimeUpdate,
     backend_url: state.backendUrl,
   });
@@ -947,19 +977,29 @@ async function saveSettings(showToast = true) {
 async function testConnection() {
   state.backendUrl = document.getElementById("backendUrlInput").value.trim() || state.backendUrl;
   try {
+    const apiKey = document.getElementById("apiKeyInput").value.trim();
+    if (!apiKey) {
+      throw new Error("请先输入 API Key");
+    }
     const result = await backendApi().testConnection(state.backendUrl, {
       api_provider: state.apiProvider,
-      api_key: document.getElementById("apiKeyInput").value.trim(),
+      api_key: apiKey,
       api_base_url: state.apiBaseUrl,
       api_model: state.apiModel,
     });
-    if (!result.ok) throw new Error(result.message || "连接失败");
+    if (!result.ok) {
+      throw new Error(result.message || "当前默认配置不匹配这把 key");
+    }
+    state.apiConnectionStatus = "API 可调用";
     await saveSettings(false);
-    toast("连接成功，设置已保存");
+    renderSettings();
+    toast("API 可调用，设置已保存");
   } catch (err) {
     try {
       await backendApi().getHealth(state.backendUrl);
-      toast("本地后端在线，但 API Key 连接失败", true);
+      state.apiConnectionStatus = `API 不可调用：${err.message}`;
+      renderSettings();
+      toast(`本地后端在线，但 ${err.message}`, true);
     } catch {
       toast(`连接失败：${err.message}`, true);
     }
@@ -976,20 +1016,20 @@ async function broadcastCaptureToggle(enabled) {
 }
 
 async function toggleSync() {
-  state.keepUpdated = !state.keepUpdated;
+  state.syncEnabled = !state.syncEnabled;
   try {
-    const result = await backendApi().toggleSync(state.backendUrl, { enabled: state.keepUpdated });
+    const result = await backendApi().toggleSync(state.backendUrl, { enabled: state.syncEnabled });
     state.lastSyncAt = result.last_sync_at ?? state.lastSyncAt;
   } catch {
     // Fallback to local state if backend is offline.
   }
-  await storageSet({ [STORAGE_KEYS.keepUpdated]: state.keepUpdated });
-  await broadcastCaptureToggle(state.keepUpdated);
+  await storageSet({ [STORAGE_KEYS.keepUpdated]: state.syncEnabled });
+  await broadcastCaptureToggle(state.syncEnabled);
   renderSync();
   renderSettings();
   await refreshSummary();
-  if (state.keepUpdated) {
-    if (state.apiKeyConfigured && state.realtimeUpdate) {
+  if (state.syncEnabled) {
+    if (state.apiKeyConfigured && state.realtimeUpdate && state.keepUpdated) {
       toast("同步已开启，将自动增量更新记忆");
     } else if (state.apiKeyConfigured) {
       toast("记录已开启，可稍后在迁移页整理记忆");
@@ -1563,7 +1603,7 @@ async function clearCache() {
 }
 
 async function ensureSyncStartsPaused() {
-  state.keepUpdated = false;
+  state.syncEnabled = false;
   await storageSet({ [STORAGE_KEYS.keepUpdated]: false });
   try {
     await backendApi().toggleSync(state.backendUrl, { enabled: false });
@@ -1608,25 +1648,7 @@ function bindEvents() {
 
   document.getElementById("keepUpdatedToggle").addEventListener("change", async event => {
     state.keepUpdated = event.target.checked;
-    await storageSet({ [STORAGE_KEYS.keepUpdated]: state.keepUpdated });
-    try {
-      const backendSettings = await backendApi().saveSettings(state.backendUrl, {
-        api_provider: state.apiProvider,
-        api_key: state.apiKey,
-        api_base_url: state.apiBaseUrl,
-        api_model: state.apiModel,
-        storage_path: state.storagePath,
-        keep_updated: state.keepUpdated,
-        realtime_update: state.realtimeUpdate,
-        backend_url: state.backendUrl,
-      });
-      state.apiKeyConfigured = backendSettings.api_key_configured;
-      state.keepUpdated = backendSettings.keep_updated;
-      state.realtimeUpdate = backendSettings.realtime_update;
-    } catch {
-      // Keep local change when backend is offline.
-    }
-    await broadcastCaptureToggle(state.keepUpdated);
+    await storageSet({ [STORAGE_KEYS.keepUpdatedStrategy]: state.keepUpdated });
     renderSettings();
     renderSync();
     renderActionAvailability();
@@ -1643,12 +1665,12 @@ function bindEvents() {
         api_base_url: state.apiBaseUrl,
         api_model: state.apiModel,
         storage_path: state.storagePath,
-        keep_updated: state.keepUpdated,
+        keep_updated: state.syncEnabled,
         realtime_update: state.realtimeUpdate,
         backend_url: state.backendUrl,
       });
       state.apiKeyConfigured = backendSettings.api_key_configured;
-      state.keepUpdated = backendSettings.keep_updated;
+      state.syncEnabled = backendSettings.keep_updated;
       state.realtimeUpdate = backendSettings.realtime_update;
     } catch {
       // Keep local change when backend is offline.
@@ -1656,7 +1678,7 @@ function bindEvents() {
     renderSettings();
     renderSync();
     renderActionAvailability();
-    if (state.realtimeUpdate && state.apiKeyConfigured && state.keepUpdated) {
+    if (state.realtimeUpdate && state.apiKeyConfigured && state.syncEnabled && state.keepUpdated) {
       toast("同步记忆已开启。重新同步或刷新当前会话页后，将自动提取记忆。");
     } else if (state.realtimeUpdate && !state.apiKeyConfigured) {
       toast("同步记忆已开启，配置 API 后才会开始提取记忆。");
@@ -1702,6 +1724,7 @@ function bindEvents() {
   });
 
   document.getElementById("saveRecommendedSkillBtn").addEventListener("click", saveRecommendedSkills);
+  document.getElementById("deleteSkillBtn").addEventListener("click", deleteSelectedSkills);
   document.getElementById("exportSkillBtn").addEventListener("click", exportSkills);
   document.getElementById("injectSkillBtn").addEventListener("click", injectSkills);
 
@@ -1742,6 +1765,7 @@ async function init() {
     STORAGE_KEYS.apiModel,
     STORAGE_KEYS.backendUrl,
     STORAGE_KEYS.keepUpdated,
+    STORAGE_KEYS.keepUpdatedStrategy,
     STORAGE_KEYS.realtimeUpdate,
     STORAGE_KEYS.lastSyncAt,
     STORAGE_KEYS.savedSkills,
@@ -1753,7 +1777,8 @@ async function init() {
   state.apiBaseUrl = settings[STORAGE_KEYS.apiBaseUrl] || state.apiBaseUrl;
   state.apiModel = settings[STORAGE_KEYS.apiModel] || state.apiModel;
   state.backendUrl = settings[STORAGE_KEYS.backendUrl] || state.backendUrl;
-  state.keepUpdated = !!settings[STORAGE_KEYS.keepUpdated];
+  state.syncEnabled = !!settings[STORAGE_KEYS.keepUpdated];
+  state.keepUpdated = settings[STORAGE_KEYS.keepUpdatedStrategy] ?? true;
   state.realtimeUpdate = !!settings[STORAGE_KEYS.realtimeUpdate];
   state.lastSyncAt = settings[STORAGE_KEYS.lastSyncAt] || null;
   state.dirHandle = await loadSavedDir();
@@ -1763,7 +1788,7 @@ async function init() {
 
   try {
     const backendSettings = await backendApi().getSettings(state.backendUrl);
-    state.keepUpdated = backendSettings.keep_updated;
+    state.syncEnabled = backendSettings.keep_updated;
     state.realtimeUpdate = backendSettings.realtime_update;
     state.lastSyncAt = backendSettings.last_sync_at || state.lastSyncAt;
     state.storagePath = backendSettings.storage_path || state.storagePath;

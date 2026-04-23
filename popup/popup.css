@@ -437,8 +437,8 @@ button {
 .section-block h3,
 .settings-card h3 {
   margin: 0 0 8px;
-  font-size: var(--font-subtitle-size);
-  font-weight: var(--font-subtitle-weight);
+  font-size: 15px;
+  font-weight: 700;
   line-height: 1.4;
   color: var(--text);
 }
@@ -949,8 +949,8 @@ button {
 }
 
 .toggle-row strong {
-  font-size: var(--font-subtitle-size);
-  font-weight: var(--font-subtitle-weight);
+  font-size: 14px;
+  font-weight: 600;
   line-height: 1.4;
   color: var(--text);
 }
@@ -982,8 +982,8 @@ button {
 }
 
 .settings-action-row span {
-  font-size: var(--font-subtitle-size);
-  font-weight: var(--font-subtitle-weight);
+  font-size: 14px;
+  font-weight: 600;
   line-height: 1.4;
   color: inherit;
 }
