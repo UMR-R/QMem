@@ -234,8 +234,8 @@
         <div class="settings-card">
           <h3>数据管理</h3>
           <button id="importHistoryBtn" class="settings-action-row" type="button">
-            <span>导入历史</span>
-            <small>导入 ChatGPT / DeepSeek 历史记录</small>
+            <span>导入原始对话</span>
+            <small>支持 txt/md/json 的原始对话</small>
           </button>
           <button id="clearCacheBtn" class="settings-action-row danger-row" type="button">
             <span>清理缓存</span>
@@ -245,7 +245,7 @@
       </section>
 
       <div id="toast" class="toast hidden"></div>
-      <input id="importFileInput" type="file" accept=".json" hidden>
+      <input id="importFileInput" type="file" accept=".json,.jsonl,.md,.txt" hidden>
     </main>
   </div>
 

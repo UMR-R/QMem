@@ -11,8 +11,14 @@ extract stable user identity information. Output ONLY valid JSON matching this s
   "long_term_research_or_work_focus": []
 }
 Rules:
+- Profile should contain objective, stable background facts only.
 - Only include fields with clear evidence.
-- domain_background: list of domain areas (e.g. "machine learning", "product management").
+- role_identity should be things like "student", "teacher", "researcher", "engineer", "product manager".
+- domain_background: stable academic/professional domains only (e.g. "machine learning", "product management", "computer vision").
+- Do NOT put task names, prompt names, feature directions, or one-off themes into domain_background.
+- common_languages means language background / habitual working languages, NOT current answer preference.
+- long_term_research_or_work_focus should be used conservatively: only include truly long-horizon research/work directions with repeated evidence across conversations.
+- Do NOT include short-term discussion topics such as "memory migration app", "market analysis", "standardization", "cross-platform mapping", "auditability", "conflict handling", "post-migration validation" unless they are clearly established as long-term work programs.
 - Leave fields empty ("" or []) if no evidence.
 - Do NOT guess or hallucinate."""
 
@@ -29,10 +35,12 @@ extract the user's stable output and interaction preferences. Output ONLY valid 
   "response_granularity": ""
 }
 Rules:
+- Preferences should contain interaction and usage preferences, not identity facts.
 - style_preference: e.g. ["no bullet points", "use numbered lists", "terse responses"].
 - forbidden_expressions: phrases the user explicitly asked NOT to use.
-- language_preference: primary language (e.g. "English", "Chinese", "English+Chinese mix").
-- primary_task_types: what the user repeatedly asks the model to help with.
+- language_preference: the language the user prefers the assistant to use in responses (e.g. "English", "Chinese", "English+Chinese mix").
+- primary_task_types: repeated kinds of help the user asks for (e.g. paper writing, product design, debugging, information retrieval). These belong in preferences/usage patterns, not in profile.
+- Keep preferences small and stable. If something sounds like a temporary topic rather than a repeated preference or usage pattern, leave it out.
 - response_granularity: "concise" | "detailed" | "step-by-step" | "".
 - Only include what has clear evidence from the conversation."""
 
@@ -77,6 +85,10 @@ identify recurring workflow patterns the user applies frequently. Output ONLY va
 ]
 Rules:
 - Only include workflows that appear in multiple different conversations.
+- A workflow must be a reusable standardized procedure, not just a topic, domain, or troubleshooting area.
+- It should have a clear trigger, an ordered sequence of concrete steps, and usually some stable output/template/review rule.
+- If there is no standard step template, do NOT output it as a workflow.
+- Do NOT output vague labels like "food recommendation", "SSH troubleshooting", "shopping advice", or other topics that are not reusable procedures.
 - typical_steps: ordered list of steps the user follows.
 - reuse_frequency: "daily" | "weekly" | "per-project" | "ad-hoc".
 - Return [] if no recurring workflows found."""
@@ -154,7 +166,9 @@ Output ONLY valid JSON with this structure:
 
 Rules:
 - profile_updates: only fields that changed or are newly confirmed.
-- preference_updates: only newly expressed preferences.
+- preference_updates: only newly expressed preferences or repeated usage-pattern signals.
+- Put repeated "what the user often asks for" into preference_updates.add_primary_task_types, not profile_updates.
+- Do NOT move objective identity/background facts into preferences, and do NOT move response preferences into profile.
 - is_noise: true if the conversation has no memory-worthy content.
 - Be conservative: when in doubt, mark as noise or accumulate."""
 

@@ -15,6 +15,13 @@
   --radius-lg: 20px;
   --radius-md: 16px;
   --radius-sm: 12px;
+  --font-title-size: 18px;
+  --font-title-weight: 700;
+  --font-subtitle-size: 14px;
+  --font-subtitle-weight: 600;
+  --font-caption-size: 11px;
+  --font-caption-weight: 500;
+  --font-caption-line: 1.5;
 }
 
 * {
@@ -156,14 +163,18 @@ button {
 
 .brand-copy h1 {
   margin: 0;
-  font-size: 18px;
-  line-height: 1.05;
+  font-size: var(--font-title-size);
+  font-weight: var(--font-title-weight);
+  line-height: 1.1;
+  color: var(--text);
   letter-spacing: -0.03em;
 }
 
 .brand-copy p {
   margin: 4px 0 0;
-  font-size: 10px;
+  font-size: var(--font-caption-size);
+  font-weight: var(--font-caption-weight);
+  line-height: var(--font-caption-line);
   color: var(--muted);
   letter-spacing: 0;
 }
@@ -271,8 +282,9 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  font-size: 14px;
-  font-weight: 700;
+  font-size: var(--font-subtitle-size);
+  font-weight: var(--font-subtitle-weight);
+  line-height: 1.4;
   color: var(--primary);
 }
 
@@ -291,7 +303,9 @@ button {
 .sync-meta p {
   margin: 8px 0 0;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--font-caption-size);
+  font-weight: var(--font-caption-weight);
+  line-height: var(--font-caption-line);
 }
 
 .primary-strip-btn,
@@ -398,7 +412,10 @@ button {
 .view-head h2 {
   margin: 0;
   text-align: center;
-  font-size: 18px;
+  font-size: var(--font-title-size);
+  font-weight: var(--font-title-weight);
+  line-height: 1.1;
+  color: var(--text);
   letter-spacing: -0.02em;
 }
 
@@ -420,7 +437,10 @@ button {
 .section-block h3,
 .settings-card h3 {
   margin: 0 0 8px;
-  font-size: 16px;
+  font-size: var(--font-subtitle-size);
+  font-weight: var(--font-subtitle-weight);
+  line-height: 1.4;
+  color: var(--text);
 }
 
 .section-block p,
@@ -428,8 +448,9 @@ button {
 .settings-note {
   margin: 0;
   color: var(--muted);
-  line-height: 1.5;
-  font-size: 12px;
+  line-height: var(--font-caption-line);
+  font-size: var(--font-caption-size);
+  font-weight: var(--font-caption-weight);
 }
 
 .mid-primary-btn {
@@ -475,13 +496,18 @@ button {
 
 .organize-copy strong {
   display: block;
-  font-size: 13px;
+  font-size: var(--font-subtitle-size);
+  font-weight: var(--font-subtitle-weight);
+  line-height: 1.4;
+  color: var(--text);
 }
 
 .organize-copy p {
   margin: 2px 0 0;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--font-caption-size);
+  font-weight: var(--font-caption-weight);
+  line-height: var(--font-caption-line);
 }
 
 .mid-secondary-btn {
@@ -740,8 +766,9 @@ button {
   margin: -4px 0 10px;
   padding: 0 2px;
   color: var(--muted);
-  font-size: 11px;
-  line-height: 1.45;
+  font-size: var(--font-caption-size);
+  font-weight: var(--font-caption-weight);
+  line-height: var(--font-caption-line);
 }
 
 .skill-item {
@@ -764,10 +791,12 @@ button {
   font-size: 20px;
 }
 
-.skill-copy h4 {
+ .skill-copy h4 {
   margin: 0 0 8px;
-  font-size: 15px;
-  line-height: 1.3;
+  font-size: var(--font-subtitle-size);
+  font-weight: var(--font-subtitle-weight);
+  line-height: 1.4;
+  color: var(--text);
   display: -webkit-box;
   -webkit-line-clamp: 1;
   -webkit-box-orient: vertical;
@@ -777,16 +806,17 @@ button {
 .skill-meta {
   margin: -2px 0 6px;
   color: var(--primary);
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1.35;
+  font-size: var(--font-caption-size);
+  font-weight: var(--font-subtitle-weight);
+  line-height: 1.4;
 }
 
 .skill-copy p {
   margin: 0;
   color: var(--muted);
-  line-height: 1.45;
-  font-size: 12px;
+  line-height: var(--font-caption-line);
+  font-size: var(--font-caption-size);
+  font-weight: var(--font-caption-weight);
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -852,7 +882,9 @@ button {
 .field-label {
   display: block;
   margin: 6px 0 5px;
-  font-size: 12px;
+  font-size: var(--font-caption-size);
+  font-weight: var(--font-caption-weight);
+  line-height: var(--font-caption-line);
   color: var(--muted);
 }
 
@@ -913,13 +945,18 @@ button {
 }
 
 .toggle-row strong {
-  font-size: 14px;
+  font-size: var(--font-subtitle-size);
+  font-weight: var(--font-subtitle-weight);
+  line-height: 1.4;
+  color: var(--text);
 }
 
 .toggle-row em {
   color: var(--muted);
   font-style: normal;
-  font-size: 11px;
+  font-size: var(--font-caption-size);
+  font-weight: var(--font-caption-weight);
+  line-height: var(--font-caption-line);
 }
 
 .toggle-input {
@@ -946,7 +983,9 @@ button {
 
 .settings-action-row small {
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--font-caption-size);
+  font-weight: var(--font-caption-weight);
+  line-height: var(--font-caption-line);
 }
 
 .danger-row {
@@ -955,7 +994,7 @@ button {
 
 .settings-note {
   margin-top: 14px;
-  font-size: 12px;
+  font-size: var(--font-caption-size);
 }
 
 .toast {

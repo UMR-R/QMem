@@ -486,7 +486,7 @@ def edit(section: str, project_name: Optional[str], wiki: Optional[str]) -> None
     editor = os.environ.get("EDITOR", "vi")
 
     if section == "profile":
-        md_path = l2.wiki_dir / "profile.md"
+        md_path = l2._profile_md
         if not md_path.exists():
             console.print("[yellow]No profile yet. Run 'mwiki scan' first.[/yellow]")
             return
@@ -494,7 +494,7 @@ def edit(section: str, project_name: Optional[str], wiki: Optional[str]) -> None
         console.print("[green]Profile markdown updated.[/green] (JSON will sync on next operation)")
 
     elif section == "preferences":
-        md_path = l2.wiki_dir / "preferences.md"
+        md_path = l2._preferences_md
         if not md_path.exists():
             console.print("[yellow]No preferences yet. Run 'mwiki scan' first.[/yellow]")
             return
@@ -512,7 +512,7 @@ def edit(section: str, project_name: Optional[str], wiki: Optional[str]) -> None
                 console.print(f"  - {p.project_name}")
             return
         safe = project_name.lower().replace(" ", "_")[:64]
-        md_path = l2.wiki_dir / "projects" / f"{safe}.md"
+        md_path = l2.wiki_dir / "projects" / safe / "project.md"
         if not md_path.exists():
             console.print(f"[yellow]Project '{project_name}' not found.[/yellow]")
             return
@@ -540,25 +540,25 @@ def delete(section: str, name: Optional[str], wiki: Optional[str], yes: bool) ->
         return click.confirm(msg)
 
     if section == "profile":
-        path = l2.wiki_dir / "profile.json"
+        path = l2._profile_json
         if not path.exists():
             console.print("[yellow]No profile to delete.[/yellow]")
             return
         if confirm("Delete profile permanently?"):
             path.unlink()
-            md = l2.wiki_dir / "profile.md"
+            md = l2._profile_md
             if md.exists():
                 md.unlink()
             console.print("[green]Profile deleted.[/green]")
 
     elif section == "preferences":
-        path = l2.wiki_dir / "preferences.json"
+        path = l2._preferences_json
         if not path.exists():
             console.print("[yellow]No preferences to delete.[/yellow]")
             return
         if confirm("Delete preferences permanently?"):
             path.unlink()
-            md = l2.wiki_dir / "preferences.md"
+            md = l2._preferences_md
             if md.exists():
                 md.unlink()
             console.print("[green]Preferences deleted.[/green]")
@@ -568,15 +568,18 @@ def delete(section: str, name: Optional[str], wiki: Optional[str], yes: bool) ->
             console.print("[red]--name required for project deletion.[/red]")
             return
         safe = name.lower().replace(" ", "_")[:64]
-        json_path = l2.wiki_dir / "projects" / f"{safe}.json"
+        project_dir = l2.wiki_dir / "projects" / safe
+        json_path = project_dir / "project.json"
         if not json_path.exists():
             console.print(f"[yellow]Project '{name}' not found.[/yellow]")
             return
         if confirm(f"Delete project '{name}' permanently?"):
             json_path.unlink()
-            md = json_path.with_suffix(".md")
+            md = project_dir / "project.md"
             if md.exists():
                 md.unlink()
+            if project_dir.exists() and not any(project_dir.iterdir()):
+                project_dir.rmdir()
             console.print(f"[green]Project '{name}' deleted.[/green]")
 
     elif section == "episode":

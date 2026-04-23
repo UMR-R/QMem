@@ -1634,10 +1634,13 @@ def _looks_like_stable_project(project: ProjectMemory) -> bool:
     signal_count = _project_signal_count(project)
     name = project.project_name.strip().lower()
 
-    if episode_count < 2:
+    if signal_count < 2:
         return False
 
-    if signal_count < 2:
+    # Allow a single strong episode to count as a project when it already
+    # contains concrete project structure such as goals, stage, decisions,
+    # questions, constraints, or next actions.
+    if episode_count < 1:
         return False
 
     # Filter out topic-like or exploratory labels that are discussed repeatedly
@@ -1656,7 +1659,7 @@ def _looks_like_stable_project(project: ProjectMemory) -> bool:
         "exploration",
     }
     token_hits = sum(1 for token in exploratory_tokens if token in name)
-    if episode_count < 3 and token_hits >= 2:
+    if episode_count < 2 and token_hits >= 2 and signal_count < 3:
         return False
 
     return True

@@ -675,10 +675,10 @@ async function deleteSkill(skillId) {
     if (state.currentSkillTab === "recommended") {
       const result = await backendApi().getRecommendedSkills(state.backendUrl);
       renderRecommendedSkillMeta(result.meta || null);
-      renderSkillList(result.items || [], state.selectedRecommendedIds, { showDelete: true });
+      renderSkillList(result.items || [], state.selectedRecommendedIds, { showDelete: false });
     } else {
       const result = await backendApi().getMySkills(state.backendUrl);
-      renderSkillList(result.items || [], state.selectedSkillIds, { showDelete: true });
+      renderSkillList(result.items || [], state.selectedSkillIds, { showDelete: false });
     }
     toast("Skill 已从列表中移除");
   } catch (err) {
@@ -690,7 +690,7 @@ function renderSkillList(items, selectedSet, options = {}) {
   const { showDelete = false } = options;
   const listEl = document.getElementById("skillList");
   listEl.innerHTML = "";
-  const safeItems = items.length === 0 && showDelete ? [buildEmptySkillCard()] : items;
+  const safeItems = items.length === 0 && state.currentSkillTab === "my" ? [buildEmptySkillCard()] : items;
 
   safeItems.forEach(item => {
     const wrapper = document.createElement("div");
@@ -804,7 +804,7 @@ async function refreshSummary() {
 
     if (state.currentSkillTab === "my") {
       const skillResponse = await backendApi().getMySkills(state.backendUrl);
-      renderSkillList(skillResponse.items || [], state.selectedSkillIds, { showDelete: true });
+      renderSkillList(skillResponse.items || [], state.selectedSkillIds, { showDelete: false });
     }
     return;
   } catch {
@@ -839,7 +839,7 @@ async function refreshSummary() {
 
   renderStats(summary);
   const mySkills = deriveMySkills(allData, pnData);
-  if (state.currentSkillTab === "my") renderSkillList(mySkills, state.selectedSkillIds, { showDelete: true });
+  if (state.currentSkillTab === "my") renderSkillList(mySkills, state.selectedSkillIds, { showDelete: false });
 }
 
 async function saveSettings(showToast = true) {
@@ -1368,11 +1368,11 @@ function bindEvents() {
     setView("skill");
     try {
       const result = await backendApi().getMySkills(state.backendUrl);
-      renderSkillList(result.items || [], state.selectedSkillIds, { showDelete: true });
+      renderSkillList(result.items || [], state.selectedSkillIds, { showDelete: false });
     } catch {
       const allData = await storageGet(null);
       const pnData = allData["mw:persistent_nodes"] ?? { nodes: {} };
-      renderSkillList(deriveMySkills(allData, pnData), state.selectedSkillIds, { showDelete: true });
+      renderSkillList(deriveMySkills(allData, pnData), state.selectedSkillIds, { showDelete: false });
     }
   });
 
@@ -1460,11 +1460,11 @@ function bindEvents() {
     renderRecommendedSkillMeta(null);
     try {
       const result = await backendApi().getMySkills(state.backendUrl);
-      renderSkillList(result.items || [], state.selectedSkillIds, { showDelete: true });
+      renderSkillList(result.items || [], state.selectedSkillIds, { showDelete: false });
     } catch {
       const allData = await storageGet(null);
       const pnData = allData["mw:persistent_nodes"] ?? { nodes: {} };
-      renderSkillList(deriveMySkills(allData, pnData), state.selectedSkillIds, { showDelete: true });
+      renderSkillList(deriveMySkills(allData, pnData), state.selectedSkillIds, { showDelete: false });
     }
   });
 
@@ -1475,11 +1475,11 @@ function bindEvents() {
     backendApi().getRecommendedSkills(state.backendUrl)
       .then(result => {
         renderRecommendedSkillMeta(result.meta || null);
-        renderSkillList(result.items || [], state.selectedRecommendedIds, { showDelete: true });
+        renderSkillList(result.items || [], state.selectedRecommendedIds, { showDelete: false });
       })
       .catch(() => {
         renderRecommendedSkillMeta(null);
-        renderSkillList(recommendedSkills, state.selectedRecommendedIds, { showDelete: true });
+        renderSkillList(recommendedSkills, state.selectedRecommendedIds, { showDelete: false });
       });
   });
 
@@ -1502,7 +1502,7 @@ function bindEvents() {
       if (job?.status === "failed") throw new Error(job.error || "导入失败");
       const imported = job?.result?.imported_conversations;
       await refreshSummary();
-      toast(imported ? `历史导入完成：${imported} 条对话` : `历史导入任务已创建：${result.job_id}`);
+      toast(imported ? `原始对话导入完成：${imported} 条对话` : `原始对话导入任务已创建：${result.job_id}`);
     } catch (err) {
       toast(`导入失败：${err.message}`, true);
     } finally {
@@ -1558,11 +1558,11 @@ async function init() {
 
   try {
     const result = await backendApi().getMySkills(state.backendUrl);
-    renderSkillList(result.items || [], state.selectedSkillIds, { showDelete: true });
+    renderSkillList(result.items || [], state.selectedSkillIds, { showDelete: false });
   } catch {
     const allData = await storageGet(null);
     const pnData = allData["mw:persistent_nodes"] ?? { nodes: {} };
-    renderSkillList(deriveMySkills(allData, pnData), state.selectedSkillIds, { showDelete: true });
+    renderSkillList(deriveMySkills(allData, pnData), state.selectedSkillIds, { showDelete: false });
   }
 }
 
