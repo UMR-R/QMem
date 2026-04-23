@@ -156,9 +156,15 @@ class MemoryBuilder:
         pref_data = self.llm.extract_json(_PREFERENCE_SYSTEM, pref_context)
         prefs = self._build_preferences(pref_data, l1_text, earliest_ts,
                                         pref_ep_ids, ep_by_id)
+        if profile.primary_task_types:
+            prefs.primary_task_types = list(
+                dict.fromkeys(prefs.primary_task_types + profile.primary_task_types)
+            )
+            profile.primary_task_types = []
+            self.wiki.save_profile(profile)
         self.wiki.save_preferences(prefs)
         results["preferences"] = bool(
-            prefs.style_preference or prefs.language_preference or prefs.forbidden_expressions
+            prefs.style_preference or prefs.language_preference or prefs.forbidden_expressions or prefs.primary_task_types
         )
 
         # --- Extract projects ---

@@ -23,6 +23,29 @@ class L1Signal(BaseModel):
             return self.raw_text
         return json.dumps(self.raw_json, ensure_ascii=False, indent=2)
 
+    def is_meaningful(self) -> bool:
+        text = self.text().strip()
+        normalized = text.lower()
+        if self.signal_type == "generic":
+            return False
+        if not text or normalized in {"{}", "[]", "null", "\"\""}:
+            return False
+        if self.signal_type == "saved_memory" and normalized in {"{}", "[]"}:
+            return False
+        if self.platform == "unknown" and self.signal_type == "summary" and normalized in {
+            "chat history",
+            "conversation history",
+            "history",
+        }:
+            return False
+        if self.platform == "unknown" and self.signal_type == "saved_memory" and normalized in {
+            "{}",
+            "[]",
+            "null",
+        }:
+            return False
+        return True
+
 
 class L1SignalLayer:
     """
@@ -161,6 +184,8 @@ class L1SignalLayer:
         """All signal text joined for LLM consumption."""
         parts = []
         for sig in self.signals:
+            if not sig.is_meaningful():
+                continue
             parts.append(f"[{sig.signal_type.upper()} from {sig.platform}]\n{sig.text()}")
         return "\n\n---\n\n".join(parts)
 

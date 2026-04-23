@@ -8,13 +8,11 @@ extract stable user identity information. Output ONLY valid JSON matching this s
   "domain_background": [],
   "organization_or_affiliation": "",
   "common_languages": [],
-  "primary_task_types": [],
   "long_term_research_or_work_focus": []
 }
 Rules:
 - Only include fields with clear evidence.
 - domain_background: list of domain areas (e.g. "machine learning", "product management").
-- primary_task_types: what the user repeatedly asks the model to help with.
 - Leave fields empty ("" or []) if no evidence.
 - Do NOT guess or hallucinate."""
 
@@ -26,6 +24,7 @@ extract the user's stable output and interaction preferences. Output ONLY valid 
   "formatting_constraints": [],
   "forbidden_expressions": [],
   "language_preference": "",
+  "primary_task_types": [],
   "revision_preference": [],
   "response_granularity": ""
 }
@@ -33,6 +32,7 @@ Rules:
 - style_preference: e.g. ["no bullet points", "use numbered lists", "terse responses"].
 - forbidden_expressions: phrases the user explicitly asked NOT to use.
 - language_preference: primary language (e.g. "English", "Chinese", "English+Chinese mix").
+- primary_task_types: what the user repeatedly asks the model to help with.
 - response_granularity: "concise" | "detailed" | "step-by-step" | "".
 - Only include what has clear evidence from the conversation."""
 
@@ -121,6 +121,7 @@ Output ONLY valid JSON with this structure:
     "add_style": [],
     "add_forbidden": [],
     "update_language": "",
+    "add_primary_task_types": [],
     "update_granularity": ""
   },
   "project_updates": [

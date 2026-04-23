@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>记忆迁移</title>
+  <title>迁忆</title>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
@@ -11,11 +11,11 @@
     <header class="app-header">
       <div class="brand-block">
         <div class="brand-icon" aria-hidden="true">
-          <span></span>
-          <span></span>
+          <span class="brand-core"></span>
+          <span class="brand-arrow"></span>
         </div>
         <div class="brand-copy">
-          <h1>记忆迁移</h1>
+          <h1>迁忆</h1>
           <p>让你的对话记忆，随你而行</p>
         </div>
       </div>
@@ -102,23 +102,41 @@
 
         <div class="section-block">
           <h3>整理记忆</h3>
-          <p>归并、去重并生成可迁移的记忆包</p>
+          <div id="organizeStatusCard" class="organize-status-card hidden">
+            <div class="organize-ring" aria-hidden="true"></div>
+            <div class="organize-copy">
+              <strong id="organizeStatusText">正在整理记忆...</strong>
+              <p id="organizeStatusHint">准备开始</p>
+            </div>
+          </div>
           <div class="stacked-actions">
-            <button id="organizeBtn" class="mid-primary-btn" type="button">
-              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path d="M12 3l8 4.5-8 4.5-8-4.5L12 3z"></path>
-                <path d="M4 12l8 4.5 8-4.5"></path>
-                <path d="M4 16.5L12 21l8-4.5"></path>
-              </svg>
-              <span>整理</span>
-            </button>
-            <button id="addCurrentConversationBtn" class="mid-secondary-btn" type="button">
-              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path d="M12 6v12"></path>
-                <path d="M6 12h12"></path>
-              </svg>
-              <span>加入当前对话</span>
-            </button>
+            <div id="organizeBtnWrap" class="action-tooltip-wrap" title="">
+              <button id="organizeBtn" class="mid-primary-btn" type="button">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M12 3l8 4.5-8 4.5-8-4.5L12 3z"></path>
+                  <path d="M4 12l8 4.5 8-4.5"></path>
+                  <path d="M4 16.5L12 21l8-4.5"></path>
+                </svg>
+                <span>整理记忆</span>
+              </button>
+            </div>
+            <p id="organizeRequirementHint" class="action-requirement-hint hidden">请先在设置页配置 DeepSeek API Key</p>
+            <div class="paired-actions">
+              <button id="addCurrentConversationBtn" class="mid-secondary-btn" type="button">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M12 6v12"></path>
+                  <path d="M6 12h12"></path>
+                </svg>
+                <span>加入当前对话</span>
+              </button>
+              <button id="addPlatformMemoryBtn" class="mid-secondary-btn" type="button">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M12 5v14"></path>
+                  <path d="M5 12h14"></path>
+                </svg>
+                <span>加入平台记忆</span>
+              </button>
+            </div>
           </div>
         </div>
 
@@ -126,33 +144,7 @@
 
         <div class="section-block">
           <h3>勾选记忆内容</h3>
-          <div class="selection-list">
-            <label class="selection-row">
-              <input type="checkbox" data-category="profile" checked>
-              <span>用户画像</span>
-              <em id="countProfile">0</em>
-            </label>
-            <label class="selection-row">
-              <input type="checkbox" data-category="preferences" checked>
-              <span>偏好设置</span>
-              <em id="countPreferences">0</em>
-            </label>
-            <label class="selection-row">
-              <input type="checkbox" data-category="projects">
-              <span>项目记忆</span>
-              <em id="countProjects">0</em>
-            </label>
-            <label class="selection-row">
-              <input type="checkbox" data-category="workflows" checked>
-              <span>工作流 / SOP</span>
-              <em id="countWorkflows">0</em>
-            </label>
-            <label class="selection-row">
-              <input type="checkbox" data-category="persistent">
-              <span>Persistent Memory</span>
-              <em id="countPersistent">0</em>
-            </label>
-          </div>
+          <div id="selectionList" class="selection-list"></div>
         </div>
 
         <div class="bottom-actions">
@@ -177,10 +169,12 @@
           <button id="recommendedSkillTab" class="skill-tab" type="button">为你推荐</button>
         </div>
 
+        <div id="recommendedSkillMeta" class="recommended-skill-meta hidden"></div>
+
         <div id="skillList" class="skill-list"></div>
 
         <div class="bottom-actions">
-          <button id="saveSkillBtn" class="ghost-action-btn" type="button">保存</button>
+          <button id="exportSkillBtn" class="ghost-action-btn" type="button">导出</button>
           <button id="injectSkillBtn" class="solid-action-btn" type="button">注入当前会话</button>
         </div>
       </section>
@@ -198,15 +192,15 @@
 
         <div class="settings-card">
           <h3>API 配置</h3>
-          <label class="field-label" for="apiKeyInput">DeepSeek API Key</label>
-          <div class="field-row">
-            <input id="apiKeyInput" class="text-input" type="password" placeholder="请输入 DeepSeek API Key" autocomplete="off">
-            <button id="testConnectionBtn" class="outline-mini-btn" type="button">测试连接</button>
-          </div>
           <label class="field-label" for="backendUrlInput">本地后端地址</label>
           <div class="field-row">
             <input id="backendUrlInput" class="text-input" type="text" placeholder="http://127.0.0.1:8765">
             <button id="saveSettingsBtn" class="outline-mini-btn" type="button">保存</button>
+          </div>
+          <label class="field-label" for="apiKeyInput">DeepSeek API Key</label>
+          <div class="field-row">
+            <input id="apiKeyInput" class="text-input" type="password" placeholder="请输入 DeepSeek API Key" autocomplete="off">
+            <button id="testConnectionBtn" class="outline-mini-btn" type="button">测试连接</button>
           </div>
           <p id="apiKeyStatus" class="helper-text">API Key: 未配置</p>
         </div>
@@ -223,15 +217,15 @@
           <h3>同步策略</h3>
           <label class="toggle-row">
             <span>
-              <strong>保持更新</strong>
-              <em>同步时保留本地未同步记录</em>
+              <strong>同步对话</strong>
+              <em>持续记录对话到本地</em>
             </span>
             <input id="keepUpdatedToggle" class="toggle-input" type="checkbox">
           </label>
           <label class="toggle-row">
             <span>
-              <strong>实时更新</strong>
-              <em>新对话到来后自动更新记忆</em>
+              <strong>同步记忆</strong>
+              <em>新对话到来后自动提取记忆</em>
             </span>
             <input id="realtimeUpdateToggle" class="toggle-input" type="checkbox">
           </label>
@@ -248,8 +242,6 @@
             <small>清理本地临时缓存，保留主记忆文件</small>
           </button>
         </div>
-
-        <p class="settings-note">高级同步选项先放在这里，首页只保留一个同步入口。</p>
       </section>
 
       <div id="toast" class="toast hidden"></div>

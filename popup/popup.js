@@ -11,6 +11,70 @@ const STORAGE_KEYS = {
   savedSkills: "saved_skill_ids",
 };
 
+const recommendedSkills = [
+  {
+    id: "rec:pdf_reader",
+    icon: "PDF",
+    title: "从 PDF 提取结构化要点",
+    description: "触发：需要快速读懂 PDF 或论文时 · 目标：提取结构、结论与证据 · 步骤：识别结构 / 提取重点 / 输出摘要",
+    trigger: "需要快速读懂 PDF 或论文时",
+    goal: "提取结构、结论与关键证据",
+    steps: ["识别文档结构", "提取关键结论与数据点", "输出结构化摘要"],
+    output_format: "摘要 / 要点清单",
+  },
+  {
+    id: "rec:paper_summary",
+    icon: "研",
+    title: "按问题-方法-结果总结论文",
+    description: "触发：需要沉淀论文内容时 · 目标：按问题、方法、结果、局限整理 · 步骤：定位问题 / 提取方法 / 总结结果与局限",
+    trigger: "需要沉淀论文内容时",
+    goal: "按问题、方法、结果、局限整理论文",
+    steps: ["定位研究问题", "提取方法与实验设计", "总结结果、贡献与局限"],
+    output_format: "结构化文献摘要",
+  },
+  {
+    id: "rec:project_plan",
+    icon: "计",
+    title: "把目标拆成项目计划",
+    description: "触发：需要把模糊目标变成计划时 · 目标：拆解任务和优先级 · 步骤：澄清目标 / 排序任务 / 输出行动计划",
+    trigger: "需要把模糊目标变成项目计划时",
+    goal: "拆解任务、确定优先级并输出行动计划",
+    steps: ["澄清目标和边界", "拆解任务并排序优先级", "输出阶段计划与下一步"],
+    output_format: "行动计划 / Roadmap",
+  },
+];
+
+const SUPPORTED_HOSTS = new Set([
+  "chatgpt.com",
+  "chat.openai.com",
+  "gemini.google.com",
+  "chat.deepseek.com",
+  "www.doubao.com",
+]);
+
+const UI_LOCALE = (
+  chrome.i18n?.getUILanguage?.()
+  || navigator.languages?.[0]
+  || navigator.language
+  || "zh-CN"
+).toLowerCase();
+const IS_ZH_UI = UI_LOCALE.startsWith("zh");
+const CATEGORY_LABELS = IS_ZH_UI
+  ? {
+      profile: "用户画像",
+      preferences: "偏好设置",
+      projects: "项目记忆",
+      workflows: "工作流 / SOP",
+      persistent: "兴趣发现",
+    }
+  : {
+      profile: "Profile",
+      preferences: "Preferences",
+      projects: "Projects",
+      workflows: "Workflows / SOP",
+      persistent: "Topics & Habits",
+    };
+
 const state = {
   dirHandle: null,
   apiKey: "",
@@ -23,6 +87,9 @@ const state = {
   currentSkillTab: "my",
   selectedSkillIds: new Set(),
   selectedRecommendedIds: new Set(),
+  selectedMemoryIds: new Set(),
+  expandedCategories: new Set(),
+  memoryItemsByCategory: {},
   storagePath: "",
   categories: {
     profile: 0,
@@ -31,28 +98,8 @@ const state = {
     workflows: 0,
     persistent: 0,
   },
+  categoryLabels: { ...CATEGORY_LABELS },
 };
-
-const recommendedSkills = [
-  {
-    id: "rec:pdf_reader",
-    icon: "PDF",
-    title: "读 PDF",
-    description: "快速提取 PDF 的结构、要点与关键结论。",
-  },
-  {
-    id: "rec:paper_summary",
-    icon: "研",
-    title: "读文献总结",
-    description: "按问题、方法、结果、局限结构化整理论文。",
-  },
-  {
-    id: "rec:project_plan",
-    icon: "计",
-    title: "项目规划",
-    description: "拆解任务、设定优先级并生成执行路径。",
-  },
-];
 
 function openDB() {
   return new Promise((resolve, reject) => {
@@ -117,6 +164,46 @@ function tabsSendMessage(tabId, message) {
       else resolve(res);
     });
   });
+}
+
+function isSupportedTab(tab) {
+  try {
+    const url = new URL(tab?.url || "");
+    return SUPPORTED_HOSTS.has(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
+function isMissingReceiverError(error) {
+  const message = String(error?.message || "");
+  return (
+    message.includes("Receiving end does not exist") ||
+    message.includes("Could not establish connection") ||
+    message.includes("message port closed")
+  );
+}
+
+async function copyTextToClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+    let ok = false;
+    try {
+      ok = document.execCommand("copy");
+    } finally {
+      textarea.remove();
+    }
+    return ok;
+  }
 }
 
 async function loadSavedDir() {
@@ -219,7 +306,7 @@ function renderSync() {
   if (state.keepUpdated) {
     if (state.apiKeyConfigured && state.realtimeUpdate) {
       statusText = "同步中";
-      hintText = "正在记录对话，并自动增量更新记忆";
+      hintText = "正在记录对话，并自动提取记忆";
     } else if (state.apiKeyConfigured) {
       statusText = "记录中";
       hintText = "正在记录原始对话，可稍后在迁移页整理记忆";
@@ -249,21 +336,233 @@ function renderDirectory() {
 }
 
 function renderSettings() {
-  document.getElementById("apiKeyInput").value = state.apiKey;
+  const apiKeyInput = document.getElementById("apiKeyInput");
+  apiKeyInput.value = state.apiKey;
   document.getElementById("backendUrlInput").value = state.backendUrl;
   document.getElementById("keepUpdatedToggle").checked = state.keepUpdated;
   document.getElementById("realtimeUpdateToggle").checked = state.realtimeUpdate;
-  document.getElementById("apiKeyStatus").textContent = state.apiKey
-    ? `API Key: ${"●".repeat(8)}`
-    : "API Key: 未配置";
+  if (state.apiKey) {
+    document.getElementById("apiKeyStatus").textContent = `API Key: ${"●".repeat(8)}`;
+    apiKeyInput.placeholder = "请输入 DeepSeek API Key";
+  } else if (state.apiKeyConfigured) {
+    document.getElementById("apiKeyStatus").textContent = "API Key: 已在本地后端配置";
+    apiKeyInput.placeholder = "如需更换，请重新输入新的 DeepSeek API Key";
+  } else {
+    document.getElementById("apiKeyStatus").textContent = "API Key: 未配置";
+    apiKeyInput.placeholder = "请输入 DeepSeek API Key";
+  }
 }
 
-function renderCategoryCounts() {
-  document.getElementById("countProfile").textContent = state.categories.profile;
-  document.getElementById("countPreferences").textContent = state.categories.preferences;
-  document.getElementById("countProjects").textContent = state.categories.projects;
-  document.getElementById("countWorkflows").textContent = state.categories.workflows;
-  document.getElementById("countPersistent").textContent = state.categories.persistent;
+function renderActionAvailability() {
+  const organizeBtn = document.getElementById("organizeBtn");
+  const organizeBtnWrap = document.getElementById("organizeBtnWrap");
+  const organizeHint = document.getElementById("organizeRequirementHint");
+  if (!organizeBtn) return;
+  const enabled = !!state.apiKeyConfigured;
+  organizeBtn.disabled = !enabled;
+  organizeBtn.style.opacity = enabled ? "" : "0.5";
+  organizeBtn.title = "";
+  if (organizeBtnWrap) {
+    organizeBtnWrap.title = enabled ? "" : "请先添加 API 后使用";
+  }
+  if (organizeHint) {
+    organizeHint.classList.toggle("hidden", enabled);
+  }
+}
+
+function truncateText(text, maxLength = 56) {
+  const value = String(text || "").replace(/\s+/g, " ").trim();
+  if (!value) return "";
+  if (value.length <= maxLength) return value;
+  return `${value.slice(0, Math.max(0, maxLength - 1)).trim()}…`;
+}
+
+function localizeMemoryDescription(categoryId, description) {
+  const raw = String(description || "").trim();
+  if (!raw) return "";
+  if (categoryId === "persistent") {
+    return "";
+  }
+  return raw;
+}
+
+function buildSelectionPreview(categoryId, item) {
+  const displayTitle = item?.display_title || item?.title || "";
+  const displayDescription = item?.display_description ?? item?.description ?? "";
+  const title = truncateText(displayTitle, categoryId === "persistent" ? 44 : 30);
+  const description = truncateText(
+    localizeMemoryDescription(categoryId, displayDescription),
+    categoryId === "persistent" ? 20 : 42
+  );
+  return { title, description };
+}
+
+function setOrganizeStatus(active, text = "正在整理记忆...", hint = "准备开始") {
+  const card = document.getElementById("organizeStatusCard");
+  card.classList.toggle("hidden", !active);
+  document.getElementById("organizeStatusText").textContent = text;
+  document.getElementById("organizeStatusHint").textContent = hint;
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function ensureCategoryItems(category) {
+  if (state.memoryItemsByCategory[category]) return state.memoryItemsByCategory[category];
+  try {
+    const locale = IS_ZH_UI ? "zh-CN" : "en-US";
+    const result = await backendApi().getMemoryItems(state.backendUrl, category, locale);
+    state.memoryItemsByCategory[category] = result.items || [];
+  } catch {
+    state.memoryItemsByCategory[category] = [];
+  }
+  return state.memoryItemsByCategory[category];
+}
+
+async function toggleCategoryExpanded(category) {
+  if (state.expandedCategories.has(category)) {
+    state.expandedCategories.delete(category);
+    renderSelectionList();
+    return;
+  }
+  state.expandedCategories.add(category);
+  await ensureCategoryItems(category);
+  renderSelectionList();
+}
+
+async function toggleCategorySelection(category, checked) {
+  const items = await ensureCategoryItems(category);
+  if (items.length === 0) {
+    state.selectedMemoryIds[checked ? "add" : "delete"](`${category}:default`);
+  } else {
+    items.forEach(item => state.selectedMemoryIds[checked ? "add" : "delete"](item.id));
+  }
+  renderSelectionList();
+}
+
+function renderSelectionList() {
+  const listEl = document.getElementById("selectionList");
+  if (!listEl) return;
+
+  const categories = [
+    { id: "profile", label: state.categoryLabels.profile || CATEGORY_LABELS.profile, count: state.categories.profile },
+    { id: "preferences", label: state.categoryLabels.preferences || CATEGORY_LABELS.preferences, count: state.categories.preferences },
+    { id: "projects", label: state.categoryLabels.projects || CATEGORY_LABELS.projects, count: state.categories.projects },
+    { id: "workflows", label: state.categoryLabels.workflows || CATEGORY_LABELS.workflows, count: state.categories.workflows },
+    { id: "persistent", label: state.categoryLabels.persistent || CATEGORY_LABELS.persistent, count: state.categories.persistent },
+  ];
+
+  listEl.innerHTML = "";
+  categories.forEach(category => {
+    const items = state.memoryItemsByCategory[category.id] || [];
+    const expanded = state.expandedCategories.has(category.id);
+    const selectedCount = items.length === 0
+      ? (state.selectedMemoryIds.has(`${category.id}:default`) ? 1 : 0)
+      : items.filter(item => state.selectedMemoryIds.has(item.id)).length;
+    const checked = category.count > 0 && selectedCount === Math.max(items.length, 1);
+
+    const group = document.createElement("div");
+    group.className = "selection-group";
+    group.innerHTML = `
+      <div class="selection-row">
+        <input class="selection-parent-check" type="checkbox" data-category="${category.id}" ${checked ? "checked" : ""}>
+        <span>${category.label}</span>
+        <em>${category.count}</em>
+        <button class="selection-expand-btn ${expanded ? "is-expanded" : ""}" type="button" data-expand="${category.id}" aria-label="展开 ${category.label}">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M6 9l6 6 6-6"></path>
+          </svg>
+        </button>
+      </div>
+      ${expanded ? `<div class="selection-children"></div>` : ""}
+    `;
+
+    const parentCheck = group.querySelector(".selection-parent-check");
+    parentCheck.addEventListener("change", event => {
+      toggleCategorySelection(category.id, event.target.checked).catch(err => {
+        toast(`更新勾选失败：${err.message}`, true);
+      });
+    });
+
+    const expandBtn = group.querySelector(".selection-expand-btn");
+    expandBtn.addEventListener("click", () => {
+      toggleCategoryExpanded(category.id).catch(err => {
+        toast(`展开失败：${err.message}`, true);
+      });
+    });
+
+    if (expanded) {
+      const childList = group.querySelector(".selection-children");
+      if (items.length === 0) {
+        childList.innerHTML = `<div class="selection-child"><input type="checkbox" checked disabled><div><strong>暂无细项</strong><p>当前类别还没有整理出可单独选择的内容。</p></div></div>`;
+      } else if (category.id === "profile") {
+        const grouped = new Map();
+        items.forEach(item => {
+          const groupLabel = item.display_title || item.title || "未命名";
+          if (!grouped.has(groupLabel)) grouped.set(groupLabel, []);
+          grouped.get(groupLabel).push(item);
+        });
+        grouped.forEach((groupItems, groupLabel) => {
+          const subgroup = document.createElement("div");
+          subgroup.className = "selection-subgroup";
+          const chips = groupItems.map(item => {
+            const preview = buildSelectionPreview(category.id, item);
+            return `
+              <label class="selection-chip" title="${item.display_description || item.description || ""}">
+                <input type="checkbox" data-item-id="${item.id}" ${state.selectedMemoryIds.has(item.id) ? "checked" : ""}>
+                <span>${preview.description || preview.title}</span>
+              </label>
+            `;
+          }).join("");
+          subgroup.innerHTML = `
+            <div class="selection-subgroup-title">${groupLabel}</div>
+            <div class="selection-chip-row">${chips}</div>
+          `;
+          subgroup.querySelectorAll("input").forEach(checkbox => {
+            checkbox.addEventListener("change", event => {
+              const itemId = event.target.dataset.itemId;
+              if (event.target.checked) state.selectedMemoryIds.add(itemId);
+              else state.selectedMemoryIds.delete(itemId);
+              renderSelectionList();
+            });
+          });
+          childList.appendChild(subgroup);
+        });
+      } else {
+        items.forEach(item => {
+          const preview = buildSelectionPreview(category.id, item);
+          const child = document.createElement("label");
+          child.className = "selection-child";
+          child.innerHTML = `
+            <input type="checkbox" data-item-id="${item.id}" ${state.selectedMemoryIds.has(item.id) ? "checked" : ""}>
+            <div>
+              <strong title="${item.title || ""}">${preview.title}</strong>
+              <p title="${item.description || ""}">${preview.description}</p>
+            </div>
+          `;
+          const checkbox = child.querySelector("input");
+          checkbox.addEventListener("change", event => {
+            if (event.target.checked) state.selectedMemoryIds.add(item.id);
+            else state.selectedMemoryIds.delete(item.id);
+            renderSelectionList();
+          });
+          childList.appendChild(child);
+        });
+      }
+    }
+
+    listEl.appendChild(group);
+  });
+}
+
+async function initializeDefaultMemorySelection() {
+  if (state.selectedMemoryIds.size > 0) return;
+  for (const category of ["profile", "preferences", "workflows"]) {
+    const items = await ensureCategoryItems(category);
+    if (items.length === 0) state.selectedMemoryIds.add(`${category}:default`);
+    else items.forEach(item => state.selectedMemoryIds.add(item.id));
+  }
 }
 
 function deriveMySkills(allData, pnData) {
@@ -319,13 +618,69 @@ function buildEmptySkillCard() {
   };
 }
 
-async function deleteMySkill(skillId) {
+function truncateText(text, maxLength = 72) {
+  const value = String(text || "").replace(/\s+/g, " ").trim();
+  if (!value) return "";
+  if (value.length <= maxLength) return value;
+  return `${value.slice(0, Math.max(0, maxLength - 1)).trim()}…`;
+}
+
+function buildSkillPreview(item) {
+  if (item?.selectable === false) {
+    return {
+      title: item.title,
+      summary: item.description || "",
+      meta: "",
+    };
+  }
+
+  const title = truncateText(item?.title || "未命名 Skill", 28);
+  const metaParts = [];
+  if (item?.kind === "workflow") metaParts.push("工作流");
+  else if (item?.kind === "skill") metaParts.push("Skill");
+  if (item?.confidence) metaParts.push(`置信度 ${item.confidence}`);
+
+  const summaryCandidates = [
+    item?.goal ? `目标：${item.goal}` : "",
+    item?.trigger ? `触发：${item.trigger}` : "",
+    item?.output_format ? `产出：${item.output_format}` : "",
+    item?.description || "",
+  ].filter(Boolean);
+
+  let summary = summaryCandidates[0] || "";
+  if (!summary && Array.isArray(item?.steps) && item.steps.length > 0) {
+    summary = `步骤：${item.steps.slice(0, 2).join(" / ")}`;
+  }
+  if (summary.includes("|")) {
+    summary = summary
+      .split("|")
+      .map(part => part.trim())
+      .filter(Boolean)
+      .slice(0, 2)
+      .join(" · ");
+  }
+
+  return {
+    title,
+    summary: truncateText(summary, 64),
+    meta: metaParts.join(" · "),
+  };
+}
+
+async function deleteSkill(skillId) {
   try {
     await backendApi().deleteSkills(state.backendUrl, { skill_ids: [skillId] });
     state.selectedSkillIds.delete(skillId);
-    const result = await backendApi().getMySkills(state.backendUrl);
-    renderSkillList(result.items || [], state.selectedSkillIds, { showDelete: true });
-    toast("Skill 已从我的列表中移除");
+    state.selectedRecommendedIds.delete(skillId);
+    if (state.currentSkillTab === "recommended") {
+      const result = await backendApi().getRecommendedSkills(state.backendUrl);
+      renderRecommendedSkillMeta(result.meta || null);
+      renderSkillList(result.items || [], state.selectedRecommendedIds, { showDelete: true });
+    } else {
+      const result = await backendApi().getMySkills(state.backendUrl);
+      renderSkillList(result.items || [], state.selectedSkillIds, { showDelete: true });
+    }
+    toast("Skill 已从列表中移除");
   } catch (err) {
     toast(`删除失败：${err.message}`, true);
   }
@@ -341,6 +696,7 @@ function renderSkillList(items, selectedSet, options = {}) {
     const wrapper = document.createElement("div");
     wrapper.className = "skill-item";
     const iconText = getSkillIcon(item);
+    const preview = buildSkillPreview(item);
     const actionNodes = item.selectable === false
       ? `<div class="skill-check-placeholder"></div>`
       : `
@@ -352,8 +708,9 @@ function renderSkillList(items, selectedSet, options = {}) {
     wrapper.innerHTML = `
       <div class="skill-icon">${iconText}</div>
       <div class="skill-copy">
-        <h4>${item.title}</h4>
-        <p>${item.description}</p>
+        <h4 title="${item.title || ""}">${preview.title}</h4>
+        ${preview.meta ? `<div class="skill-meta">${preview.meta}</div>` : ""}
+        <p title="${item.description || ""}">${preview.summary}</p>
       </div>
       ${actionNodes}
     `;
@@ -368,18 +725,60 @@ function renderSkillList(items, selectedSet, options = {}) {
     if (deleteBtn) {
       deleteBtn.addEventListener("click", event => {
         event.preventDefault();
-        deleteMySkill(item.id);
+        deleteSkill(item.id);
       });
     }
     listEl.appendChild(wrapper);
   });
 }
 
+function formatRecommendedUpdatedAt(value) {
+  if (!value) return IS_ZH_UI ? "最近更新：未知" : "Updated: unknown";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return IS_ZH_UI ? "最近更新：未知" : "Updated: unknown";
+  }
+  const now = new Date();
+  const sameDay = now.getFullYear() === date.getFullYear()
+    && now.getMonth() === date.getMonth()
+    && now.getDate() === date.getDate();
+  const hh = String(date.getHours()).padStart(2, "0");
+  const mm = String(date.getMinutes()).padStart(2, "0");
+  if (IS_ZH_UI) {
+    return sameDay
+      ? `最近更新：今天 ${hh}:${mm}`
+      : `最近更新：${date.getMonth() + 1}/${date.getDate()} ${hh}:${mm}`;
+  }
+  return sameDay
+    ? `Updated: today ${hh}:${mm}`
+    : `Updated: ${date.getMonth() + 1}/${date.getDate()} ${hh}:${mm}`;
+}
+
+function renderRecommendedSkillMeta(meta) {
+  const el = document.getElementById("recommendedSkillMeta");
+  if (!el) return;
+  if (!meta) {
+    el.textContent = "";
+    el.classList.add("hidden");
+    return;
+  }
+  const status = meta.last_refresh_status === "success"
+    ? (IS_ZH_UI ? "今日推荐" : "Today")
+    : (IS_ZH_UI ? "推荐缓存" : "Cached");
+  const sourceText = Array.isArray(meta.sources) && meta.sources.length
+    ? (IS_ZH_UI ? `来源：${meta.sources.join(" / ")}` : `Sources: ${meta.sources.join(" / ")}`)
+    : "";
+  const updatedText = formatRecommendedUpdatedAt(meta.last_updated_at);
+  el.textContent = [status, updatedText, sourceText].filter(Boolean).join(" · ");
+  el.classList.remove("hidden");
+}
+
 async function refreshSummary() {
   try {
+    const locale = IS_ZH_UI ? "zh-CN" : "en-US";
     const [summary, categories] = await Promise.all([
       backendApi().getSummary(state.backendUrl),
-      backendApi().getMemoryCategories(state.backendUrl),
+      backendApi().getMemoryCategories(state.backendUrl, locale),
     ]);
 
     state.categories.profile = categories.categories.find(item => item.id === "profile")?.count ?? 0;
@@ -387,8 +786,16 @@ async function refreshSummary() {
     state.categories.projects = categories.categories.find(item => item.id === "projects")?.count ?? 0;
     state.categories.workflows = categories.categories.find(item => item.id === "workflows")?.count ?? 0;
     state.categories.persistent = categories.categories.find(item => item.id === "persistent")?.count ?? 0;
-
-    renderCategoryCounts();
+    state.categoryLabels.profile = categories.categories.find(item => item.id === "profile")?.label || CATEGORY_LABELS.profile;
+    state.categoryLabels.preferences = categories.categories.find(item => item.id === "preferences")?.label || CATEGORY_LABELS.preferences;
+    state.categoryLabels.projects = categories.categories.find(item => item.id === "projects")?.label || CATEGORY_LABELS.projects;
+    state.categoryLabels.workflows = categories.categories.find(item => item.id === "workflows")?.label || CATEGORY_LABELS.workflows;
+    state.categoryLabels.persistent = categories.categories.find(item => item.id === "persistent")?.label || CATEGORY_LABELS.persistent;
+    await Promise.all(["profile", "preferences", "projects", "workflows", "persistent"].map(category => ensureCategoryItems(category)));
+    if (state.selectedMemoryIds.size === 0) {
+      await initializeDefaultMemorySelection();
+    }
+    renderSelectionList();
     renderStats({
       lastSyncAt: summary.last_sync_at,
       conversationCount: summary.conversation_count,
@@ -416,8 +823,7 @@ async function refreshSummary() {
   state.categories.projects = projects.length;
   state.categories.workflows = workflows.length;
   state.categories.persistent = Object.keys(pnData.nodes ?? {}).length;
-
-  renderCategoryCounts();
+  renderSelectionList();
 
   const summary = {
     lastSyncAt: state.lastSyncAt,
@@ -436,9 +842,8 @@ async function refreshSummary() {
   if (state.currentSkillTab === "my") renderSkillList(mySkills, state.selectedSkillIds, { showDelete: true });
 }
 
-async function saveSettings() {
+async function saveSettings(showToast = true) {
   state.apiKey = document.getElementById("apiKeyInput").value.trim();
-  state.apiKeyConfigured = !!state.apiKey;
   state.backendUrl = document.getElementById("backendUrlInput").value.trim() || "http://127.0.0.1:8765";
   state.storagePath = document.getElementById("storageDirInput").value.trim();
   await storageSet({
@@ -457,7 +862,10 @@ async function saveSettings() {
   state.storagePath = backendSettings.storage_path || state.storagePath;
   renderSettings();
   renderSync();
-  toast("设置已保存到本地后端");
+  renderActionAvailability();
+  if (showToast) {
+    toast("设置已保存到本地后端");
+  }
 }
 
 async function testConnection() {
@@ -468,7 +876,8 @@ async function testConnection() {
       api_key: document.getElementById("apiKeyInput").value.trim(),
     });
     if (!result.ok) throw new Error(result.message || "连接失败");
-    toast("API 与本地后端连接正常");
+    await saveSettings(false);
+    toast("连接成功，设置已保存");
   } catch (err) {
     try {
       await backendApi().getHealth(state.backendUrl);
@@ -514,33 +923,59 @@ async function toggleSync() {
   }
 }
 
+function syncPolicyHint() {
+  toast("同步策略已更新。已打开的会话页可能需要刷新，或重新开启同步后生效。");
+}
+
 async function runOrganize() {
   const organizeBtn = document.getElementById("organizeBtn");
+  if (!state.apiKeyConfigured) {
+    renderActionAvailability();
+    toast("请先在设置页配置 DeepSeek API Key", true);
+    return;
+  }
   organizeBtn.disabled = true;
   organizeBtn.style.opacity = "0.65";
+  setOrganizeStatus(true, "正在整理记忆...", "准备开始");
 
   try {
     toast("正在整理记忆...");
     const response = await backendApi().organizeMemory(state.backendUrl);
     const jobId = response.job_id;
     if (jobId) {
-      const job = await backendApi().getJob(state.backendUrl, jobId);
-      if (job.status === "failed") throw new Error(job.error || "整理失败");
+      let job;
+      while (true) {
+        job = await backendApi().getJob(state.backendUrl, jobId);
+        const progress = job.progress || {};
+        setOrganizeStatus(
+          true,
+          progress.message || "正在整理记忆...",
+          typeof progress.current === "number" && typeof progress.total === "number"
+            ? `${progress.current} / ${progress.total}`
+            : "处理中"
+        );
+        if (job.status === "completed") break;
+        if (job.status === "failed") throw new Error(job.error || "整理失败");
+        await sleep(900);
+      }
       const built = job.result?.episodes ?? 0;
+      const updatedEpisodes = job.result?.updated_episodes ?? 0;
       const projects = job.result?.projects ?? 0;
       const workflows = job.result?.workflows ?? 0;
-      const memorySummary = [`episodes ${built}`, `projects ${projects}`, `workflows ${workflows}`]
+      const memorySummary = [`episodes ${built}`, `updated ${updatedEpisodes}`, `projects ${projects}`, `workflows ${workflows}`]
         .join(" · ");
       toast(`整理完成：${memorySummary}`);
     } else {
       toast("整理完成，记忆已更新");
     }
     state.lastSyncAt = new Date().toISOString();
+    state.memoryItemsByCategory = {};
     await storageSet({ [STORAGE_KEYS.lastSyncAt]: state.lastSyncAt });
     await refreshSummary();
   } catch (err) {
     toast(`整理失败：${err.message}`, true);
   } finally {
+    setOrganizeStatus(false);
     organizeBtn.disabled = false;
     organizeBtn.style.opacity = "";
   }
@@ -596,59 +1031,47 @@ async function syncStorageToFiles() {
   }
 }
 
-function getSelectedCategories() {
-  return Array.from(document.querySelectorAll("[data-category]"))
-    .filter(checkbox => checkbox.checked)
-    .map(checkbox => checkbox.dataset.category);
-}
-
 async function getSelectedIdsForBackend() {
-  const categories = getSelectedCategories();
-  const ids = [];
-  for (const category of categories) {
-    try {
-      const result = await backendApi().getMemoryItems(state.backendUrl, category);
-      const items = result.items || [];
-      if (items.length > 0) {
-        ids.push(...items.map(item => item.id));
-      } else {
-        ids.push(`${category}:default`);
-      }
-    } catch {
-      ids.push(`${category}:default`);
-    }
-  }
+  const ids = [...state.selectedMemoryIds];
+  if (ids.length === 0) throw new Error("请至少勾选一项记忆内容");
   return ids;
 }
 
 async function buildMemoryPackage() {
-  const selected = getSelectedCategories();
-  if (selected.length === 0) throw new Error("请至少勾选一项记忆内容");
+  const selectedIds = await getSelectedIdsForBackend();
+  const selectedPrefixes = new Set(selectedIds.map(item => item.split(":")[0]));
 
   const allData = await storageGet(null);
   const packageData = {
     generated_at: new Date().toISOString(),
-    selected_categories: selected,
+    selected_ids: selectedIds,
     data: {},
   };
 
-  if (selected.includes("profile") && allData["mw:profile"]) {
+  if (selectedPrefixes.has("profile") && allData["mw:profile"]) {
     packageData.data.profile = allData["mw:profile"];
   }
-  if (selected.includes("preferences") && allData["mw:preferences"]) {
+  if (selectedPrefixes.has("preferences") && allData["mw:preferences"]) {
     packageData.data.preferences = allData["mw:preferences"];
   }
-  if (selected.includes("projects")) {
+  if (selectedPrefixes.has("project")) {
     packageData.data.projects = Object.entries(allData)
       .filter(([key]) => key.startsWith("mw:projects:"))
       .map(([, value]) => value);
   }
-  if (selected.includes("workflows")) {
+  if (selectedPrefixes.has("workflow")) {
     packageData.data.workflows = allData["mw:workflows"] ?? [];
   }
-  if (selected.includes("persistent")) {
+  if (selectedPrefixes.has("persistent")) {
     const pnData = await readPersistentNodes();
-    packageData.data.persistent = Object.entries(pnData.nodes ?? {}).map(([id, node]) => ({ id, ...node }));
+    const selectedNodeIds = new Set(
+      selectedIds
+        .filter(id => id.startsWith("persistent:"))
+        .map(id => id.split(":").slice(1).join(":"))
+    );
+    packageData.data.persistent = Object.entries(pnData.nodes ?? {})
+      .filter(([id]) => selectedNodeIds.size === 0 || selectedNodeIds.has(id))
+      .map(([id, node]) => ({ id, ...node }));
 
     const episodeIds = new Set(packageData.data.persistent.flatMap(node => node.episode_refs ?? []));
     packageData.data.episodic_evidence = [];
@@ -702,13 +1125,29 @@ async function exportPackage() {
 async function getActiveSupportedTab() {
   const [tab] = await tabsQuery({ active: true, currentWindow: true });
   if (!tab?.id) throw new Error("未找到当前标签页");
+  if (!isSupportedTab(tab)) {
+    throw new Error("请先切换到 ChatGPT、Gemini、DeepSeek 或豆包页面");
+  }
   return tab;
 }
 
 async function injectTextIntoTab(text) {
   const tab = await getActiveSupportedTab();
-  const result = await tabsSendMessage(tab.id, { type: "INJECT_INPUT", text });
+  let result;
+  try {
+    result = await tabsSendMessage(tab.id, { type: "INJECT_INPUT", text });
+  } catch (err) {
+    if (isMissingReceiverError(err)) {
+      const copied = await copyTextToClipboard(text);
+      return {
+        ok: copied,
+        fallback: copied ? "clipboard" : "receiver_missing",
+      };
+    }
+    throw err;
+  }
   if (!result?.ok) throw new Error(result?.error ?? "当前页面不支持注入");
+  return { ok: true, fallback: null };
 }
 
 async function scrapeCurrentConversationFromTab() {
@@ -719,6 +1158,16 @@ async function scrapeCurrentConversationFromTab() {
   return result.data;
 }
 
+async function scrapePlatformMemoryFromTab() {
+  const tab = await getActiveSupportedTab();
+  const result = await tabsSendMessage(tab.id, { type: "SCRAPE_PLATFORM_MEMORY" });
+  if (!result?.ok) throw new Error(result?.error ?? "当前页面不支持抓取平台记忆");
+  if (!result?.data?.pageTextExcerpt && !(result?.data?.memoryHints || []).length) {
+    throw new Error("当前页面没有可保存的平台记忆信息");
+  }
+  return result.data;
+}
+
 async function injectPackage() {
   try {
     const selectedIds = await getSelectedIdsForBackend();
@@ -726,13 +1175,21 @@ async function injectPackage() {
       selected_ids: selectedIds,
       target_platform: "chatgpt",
     });
-    await injectTextIntoTab(result.text || "");
-    toast("记忆内容已注入当前会话输入框");
+    const injection = await injectTextIntoTab(result.text || "");
+    if (injection?.fallback === "clipboard") {
+      toast("当前页面未就绪，记忆内容已复制到剪贴板。刷新当前对话页后可直接粘贴。");
+    } else {
+      toast("记忆内容已注入当前会话输入框");
+    }
   } catch {
     try {
       const pkg = await buildMemoryPackage();
-      await injectTextIntoTab(buildMemoryPrompt(pkg));
-      toast("记忆内容已注入当前会话输入框");
+      const injection = await injectTextIntoTab(buildMemoryPrompt(pkg));
+      if (injection?.fallback === "clipboard") {
+        toast("当前页面未就绪，记忆内容已复制到剪贴板。刷新当前对话页后可直接粘贴。");
+      } else {
+        toast("记忆内容已注入当前会话输入框");
+      }
     } catch (err) {
       toast(`注入失败：${err.message}`, true);
     }
@@ -762,9 +1219,9 @@ async function addCurrentConversation() {
     await refreshSummary();
     if (job?.result?.processed) {
       const episodes = job.result?.process_result?.episodes ?? 0;
-      toast(`当前对话已加入记忆，并整理为 ${episodes} 条 episodic 记忆`);
+      toast(`当前对话已加入记忆，并整理为 ${episodes} 条记忆`);
     } else {
-      toast("当前对话已补录到 raw，可稍后点击整理");
+      toast("当前对话已记录，可稍后整理");
     }
   } catch (err) {
     toast(`加入当前对话失败：${err.message}`, true);
@@ -774,15 +1231,70 @@ async function addCurrentConversation() {
   }
 }
 
-async function saveSkills() {
-  const allSkillIds = new Set([...state.selectedSkillIds, ...state.selectedRecommendedIds]);
-  await storageSet({ [STORAGE_KEYS.savedSkills]: [...allSkillIds] });
+async function addPlatformMemory() {
+  const button = document.getElementById("addPlatformMemoryBtn");
+  button.disabled = true;
+  button.style.opacity = "0.65";
+
   try {
-    await backendApi().saveSkills(state.backendUrl, { skill_ids: [...allSkillIds] });
-  } catch {
-    // Keep local save as fallback.
+    toast("正在保存平台记忆...");
+    const snapshot = await scrapePlatformMemoryFromTab();
+    const response = await backendApi().importPlatformMemory(state.backendUrl, snapshot);
+    toast(response.message || "平台记忆已保存到本地");
+  } catch (err) {
+    toast(`加入平台记忆失败：${err.message}`, true);
+  } finally {
+    button.disabled = false;
+    button.style.opacity = "";
   }
-  toast("Skill 选择已保存");
+}
+
+function inferTargetPlatformFromTab(tab) {
+  try {
+    const hostname = new URL(tab?.url || "").hostname;
+    if (hostname === "gemini.google.com") return "gemini";
+    if (hostname === "chat.deepseek.com") return "deepseek";
+    if (hostname === "www.doubao.com") return "doubao";
+    return "chatgpt";
+  } catch {
+    return "chatgpt";
+  }
+}
+
+async function exportSkills() {
+  const allSkillIds = new Set([...state.selectedSkillIds, ...state.selectedRecommendedIds]);
+  const selectedIds = [...allSkillIds];
+  if (selectedIds.length === 0) {
+    toast("请至少选择一个 Skill", true);
+    return;
+  }
+  try {
+    const result = await backendApi().exportSkills(state.backendUrl, { skill_ids: selectedIds });
+    downloadText(result.filename || `skills_${new Date().toISOString().slice(0, 10)}.json`, result.content || "");
+    toast("Skill 已导出");
+  } catch (err) {
+    try {
+      const allData = await storageGet(null);
+      const pnData = allData["mw:persistent_nodes"] ?? { nodes: {} };
+      const mySkills = deriveMySkills(allData, pnData);
+      const selected = [];
+      mySkills.forEach(skill => {
+        if (state.selectedSkillIds.has(skill.id)) selected.push(skill);
+      });
+      recommendedSkills.forEach(skill => {
+        if (state.selectedRecommendedIds.has(skill.id)) selected.push(skill);
+      });
+      if (selected.length === 0) throw new Error("请至少选择一个 Skill");
+      const payload = {
+        generated_at: new Date().toISOString(),
+        skills: selected,
+      };
+      downloadText(`skills_${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(payload, null, 2));
+      toast("Skill 已导出");
+    } catch (fallbackErr) {
+      toast(`导出失败：${fallbackErr.message || err.message}`, true);
+    }
+  }
 }
 
 function buildSkillPrompt(selectedSkills) {
@@ -800,12 +1312,17 @@ async function injectSkills() {
   try {
     const selectedIds = [...state.selectedSkillIds, ...state.selectedRecommendedIds];
     if (selectedIds.length === 0) throw new Error("请至少选择一个 Skill");
+    const tab = await getActiveSupportedTab();
     const result = await backendApi().injectSkills(state.backendUrl, {
       skill_ids: selectedIds,
-      target_platform: "chatgpt",
+      target_platform: inferTargetPlatformFromTab(tab),
     });
-    await injectTextIntoTab(result.text || "");
-    toast("Skill 已注入当前会话输入框");
+    const injection = await injectTextIntoTab(result.text || "");
+    if (injection?.fallback === "clipboard") {
+      toast("当前页面未就绪，Skill 已复制到剪贴板。刷新当前对话页后可直接粘贴。");
+    } else {
+      toast("Skill 已注入当前会话输入框");
+    }
   } catch {
     try {
       const allData = await storageGet(null);
@@ -821,8 +1338,12 @@ async function injectSkills() {
       });
 
       if (selected.length === 0) throw new Error("请至少选择一个 Skill");
-      await injectTextIntoTab(buildSkillPrompt(selected));
-      toast("Skill 已注入当前会话输入框");
+      const injection = await injectTextIntoTab(buildSkillPrompt(selected));
+      if (injection?.fallback === "clipboard") {
+        toast("当前页面未就绪，Skill 已复制到剪贴板。刷新当前对话页后可直接粘贴。");
+      } else {
+        toast("Skill 已注入当前会话输入框");
+      }
     } catch (err) {
       toast(`注入失败：${err.message}`, true);
     }
@@ -875,7 +1396,7 @@ function bindEvents() {
     state.keepUpdated = event.target.checked;
     await storageSet({ [STORAGE_KEYS.keepUpdated]: state.keepUpdated });
     try {
-      await backendApi().saveSettings(state.backendUrl, {
+      const backendSettings = await backendApi().saveSettings(state.backendUrl, {
         api_provider: "deepseek",
         api_key: state.apiKey,
         storage_path: state.storagePath,
@@ -883,18 +1404,24 @@ function bindEvents() {
         realtime_update: state.realtimeUpdate,
         backend_url: state.backendUrl,
       });
+      state.apiKeyConfigured = backendSettings.api_key_configured;
+      state.keepUpdated = backendSettings.keep_updated;
+      state.realtimeUpdate = backendSettings.realtime_update;
     } catch {
       // Keep local change when backend is offline.
     }
     await broadcastCaptureToggle(state.keepUpdated);
+    renderSettings();
     renderSync();
+    renderActionAvailability();
+    syncPolicyHint();
   });
 
   document.getElementById("realtimeUpdateToggle").addEventListener("change", async event => {
     state.realtimeUpdate = event.target.checked;
     await storageSet({ [STORAGE_KEYS.realtimeUpdate]: state.realtimeUpdate });
     try {
-      await backendApi().saveSettings(state.backendUrl, {
+      const backendSettings = await backendApi().saveSettings(state.backendUrl, {
         api_provider: "deepseek",
         api_key: state.apiKey,
         storage_path: state.storagePath,
@@ -902,15 +1429,27 @@ function bindEvents() {
         realtime_update: state.realtimeUpdate,
         backend_url: state.backendUrl,
       });
+      state.apiKeyConfigured = backendSettings.api_key_configured;
+      state.keepUpdated = backendSettings.keep_updated;
+      state.realtimeUpdate = backendSettings.realtime_update;
     } catch {
       // Keep local change when backend is offline.
     }
+    renderSettings();
     renderSync();
-    toast(state.realtimeUpdate ? "实时更新已开启" : "实时更新已关闭");
+    renderActionAvailability();
+    if (state.realtimeUpdate && state.apiKeyConfigured && state.keepUpdated) {
+      toast("同步记忆已开启。重新同步或刷新当前会话页后，将自动提取记忆。");
+    } else if (state.realtimeUpdate && !state.apiKeyConfigured) {
+      toast("同步记忆已开启，配置 API 后才会开始提取记忆。");
+    } else {
+      toast("同步记忆已关闭。新对话可稍后手动整理。");
+    }
   });
 
   document.getElementById("organizeBtn").addEventListener("click", runOrganize);
   document.getElementById("addCurrentConversationBtn").addEventListener("click", addCurrentConversation);
+  document.getElementById("addPlatformMemoryBtn").addEventListener("click", addPlatformMemory);
   document.getElementById("exportPackageBtn").addEventListener("click", exportPackage);
   document.getElementById("injectPackageBtn").addEventListener("click", injectPackage);
 
@@ -918,6 +1457,7 @@ function bindEvents() {
     state.currentSkillTab = "my";
     document.getElementById("mySkillTab").classList.add("is-active");
     document.getElementById("recommendedSkillTab").classList.remove("is-active");
+    renderRecommendedSkillMeta(null);
     try {
       const result = await backendApi().getMySkills(state.backendUrl);
       renderSkillList(result.items || [], state.selectedSkillIds, { showDelete: true });
@@ -933,11 +1473,17 @@ function bindEvents() {
     document.getElementById("recommendedSkillTab").classList.add("is-active");
     document.getElementById("mySkillTab").classList.remove("is-active");
     backendApi().getRecommendedSkills(state.backendUrl)
-      .then(result => renderSkillList(result.items || [], state.selectedRecommendedIds))
-      .catch(() => renderSkillList(recommendedSkills, state.selectedRecommendedIds));
+      .then(result => {
+        renderRecommendedSkillMeta(result.meta || null);
+        renderSkillList(result.items || [], state.selectedRecommendedIds, { showDelete: true });
+      })
+      .catch(() => {
+        renderRecommendedSkillMeta(null);
+        renderSkillList(recommendedSkills, state.selectedRecommendedIds, { showDelete: true });
+      });
   });
 
-  document.getElementById("saveSkillBtn").addEventListener("click", saveSkills);
+  document.getElementById("exportSkillBtn").addEventListener("click", exportSkills);
   document.getElementById("injectSkillBtn").addEventListener("click", injectSkills);
 
   document.getElementById("importHistoryBtn").addEventListener("click", () => {
@@ -1005,7 +1551,10 @@ async function init() {
   renderDirectory();
   renderSettings();
   renderSync();
+  renderActionAvailability();
   await refreshSummary();
+  await initializeDefaultMemorySelection();
+  renderSelectionList();
 
   try {
     const result = await backendApi().getMySkills(state.backendUrl);

@@ -19,6 +19,7 @@ class PreferenceMemory(MemoryBase):
     formatting_constraints: list[str] = Field(default_factory=list)
     forbidden_expressions: list[str] = Field(default_factory=list)
     language_preference: str = ""
+    primary_task_types: list[str] = Field(default_factory=list)
     revision_preference: list[str] = Field(default_factory=list)
     response_granularity: str = ""  # e.g. "concise", "detailed", "step-by-step"
 
@@ -26,6 +27,8 @@ class PreferenceMemory(MemoryBase):
         lines = ["# Preference Memory\n"]
         if self.language_preference:
             lines.append(f"**Language:** {self.language_preference}")
+        if self.primary_task_types:
+            lines.append(f"**Primary Task Types:** {', '.join(self.primary_task_types)}")
         if self.response_granularity:
             lines.append(f"**Response Granularity:** {self.response_granularity}")
         if self.style_preference:

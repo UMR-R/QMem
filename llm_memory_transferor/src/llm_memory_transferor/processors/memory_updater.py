@@ -104,6 +104,10 @@ class MemoryUpdater:
                 )
             if pref_updates.get("update_language"):
                 prefs.language_preference = pref_updates["update_language"]
+            if pref_updates.get("add_primary_task_types"):
+                prefs.primary_task_types = list(
+                    set(prefs.primary_task_types + pref_updates["add_primary_task_types"])
+                )
             if pref_updates.get("update_granularity"):
                 prefs.response_granularity = pref_updates["update_granularity"]
             prefs.add_evidence("chat_history", platform, new_conversation_text[:80])

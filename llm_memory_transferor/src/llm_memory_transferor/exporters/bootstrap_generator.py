@@ -67,8 +67,6 @@ class BootstrapGenerator:
             parts.append(f"Background: {', '.join(profile.domain_background)}")
         if profile.common_languages:
             parts.append(f"Languages: {', '.join(profile.common_languages)}")
-        if profile.primary_task_types:
-            parts.append(f"Typically asks help with: {', '.join(profile.primary_task_types)}")
         if profile.long_term_research_or_work_focus:
             foci = "; ".join(profile.long_term_research_or_work_focus)
             parts.append(f"Long-term focus: {foci}")
@@ -81,6 +79,8 @@ class BootstrapGenerator:
         parts = []
         if prefs.language_preference:
             parts.append(f"Communicate in: {prefs.language_preference}")
+        if prefs.primary_task_types:
+            parts.append(f"Typically asks help with: {', '.join(prefs.primary_task_types)}")
         if prefs.response_granularity:
             parts.append(f"Response style: {prefs.response_granularity}")
         if prefs.style_preference:

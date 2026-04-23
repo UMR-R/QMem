@@ -83,6 +83,14 @@
       });
     },
 
+    importPlatformMemory(baseUrl, payload) {
+      return request(baseUrl, "/api/platform-memory/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+    },
+
     organizeMemory(baseUrl) {
       return request(baseUrl, "/api/memory/organize", {
         method: "POST",
@@ -91,12 +99,17 @@
       });
     },
 
-    getMemoryCategories(baseUrl) {
-      return request(baseUrl, "/api/memory/categories");
+    getMemoryCategories(baseUrl, locale) {
+      const query = new URLSearchParams();
+      if (locale) query.set("locale", locale);
+      const suffix = query.toString() ? `?${query.toString()}` : "";
+      return request(baseUrl, `/api/memory/categories${suffix}`);
     },
 
-    getMemoryItems(baseUrl, category) {
-      return request(baseUrl, `/api/memory/items?category=${encodeURIComponent(category)}`);
+    getMemoryItems(baseUrl, category, locale) {
+      const query = new URLSearchParams({ category });
+      if (locale) query.set("locale", locale);
+      return request(baseUrl, `/api/memory/items?${query.toString()}`);
     },
 
     exportPackage(baseUrl, payload) {
@@ -123,8 +136,24 @@
       return request(baseUrl, "/api/skills/recommended");
     },
 
+    refreshRecommendedSkills(baseUrl, payload = { force: true }) {
+      return request(baseUrl, "/api/skills/recommended/refresh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+    },
+
     saveSkills(baseUrl, payload) {
       return request(baseUrl, "/api/skills/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+    },
+
+    exportSkills(baseUrl, payload) {
+      return request(baseUrl, "/api/skills/export", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),

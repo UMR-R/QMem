@@ -213,6 +213,54 @@ function scrapeFullConversation(config) {
   return messages.map(({ role, text }) => ({ role, text }));
 }
 
+function scrapePlatformMemory(config) {
+  const mainRoot = document.querySelector("main, [role='main'], article") || document.body;
+  const rawText = (mainRoot?.innerText || document.body?.innerText || "").trim();
+  const condensedText = rawText.replace(/\n{3,}/g, "\n\n").trim();
+  const lines = condensedText
+    .split("\n")
+    .map(line => line.trim())
+    .filter(Boolean);
+
+  const keywords = [
+    "memory", "saved memory", "custom instruction", "instruction", "persona", "agent", "gpt",
+    "skill", "skills", "tool", "tools", "workspace", "profile",
+    "记忆", "平台记忆", "自定义指令", "提示词", "技能", "工具", "工作区", "画像",
+  ];
+  const memoryHints = [];
+  const seen = new Set();
+  for (const line of lines) {
+    const lower = line.toLowerCase();
+    if (keywords.some(keyword => lower.includes(keyword))) {
+      const clipped = line.slice(0, 240);
+      if (!seen.has(clipped)) {
+        seen.add(clipped);
+        memoryHints.push(clipped);
+      }
+    }
+    if (memoryHints.length >= 30) break;
+  }
+
+  const heading = document.querySelector("h1, h2")?.innerText?.trim() || "";
+  const title = document.title || heading || config?.name || "platform_memory";
+  const agentName = heading || title
+    .replace(/\s*[-|·]\s*ChatGPT.*$/i, "")
+    .replace(/\s*[-|·]\s*DeepSeek.*$/i, "")
+    .trim();
+
+  return {
+    title,
+    heading,
+    agentName,
+    url: location.href,
+    platform: config?.name || location.hostname,
+    chatId: config?.getChatId?.() ?? "",
+    memoryHints,
+    pageTextExcerpt: condensedText.slice(0, 8000),
+    capturedAt: new Date().toISOString(),
+  };
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 //  剪贴板拦截（平台通用）
 //  clipboard_interceptor.js 运行在 MAIN world，覆盖页面的 clipboard API，
@@ -226,6 +274,30 @@ window.addEventListener("message", (e) => {
     _lastClipboardText = e.data.text;
   }
 });
+
+function runtimeSendMessage(message) {
+  return new Promise((resolve, reject) => {
+    try {
+      chrome.runtime.sendMessage(message, response => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+        resolve(response);
+      });
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
+function storageGet(key) {
+  return new Promise(resolve => chrome.storage.local.get(key, resolve));
+}
+
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  消息监听
@@ -252,6 +324,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         chatId: config.getChatId?.() ?? "",
         messages: scrapeFullConversation(config),
       },
+    });
+    return false;
+
+  } else if (message.type === "SCRAPE_PLATFORM_MEMORY") {
+    if (!config) {
+      sendResponse({ ok: false, error: "当前页面不支持平台记忆抓取" });
+      return false;
+    }
+    sendResponse({
+      ok: true,
+      data: scrapePlatformMemory(config),
     });
     return false;
 
@@ -655,6 +738,31 @@ function stopCapture() {
   console.log("[MemAssist] 已停止捕获");
 }
 
+async function syncCapturePreference(reason = "unknown") {
+  let keepUpdated;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const data = await storageGet("keepUpdated");
+    if (typeof data.keepUpdated === "boolean") {
+      keepUpdated = data.keepUpdated;
+      break;
+    }
+    await delay(200 * (attempt + 1));
+  }
+
+  if (typeof keepUpdated !== "boolean") {
+    try {
+      const state = await runtimeSendMessage({ type: "GET_CAPTURE_STATE" });
+      keepUpdated = Boolean(state?.keepUpdated);
+    } catch (err) {
+      console.warn("[MemAssist] 获取捕获状态失败:", err?.message ?? err);
+    }
+  }
+
+  console.log("[MemAssist] keepUpdated =", keepUpdated, "，来源:", reason);
+  if (keepUpdated) startCapture();
+  else stopCapture();
+}
+
 function _captureStep(config) {
   const stopBtn = findStopButton(config);
   const currentCount = _countMessages(config);
@@ -769,7 +877,24 @@ function _getLastMessage(selectors) {
 // ── 页面加载时根据开关状态决定是否自动启动捕获 ────────────────────────────────
 
 console.log("[MemAssist] content.js 已加载，平台:", location.hostname);
-chrome.storage.local.get("keepUpdated", ({ keepUpdated }) => {
-  console.log("[MemAssist] keepUpdated =", keepUpdated);
-  if (keepUpdated) startCapture();
+syncCapturePreference("startup").catch(err => {
+  console.warn("[MemAssist] 初始化捕获状态失败:", err?.message ?? err);
+});
+
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== "local" || !changes.keepUpdated) return;
+  const nextValue = changes.keepUpdated.newValue;
+  console.log("[MemAssist] 检测到 keepUpdated 变化:", nextValue);
+  if (nextValue) startCapture();
+  else stopCapture();
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") {
+    syncCapturePreference("visibility").catch(() => {});
+  }
+});
+
+window.addEventListener("focus", () => {
+  syncCapturePreference("focus").catch(() => {});
 });

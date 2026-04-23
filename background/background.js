@@ -56,6 +56,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       .then(result => sendResponse({ ok: true, ...result }))
       .catch(err => sendResponse({ ok: false, error: err.message }));
     return true;
+
+  } else if (message.type === "GET_CAPTURE_STATE") {
+    chrome.storage.local.get(["keepUpdated", "realtimeUpdate", "deepseek_api_key"], data => {
+      sendResponse({
+        ok: true,
+        keepUpdated: Boolean(data["keepUpdated"]),
+        realtimeUpdate: Boolean(data["realtimeUpdate"]),
+        apiKeyConfigured: Boolean(data["deepseek_api_key"]),
+      });
+    });
+    return true;
   }
 });
 
