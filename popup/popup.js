@@ -496,7 +496,7 @@ function renderSelectionList() {
       const childList = group.querySelector(".selection-children");
       if (items.length === 0) {
         childList.innerHTML = `<div class="selection-child"><input type="checkbox" checked disabled><div><strong>暂无细项</strong><p>当前类别还没有整理出可单独选择的内容。</p></div></div>`;
-      } else if (category.id === "profile") {
+      } else if (category.id === "profile" || category.id === "preferences") {
         const grouped = new Map();
         items.forEach(item => {
           const groupLabel = item.display_title || item.title || "未命名";

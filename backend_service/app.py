@@ -28,7 +28,9 @@ UPLOADS_DIR = STATE_DIR / "uploads"
 EXPORTS_DIR = STATE_DIR / "exports"
 DEFAULT_WIKI_ROOT = STATE_DIR / "wiki"
 CATALOG_DIR = ROOT / "catalog"
-RECOMMENDED_SKILLS_PATH = CATALOG_DIR / "recommended_skills.json"
+LEGACY_RECOMMENDED_SKILLS_PATH = CATALOG_DIR / "recommended_skills.json"
+RECOMMENDED_SKILLS_DIR = CATALOG_DIR / "recommended_skills"
+RECOMMENDED_SKILLS_INDEX_PATH = RECOMMENDED_SKILLS_DIR / "index.json"
 RECOMMENDED_SKILLS_META_PATH = CATALOG_DIR / "recommended_skills_meta.json"
 RECOMMENDED_REFRESH_INTERVAL_HOURS = 24
 RECOMMENDED_REMOTE_SOURCES = [
@@ -52,7 +54,7 @@ from llm_memory_transferor.layers.l0_raw import L0RawLayer, RawConversation, Raw
 from llm_memory_transferor.layers.l1_signals import L1SignalLayer  # noqa: E402
 from llm_memory_transferor.layers.l2_wiki import L2Wiki  # noqa: E402
 from llm_memory_transferor.layers.l3_schema import L3Schema  # noqa: E402
-from llm_memory_transferor.models import EpisodicMemory, WorkflowMemory  # noqa: E402
+from llm_memory_transferor.models import EpisodicMemory, ProjectMemory, WorkflowMemory  # noqa: E402
 from llm_memory_transferor.processors import MemoryBuilder, MemoryUpdater  # noqa: E402
 from llm_memory_transferor.processors.prompts import (  # noqa: E402
     _PREFERENCE_SYSTEM,
@@ -435,36 +437,201 @@ def ensure_catalog_dir() -> None:
     CATALOG_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def _build_skill_markdown_lines(skill: dict[str, Any]) -> list[str]:
+    md_lines = [f"# {skill.get('title', 'Skill')}\n"]
+    kind = skill.get("kind", "skill")
+    md_lines.append(f"**Type:** {kind}")
+    if skill.get("trigger"):
+        md_lines.append(f"**Trigger:** {skill['trigger']}")
+    if skill.get("goal"):
+        md_lines.append(f"**Goal:** {skill['goal']}")
+    if skill.get("output_format"):
+        md_lines.append(f"**Output:** {skill['output_format']}")
+    if skill.get("steps"):
+        md_lines.append("\n**Steps:**")
+        md_lines.extend(f"- {step}" for step in skill["steps"] if step)
+    if skill.get("guardrails"):
+        md_lines.append("\n**Guardrails:**")
+        md_lines.extend(f"- {item}" for item in skill["guardrails"] if item)
+    if skill.get("composition", {}).get("uses_skills"):
+        md_lines.append("\n**Uses Skills:**")
+        md_lines.extend(f"- {item}" for item in skill["composition"]["uses_skills"])
+    if skill.get("composition", {}).get("prompt_template"):
+        md_lines.append(f"\n**Prompt Template:** {skill['composition']['prompt_template']}")
+    if skill.get("source_types"):
+        md_lines.append(f"\n**Source Types:** {', '.join(skill['source_types'])}")
+    if skill.get("confidence"):
+        md_lines.append(f"**Confidence:** {skill['confidence']}")
+    return md_lines
+
+
+def _build_skill_forms_lines(skill: dict[str, Any]) -> list[str]:
+    forms_lines = ["# Forms\n"]
+    if skill.get("trigger"):
+        forms_lines.append(f"## Trigger\n{skill['trigger']}\n")
+    if skill.get("output_format"):
+        forms_lines.append(f"## Output Format\n{skill['output_format']}\n")
+    if skill.get("steps"):
+        forms_lines.append("## Standard Steps")
+        forms_lines.extend(f"{idx + 1}. {step}" for idx, step in enumerate(skill["steps"]) if step)
+    if skill.get("guardrails"):
+        forms_lines.append("\n## Guardrails")
+        forms_lines.extend(f"- {item}" for item in skill["guardrails"] if item)
+    return forms_lines
+
+
+def _build_skill_reference_lines(skill: dict[str, Any]) -> list[str]:
+    ref_lines = ["# Reference\n"]
+    if skill.get("description"):
+        ref_lines.append(f"## Summary\n{skill['description']}\n")
+    if skill.get("source_types"):
+        ref_lines.append("## Sources")
+        ref_lines.extend(f"- {item}" for item in skill["source_types"] if item)
+    if skill.get("evidence_episode_ids"):
+        ref_lines.append("\n## Evidence Episodes")
+        ref_lines.extend(f"- {item}" for item in skill["evidence_episode_ids"] if item)
+    if skill.get("composition"):
+        ref_lines.append("\n## Composition")
+        for key, value in skill["composition"].items():
+            if value:
+                ref_lines.append(f"- {key}: {value}")
+    return ref_lines
+
+
+def save_recommended_skill_asset_library(items: list[dict[str, Any]], meta: dict[str, Any]) -> None:
+    ensure_catalog_dir()
+    RECOMMENDED_SKILLS_DIR.mkdir(parents=True, exist_ok=True)
+
+    for child in RECOMMENDED_SKILLS_DIR.iterdir():
+        if child.name == "index.json":
+            continue
+        if child.is_dir():
+            shutil.rmtree(child)
+        else:
+            child.unlink()
+
+    index_items: list[dict[str, Any]] = []
+    for item in items:
+        slug = _safe_slug(str(item.get("id") or item.get("title") or "skill"))
+        asset_dir = RECOMMENDED_SKILLS_DIR / slug
+        asset_dir.mkdir(parents=True, exist_ok=True)
+        scripts_dir = asset_dir / "scripts"
+        scripts_dir.mkdir(exist_ok=True)
+
+        normalized = _normalize_skill_record(item)
+        normalized["kind"] = normalized.get("kind", "recommended_skill")
+        (asset_dir / "skill.json").write_text(
+            json.dumps(normalized, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+        skill_md = str(normalized.get("skill_md_content") or "").strip()
+        if not skill_md:
+            skill_md = "\n".join(_build_skill_markdown_lines(normalized)).strip()
+        (asset_dir / "SKILL.md").write_text(skill_md.rstrip() + "\n", encoding="utf-8")
+
+        forms_md = str(normalized.get("forms_md_content") or "").strip()
+        if not forms_md:
+            forms_md = "\n".join(_build_skill_forms_lines(normalized)).strip()
+        (asset_dir / "forms.md").write_text(forms_md.rstrip() + "\n", encoding="utf-8")
+
+        reference_md = str(normalized.get("reference_md_content") or "").strip()
+        if not reference_md:
+            reference_md = "\n".join(_build_skill_reference_lines(normalized)).strip()
+        (asset_dir / "reference.md").write_text(reference_md.rstrip() + "\n", encoding="utf-8")
+
+        scripts_readme = str(normalized.get("scripts_readme") or "").strip()
+        if not scripts_readme:
+            scripts_readme = "# Scripts\n\nPlace executable helpers for this recommended skill here.\n"
+        (scripts_dir / "README.md").write_text(scripts_readme.rstrip() + "\n", encoding="utf-8")
+
+        index_items.append(
+            {
+                "id": normalized.get("id"),
+                "title": normalized.get("title"),
+                "kind": normalized.get("kind", "recommended_skill"),
+                "folder": slug,
+                "json": f"{slug}/skill.json",
+                "skill_md": f"{slug}/SKILL.md",
+                "forms_md": f"{slug}/forms.md",
+                "reference_md": f"{slug}/reference.md",
+            }
+        )
+
+    RECOMMENDED_SKILLS_INDEX_PATH.write_text(
+        json.dumps(
+            {
+                "folder": "recommended_skills",
+                "updated_at": meta.get("last_updated_at") or datetime.now(timezone.utc).isoformat(),
+                "items": index_items,
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    RECOMMENDED_SKILLS_META_PATH.write_text(
+        json.dumps(meta, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    if LEGACY_RECOMMENDED_SKILLS_PATH.exists():
+        LEGACY_RECOMMENDED_SKILLS_PATH.unlink()
+
+
 def ensure_recommended_skill_catalog() -> None:
     ensure_catalog_dir()
-    if not RECOMMENDED_SKILLS_PATH.exists():
-        RECOMMENDED_SKILLS_PATH.write_text(
-            json.dumps(DEFAULT_RECOMMENDED_SKILLS, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-    if not RECOMMENDED_SKILLS_META_PATH.exists():
-        RECOMMENDED_SKILLS_META_PATH.write_text(
-            json.dumps(
-                {
-                    "version": "1.0",
-                    "last_updated_at": datetime.now(timezone.utc).isoformat(),
-                    "last_refresh_status": "seeded",
-                    "sources": ["built_in"],
-                },
-                ensure_ascii=False,
-                indent=2,
-            ),
-            encoding="utf-8",
-        )
+    meta = {
+        "version": "1.1",
+        "last_updated_at": datetime.now(timezone.utc).isoformat(),
+        "last_refresh_status": "seeded",
+        "sources": ["built_in"],
+        "item_count": len(DEFAULT_RECOMMENDED_SKILLS),
+        "last_error": None,
+    }
+    if RECOMMENDED_SKILLS_INDEX_PATH.exists() and RECOMMENDED_SKILLS_META_PATH.exists():
+        return
+
+    if LEGACY_RECOMMENDED_SKILLS_PATH.exists():
+        try:
+            legacy_items = json.loads(LEGACY_RECOMMENDED_SKILLS_PATH.read_text(encoding="utf-8"))
+            if not isinstance(legacy_items, list):
+                legacy_items = list(DEFAULT_RECOMMENDED_SKILLS)
+        except json.JSONDecodeError:
+            legacy_items = list(DEFAULT_RECOMMENDED_SKILLS)
+        if RECOMMENDED_SKILLS_META_PATH.exists():
+            try:
+                loaded_meta = json.loads(RECOMMENDED_SKILLS_META_PATH.read_text(encoding="utf-8"))
+                if isinstance(loaded_meta, dict):
+                    meta.update(loaded_meta)
+            except json.JSONDecodeError:
+                pass
+        save_recommended_skill_asset_library(legacy_items, meta)
+        return
+
+    save_recommended_skill_asset_library(list(DEFAULT_RECOMMENDED_SKILLS), meta)
 
 
 def load_recommended_skill_catalog() -> tuple[list[dict[str, Any]], dict[str, Any]]:
     ensure_recommended_skill_catalog()
+    items: list[dict[str, Any]] = []
     try:
-        items = json.loads(RECOMMENDED_SKILLS_PATH.read_text(encoding="utf-8"))
-        if not isinstance(items, list):
-            items = list(DEFAULT_RECOMMENDED_SKILLS)
+        index_payload = json.loads(RECOMMENDED_SKILLS_INDEX_PATH.read_text(encoding="utf-8"))
+        index_items = index_payload.get("items", []) if isinstance(index_payload, dict) else []
+        for entry in index_items:
+            if not isinstance(entry, dict):
+                continue
+            relative_json = str(entry.get("json") or "").strip()
+            if not relative_json:
+                continue
+            json_path = RECOMMENDED_SKILLS_DIR / relative_json
+            if not json_path.exists():
+                continue
+            record = read_json_file(json_path)
+            if isinstance(record, dict):
+                items.append(record)
     except json.JSONDecodeError:
+        items = []
+    if not items:
         items = list(DEFAULT_RECOMMENDED_SKILLS)
 
     try:
@@ -486,15 +653,7 @@ def load_recommended_skill_catalog() -> tuple[list[dict[str, Any]], dict[str, An
 
 
 def save_recommended_skill_catalog(items: list[dict[str, Any]], meta: dict[str, Any]) -> None:
-    ensure_catalog_dir()
-    RECOMMENDED_SKILLS_PATH.write_text(
-        json.dumps(items, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    RECOMMENDED_SKILLS_META_PATH.write_text(
-        json.dumps(meta, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    save_recommended_skill_asset_library(items, meta)
 
 
 def _parse_iso_datetime(value: str | None) -> datetime | None:
@@ -690,6 +849,7 @@ def _parse_markdown_skill_source(raw_text: str, source: dict[str, Any], folder_n
     record["description"] = (
         f"触发：{record['trigger']} | 目标：{record['goal']} | 步骤：{'；'.join(record.get('steps', [])[:3])} | 产出：{record.get('output_format', '结构化结果')}"
     )
+    record["skill_md_content"] = raw_text.strip()
     return record
 
 
@@ -716,6 +876,16 @@ def _parse_github_skill_repo_source(raw_text: str, source: dict[str, Any]) -> li
             continue
         item = _parse_markdown_skill_source(md_text, source, folder_name)
         if item:
+            for filename, key in [("forms.md", "forms_md_content"), ("reference.md", "reference_md_content")]:
+                file_url = f"{raw_base}/{urllib.parse.quote(folder_name)}/{filename}"
+                try:
+                    item[key] = _fetch_remote_text(file_url, timeout=8.0).strip()
+                except (urllib.error.URLError, TimeoutError, ValueError):
+                    continue
+            item["scripts_readme"] = (
+                "# Scripts\n\n"
+                f"Recommended helper scripts for `{item.get('title', folder_name)}` can be placed here.\n"
+            )
             rows.append(item)
     return rows
 
@@ -1806,6 +1976,10 @@ def _valid_workflows(wiki: L2Wiki) -> list[WorkflowMemory]:
     return [workflow for workflow in wiki.load_workflows() if _looks_like_stable_workflow(workflow)]
 
 
+def _valid_projects(wiki: L2Wiki) -> list[ProjectMemory]:
+    return [project for project in wiki.list_projects() if _looks_like_stable_project(project)]
+
+
 def conversation_signature(conv: RawConversation) -> str:
     payload = {
         "platform": conv.platform,
@@ -2028,7 +2202,6 @@ def count_raw_conversations(path: Path) -> int:
 def build_summary(settings: dict[str, Any]) -> SummaryResponse:
     root = get_storage_root(settings)
     wiki = get_wiki(settings)
-    projects_dir = root / "projects"
     episodes_dir = root / "episodes"
     raw_dir = root / "raw"
     persistent_file = root / "js_persistent_nodes.json"
@@ -2038,7 +2211,7 @@ def build_summary(settings: dict[str, Any]) -> SummaryResponse:
 
     workflows_count = len(_valid_workflows(wiki))
 
-    projects_count = count_json_files(projects_dir)
+    projects_count = len(_valid_projects(wiki))
     episodes_count = count_json_files(episodes_dir)
     raw_count = count_raw_conversations(raw_dir)
 
@@ -2095,7 +2268,7 @@ def memory_items_for_category(settings: dict[str, Any], category: str, locale: s
 
     if category == "projects":
         items = []
-        for project in wiki.list_projects():
+        for project in _valid_projects(wiki):
             description = project.current_stage or project.project_goal or "项目记忆"
             items.append(
                 {
@@ -2221,25 +2394,52 @@ def memory_items_for_category(settings: dict[str, Any], category: str, locale: s
                     value = getattr(prefs, field, None)
                 if not value:
                     continue
-                description = ", ".join(value) if isinstance(value, list) else str(value)
-                items.append(
-                    {
-                        "id": f"preferences:{field}",
-                        "title": label,
-                        "description": description[:80],
-                        "display_title": _display_text(
-                            display_cache.get("preferences", {}).get(f"preferences:{field}", {}).get("title"),
-                            locale,
-                            _localized_field_label("preferences", field, locale),
-                        ),
-                        "display_description": _display_text(
-                            display_cache.get("preferences", {}).get(f"preferences:{field}", {}).get("description"),
-                            locale,
-                            description[:80],
-                        )[:80],
-                        "selected": False,
-                    }
-                )
+                if isinstance(value, list):
+                    for entry in value:
+                        entry_text = str(entry).strip()
+                        if not entry_text:
+                            continue
+                        item_id = f"preferences:{field}:{_safe_slug(entry_text, 'item')}"
+                        display_entry = display_cache.get("preferences", {}).get(item_id, {})
+                        items.append(
+                            {
+                                "id": item_id,
+                                "title": label,
+                                "description": entry_text,
+                                "display_title": _display_text(
+                                    display_entry.get("title"),
+                                    locale,
+                                    _localized_field_label("preferences", field, locale),
+                                ),
+                                "display_description": _display_text(
+                                    display_entry.get("description"),
+                                    locale,
+                                    entry_text,
+                                ),
+                                "selected": False,
+                            }
+                        )
+                else:
+                    description = str(value)
+                    item_id = f"preferences:{field}"
+                    items.append(
+                        {
+                            "id": item_id,
+                            "title": label,
+                            "description": description[:80],
+                            "display_title": _display_text(
+                                display_cache.get("preferences", {}).get(item_id, {}).get("title"),
+                                locale,
+                                _localized_field_label("preferences", field, locale),
+                            ),
+                            "display_description": _display_text(
+                                display_cache.get("preferences", {}).get(item_id, {}).get("description"),
+                                locale,
+                                description[:80],
+                            )[:80],
+                            "selected": False,
+                        }
+                    )
             return items
         return []
 
@@ -2324,7 +2524,7 @@ def derive_my_skills(settings: dict[str, Any]) -> list[dict[str, Any]]:
         )
 
     if len(items) < 5:
-        active_projects = [project for project in wiki.list_projects() if project.is_active]
+        active_projects = [project for project in _valid_projects(wiki) if project.is_active]
         for project in active_projects[: 5 - len(items)]:
             skill_id = f"project:{project.project_name}"
             steps = [entry.text for entry in project.next_actions[:3]]
@@ -2513,6 +2713,7 @@ def parse_selected_ids(selected_ids: list[str]) -> dict[str, set[str]]:
         "profile_fields": set(),
         "profile_values": set(),
         "preferences_fields": set(),
+        "preferences_values": set(),
         "projects": set(),
         "workflows": set(),
         "persistent": set(),
@@ -2531,7 +2732,12 @@ def parse_selected_ids(selected_ids: list[str]) -> dict[str, set[str]]:
                 selected["profile_fields"].add("*")
         elif prefix == "preferences":
             if suffix and suffix != "default":
-                selected["preferences_fields"].add(suffix)
+                parts = suffix.split(":", 1)
+                if len(parts) == 2:
+                    selected["preferences_values"].add(suffix)
+                    selected["preferences_fields"].add(parts[0])
+                else:
+                    selected["preferences_fields"].add(suffix)
             else:
                 selected["preferences_fields"].add("*")
         elif prefix in {"project", "projects"}:
@@ -2590,6 +2796,34 @@ def _filter_profile_fields(data: dict[str, Any], selected_fields: set[str], sele
     return filtered
 
 
+def _filter_preference_fields(data: dict[str, Any], selected_fields: set[str], selected_values: set[str]) -> dict[str, Any]:
+    if "*" in selected_fields:
+        return dict(data)
+
+    filtered = {"id": data.get("id")}
+    value_map: dict[str, set[str]] = {}
+    for token in selected_values:
+        field, _, slug = token.partition(":")
+        if field and slug:
+            value_map.setdefault(field, set()).add(slug)
+
+    for field in selected_fields:
+        if field not in data or not data[field]:
+            continue
+        value = data[field]
+        if isinstance(value, list) and field in value_map:
+            kept = [
+                item
+                for item in value
+                if _safe_slug(str(item), "item") in value_map[field]
+            ]
+            if kept:
+                filtered[field] = kept
+        else:
+            filtered[field] = value
+    return filtered
+
+
 def build_selected_memory_payload(
     settings: dict[str, Any],
     selected_ids: list[str],
@@ -2616,13 +2850,14 @@ def build_selected_memory_payload(
     if selected["preferences_fields"]:
         preferences = wiki.load_preferences()
         if preferences:
-            payload["memory"]["preferences"] = _filter_fields(
+            payload["memory"]["preferences"] = _filter_preference_fields(
                 preferences.model_dump(mode="json"),
                 selected["preferences_fields"],
+                selected["preferences_values"],
             )
 
     if selected["projects"]:
-        projects = wiki.list_projects()
+        projects = _valid_projects(wiki)
         if "*" not in selected["projects"]:
             projects = [project for project in projects if project.project_name in selected["projects"]]
         payload["memory"]["projects"] = [project.model_dump(mode="json") for project in projects]
