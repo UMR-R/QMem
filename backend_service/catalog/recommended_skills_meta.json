@@ -1,0 +1,10 @@
+{
+  "version": "1.1",
+  "last_updated_at": "2026-04-23T18:28:33.291685+00:00",
+  "last_refresh_status": "success",
+  "sources": [
+    "anthropic_skills"
+  ],
+  "item_count": 20,
+  "last_error": null
+}

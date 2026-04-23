@@ -74,3 +74,4 @@ step.md
 
 llm_memory_transferor/data
 llm_memory_transferor/wiki
+backend_service/.state/

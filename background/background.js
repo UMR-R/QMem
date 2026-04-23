@@ -5,14 +5,45 @@
 
 import { updateMemory } from "./memory_engine.js";
 
+async function _forwardRoundToLocalBackend(message) {
+  const settings = await chrome.storage.local.get(["backend_url"]);
+  const backendUrl = (settings["backend_url"] || "http://127.0.0.1:8765").replace(/\/$/, "");
+
+  try {
+    await fetch(`${backendUrl}/api/conversations/append`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        platform: message.platform,
+        chat_id: message.chatId,
+        url: message.url,
+        timestamp: message.timestamp,
+        user_text: message.userText,
+        assistant_text: message.assistantText,
+      }),
+    });
+  } catch (err) {
+    console.warn("[Background] 本地后端未连接，跳过 append:", err.message);
+  }
+}
+
 // ── 消息监听 ──────────────────────────────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === "SAVE_DOCUMENT") {
     saveDocument(message.text, message.platform ?? "ai", message.isMemory ?? false);
+    sendResponse?.({ ok: true });
 
   } else if (message.type === "ROUND_CAPTURED") {
-    handleRoundCaptured(message).catch(console.error);
+    handleRoundCaptured(message)
+      .then(() => sendResponse({ ok: true }))
+      .catch(err => {
+        console.error("[Background] ROUND_CAPTURED 处理失败:", err);
+        sendResponse({ ok: false, error: err.message });
+      });
+    return true;
 
   } else if (message.type === "FLUSH_NOW") {
     flushPending()
@@ -24,6 +55,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     processAllRaw(message.limit ?? 10)
       .then(result => sendResponse({ ok: true, ...result }))
       .catch(err => sendResponse({ ok: false, error: err.message }));
+    return true;
+
+  } else if (message.type === "GET_CAPTURE_STATE") {
+    chrome.storage.local.get(["keepUpdated", "realtimeUpdate", "deepseek_api_key"], data => {
+      sendResponse({
+        ok: true,
+        keepUpdated: Boolean(data["keepUpdated"]),
+        realtimeUpdate: Boolean(data["realtimeUpdate"]),
+        apiKeyConfigured: Boolean(data["deepseek_api_key"]),
+      });
+    });
     return true;
   }
 });
@@ -90,6 +132,8 @@ async function handleRoundCaptured(message) {
     [storageKey]: chatData,
     pending_flush: pending,
   });
+
+  _forwardRoundToLocalBackend(message).catch(console.error);
 
   // 立即触发 LLM 处理（fire and forget）
   flushPending().catch(console.error);

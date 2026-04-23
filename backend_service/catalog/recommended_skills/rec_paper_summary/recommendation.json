@@ -1,0 +1,24 @@
+{
+  "id": "rec:paper_summary",
+  "icon": "研",
+  "tags": [
+    "research",
+    "paper",
+    "summary"
+  ],
+  "keywords": [
+    "paper",
+    "review",
+    "literature",
+    "summary",
+    "research"
+  ],
+  "persona_signals": [
+    "paper",
+    "research",
+    "reading",
+    "summary"
+  ],
+  "usage_score": 0.92,
+  "source": "built_in"
+}

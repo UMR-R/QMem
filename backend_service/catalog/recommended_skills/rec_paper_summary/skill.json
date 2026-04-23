@@ -1,0 +1,20 @@
+{
+  "id": "rec:paper_summary",
+  "title": "读文献总结",
+  "description": "触发：需要快速读懂论文并输出结构化摘要时 | 目标：提炼问题、方法、结果和局限 | 产出：结构化文献摘要",
+  "kind": "skill",
+  "trigger": "需要快速理解论文内容并沉淀关键信息时",
+  "goal": "提炼研究问题、方法、结果和局限",
+  "steps": [
+    "定位论文核心问题",
+    "提取方法与实验设计",
+    "总结结果、贡献与局限"
+  ],
+  "output_format": "结构化文献摘要",
+  "guardrails": [],
+  "source_types": [
+    "recommended_catalog"
+  ],
+  "confidence": "medium",
+  "selected": false
+}

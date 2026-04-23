@@ -1,0 +1,27 @@
+{
+  "id": "rec:anthropic_skills:Word_文档处理",
+  "icon": "W",
+  "tags": [
+    "general"
+  ],
+  "keywords": [
+    "word",
+    "docx",
+    "file",
+    "zip",
+    "archive",
+    "containing",
+    "xml",
+    "files"
+  ],
+  "persona_signals": [
+    "word",
+    "docx",
+    "file",
+    "zip",
+    "archive",
+    "containing"
+  ],
+  "usage_score": 0.96,
+  "source": "anthropic_skills:docx"
+}

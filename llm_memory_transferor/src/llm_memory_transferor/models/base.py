@@ -42,9 +42,15 @@ class MemoryBase(BaseModel):
         self.version += 1
 
     def add_evidence(self, source_type: str, source_id: str, excerpt: str = "") -> None:
-        self.evidence_links.append(
-            EvidenceLink(source_type=source_type, source_id=source_id, excerpt=excerpt)
-        )
+        candidate = EvidenceLink(source_type=source_type, source_id=source_id, excerpt=excerpt)
+        for existing in self.evidence_links:
+            if (
+                existing.source_type == candidate.source_type
+                and existing.source_id == candidate.source_id
+                and existing.excerpt == candidate.excerpt
+            ):
+                return
+        self.evidence_links.append(candidate)
 
     def record_conflict(self, field: str, old_value: Any, new_value: Any, source: str) -> None:
         self.conflict_log.append(

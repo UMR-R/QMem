@@ -1,0 +1,21 @@
+{
+  "id": "rec:anthropic_skills:Theme_Factory_Skill",
+  "title": "Theme Factory Skill",
+  "description": "触发：需要处理与Theme Factory Skill相关的任务时 | 目标：To apply consistent, professional styling to presentation sl | 步骤：After a preferred theme is selected:；Read the corresponding theme file from the `themes/` directory；Apply the specified colors and fonts consistently throughout the deck | 产出：结构化结果",
+  "kind": "skill",
+  "trigger": "需要处理与Theme Factory Skill相关的任务时",
+  "goal": "To apply consistent, professional styling to presentation sl",
+  "steps": [
+    "After a preferred theme is selected:",
+    "Read the corresponding theme file from the `themes/` directory",
+    "Apply the specified colors and fonts consistently throughout the deck",
+    "Ensure proper contrast and readability"
+  ],
+  "output_format": "结构化结果",
+  "guardrails": [],
+  "source_types": [
+    "recommended_catalog"
+  ],
+  "confidence": "medium",
+  "selected": false
+}

@@ -213,6 +213,247 @@ function scrapeFullConversation(config) {
   return messages.map(({ role, text }) => ({ role, text }));
 }
 
+function _uniqueTexts(values, max = 24) {
+  const result = [];
+  const seen = new Set();
+  for (const value of values || []) {
+    const text = String(value || "").replace(/\s+/g, " ").trim();
+    if (!text) continue;
+    const key = text.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(text);
+    if (result.length >= max) break;
+  }
+  return result;
+}
+
+function _normalizePlatformPageText(root) {
+  const rawText = (root?.innerText || document.body?.innerText || "").trim();
+  return rawText.replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function _collectVisibleLines(root) {
+  return _normalizePlatformPageText(root)
+    .split("\n")
+    .map(line => line.trim())
+    .filter(Boolean);
+}
+
+function _textHasAny(text, keywords) {
+  const lower = String(text || "").toLowerCase();
+  return keywords.some(keyword => lower.includes(keyword));
+}
+
+function _looksLikeUiChrome(line) {
+  return _textHasAny(line, [
+    "settings", "setting", "personalization", "manage memories", "saved memory", "memory updated",
+    "learn more", "turn on", "turn off", "enable", "disable", "delete", "edit", "search", "back",
+    "chat history", "new chat", "temporary chat", "customize", "configure", "share", "save",
+    "设置", "个性化", "管理记忆", "已保存的记忆", "记忆已更新", "了解更多", "打开", "关闭",
+    "删除", "编辑", "搜索", "返回", "聊天记录", "新建聊天", "保存", "配置", "分享",
+  ]);
+}
+
+function _looksLikeSavedMemoryLine(line) {
+  const text = String(line || "").trim();
+  if (!text || text.length < 4 || text.length > 220) return false;
+  if (_looksLikeUiChrome(text)) return false;
+  return true;
+}
+
+function _extractSectionFieldCandidates() {
+  const fields = [];
+  const inputs = document.querySelectorAll("textarea, input[type='text'], input:not([type]), [contenteditable='true']");
+  for (const el of inputs) {
+    const raw = "value" in el ? el.value : el.innerText;
+    const content = String(raw || "").replace(/\s+/g, " ").trim();
+    if (!content || content.length < 4) continue;
+    const label = el.getAttribute("aria-label")
+      || el.getAttribute("placeholder")
+      || el.closest("label, section, article, form, div")?.querySelector("label, h2, h3, h4, legend")?.innerText
+      || "";
+    fields.push({ label: String(label || "").trim(), content });
+  }
+  return fields;
+}
+
+function _extractCardLikeItems() {
+  const cards = [];
+  const nodes = document.querySelectorAll("article, li, [role='listitem'], button, a, section");
+  for (const node of nodes) {
+    const text = String(node.innerText || "").trim();
+    if (!text || text.length < 8 || text.length > 320) continue;
+    const lines = text.split("\n").map(line => line.trim()).filter(Boolean);
+    if (lines.length < 2) continue;
+    const name = lines[0];
+    const summary = lines.slice(1).join(" ").slice(0, 220);
+    if (!_looksLikeSavedMemoryLine(name) || _looksLikeUiChrome(summary)) continue;
+    cards.push({ name, summary });
+  }
+  return cards;
+}
+
+function scrapePlatformMemory(config) {
+  const mainRoot = document.querySelector("main, [role='main'], article") || document.body;
+  const condensedText = _normalizePlatformPageText(mainRoot);
+  const lines = _collectVisibleLines(mainRoot);
+  const title = document.title || "";
+  const heading = document.querySelector("h1, h2")?.innerText?.trim() || "";
+  const agentName = (heading || title || config?.name || "platform_memory")
+    .replace(/\s*[-|·]\s*ChatGPT.*$/i, "")
+    .replace(/\s*[-|·]\s*DeepSeek.*$/i, "")
+    .trim();
+  const url = location.href;
+  const urlLower = url.toLowerCase();
+  const pageTextLower = condensedText.toLowerCase();
+
+  const savedMemorySignals = [
+    "saved memory", "manage memories", "memory updated", "reference saved memories",
+    "已保存的记忆", "管理记忆", "记忆已更新", "参考已保存记忆",
+  ];
+  const customInstructionSignals = [
+    "custom instructions", "how would you like chatgpt", "what traits should chatgpt have",
+    "anything else chatgpt should know", "自定义指令", "你希望 chatgpt", "chatgpt 应该了解",
+  ];
+  const agentSignals = [
+    "conversation starters", "knowledge", "actions", "instructions", "configure", "builder",
+    "对话开场白", "知识", "操作", "说明", "配置", "构建器",
+  ];
+  const platformSkillSignals = [
+    "skill", "skills", "tool", "tools", "workspace", "capability",
+    "技能", "工具", "工作区", "能力",
+  ];
+
+  const hasSavedMemory = _textHasAny(`${urlLower}\n${pageTextLower}`, savedMemorySignals);
+  const hasCustomInstructions = _textHasAny(`${urlLower}\n${pageTextLower}`, customInstructionSignals);
+  const hasAgentConfig = _textHasAny(`${urlLower}\n${pageTextLower}`, agentSignals) || /\/g\/|\/gpts\/|\/editor/.test(urlLower);
+  const hasPlatformSkills = _textHasAny(`${urlLower}\n${pageTextLower}`, platformSkillSignals);
+  const looksLikeChatPage = Boolean(config?.getChatId?.()) || /\/c\/|\/chat\//.test(urlLower);
+
+  if (looksLikeChatPage && !hasSavedMemory && !hasCustomInstructions && !hasAgentConfig && !hasPlatformSkills) {
+    return {
+      ok: false,
+      error: "请先打开平台的已保存记忆、Agent/GPT 配置或 Skill 页面，再加入平台记忆",
+    };
+  }
+
+  const fieldCandidates = _extractSectionFieldCandidates();
+  const cardCandidates = _extractCardLikeItems();
+
+  const savedMemoryItems = hasSavedMemory
+    ? _uniqueTexts(
+        [
+          ...lines.filter(_looksLikeSavedMemoryLine),
+          ...fieldCandidates.map(item => item.content),
+        ].filter(item => !_looksLikeUiChrome(item)),
+        24
+      )
+    : [];
+
+  const customInstructions = hasCustomInstructions
+    ? _uniqueTexts(
+        fieldCandidates
+          .filter(item => _looksLikeSavedMemoryLine(item.content))
+          .map(item => `${item.label || "instruction"}: ${item.content}`),
+        8
+      ).map(item => {
+        const [label, ...rest] = item.split(": ");
+        return {
+          label: rest.length ? label : "instruction",
+          content: rest.length ? rest.join(": ").trim() : item,
+        };
+      })
+    : [];
+
+  const conversationStarters = hasAgentConfig
+    ? _uniqueTexts(
+        cardCandidates
+          .map(item => item.name)
+          .filter(item => item.length <= 120 && !_looksLikeUiChrome(item)),
+        8
+      )
+    : [];
+
+  const instructionField = fieldCandidates.find(item =>
+    _textHasAny(`${item.label}\n${item.content}`, ["instruction", "说明", "自定义指令", "instructions"])
+  );
+  const knowledgeLines = hasAgentConfig
+    ? _uniqueTexts(
+        lines.filter(line => _textHasAny(line, ["knowledge", "知识", "file", "document", "pdf"])),
+        8
+      )
+    : [];
+  const toolLines = hasAgentConfig
+    ? _uniqueTexts(
+        lines.filter(line => _textHasAny(line, ["action", "actions", "tool", "tools", "操作", "工具", "browser", "code", "search"])),
+        8
+      )
+    : [];
+
+  const agentConfig = hasAgentConfig
+    ? {
+        name: agentName,
+        description: heading || title,
+        instructions: instructionField?.content || "",
+        conversation_starters: conversationStarters,
+        knowledge: knowledgeLines,
+        tools: toolLines,
+      }
+    : {};
+
+  const platformSkills = hasPlatformSkills
+    ? cardCandidates.slice(0, 12).map(item => ({
+        name: item.name,
+        summary: item.summary,
+      }))
+    : [];
+
+  const memoryHints = _uniqueTexts([
+    ...savedMemoryItems,
+    ...customInstructions.map(item => item.content),
+    ...conversationStarters,
+    ...platformSkills.map(item => `${item.name}: ${item.summary}`),
+  ], 30);
+
+  if (!memoryHints.length && !savedMemoryItems.length && !customInstructions.length && !Object.keys(agentConfig).length && !platformSkills.length) {
+    return {
+      ok: false,
+      error: "当前页面没有可保存的平台记忆信息",
+    };
+  }
+
+  const recordTypes = [];
+  if (savedMemoryItems.length) recordTypes.push("saved_memory");
+  if (customInstructions.length) recordTypes.push("custom_instruction");
+  if (Object.keys(agentConfig).length) recordTypes.push("agent_config");
+  if (platformSkills.length) recordTypes.push("platform_skill");
+
+  let pageType = "platform_context";
+  if (recordTypes.includes("saved_memory")) pageType = "saved_memory";
+  else if (recordTypes.includes("agent_config")) pageType = "agent_config";
+  else if (recordTypes.includes("platform_skill")) pageType = "platform_skill";
+  else if (recordTypes.includes("custom_instruction")) pageType = "custom_instruction";
+
+  return {
+    title,
+    heading,
+    agentName,
+    url,
+    platform: config?.name || location.hostname,
+    chatId: config?.getChatId?.() ?? "",
+    memoryHints,
+    pageTextExcerpt: condensedText.slice(0, 8000),
+    capturedAt: new Date().toISOString(),
+    pageType,
+    recordTypes,
+    savedMemoryItems,
+    customInstructions,
+    agentConfig,
+    platformSkills,
+  };
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 //  剪贴板拦截（平台通用）
 //  clipboard_interceptor.js 运行在 MAIN world，覆盖页面的 clipboard API，
@@ -227,6 +468,30 @@ window.addEventListener("message", (e) => {
   }
 });
 
+function runtimeSendMessage(message) {
+  return new Promise((resolve, reject) => {
+    try {
+      chrome.runtime.sendMessage(message, response => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+        resolve(response);
+      });
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
+function storageGet(key) {
+  return new Promise(resolve => chrome.storage.local.get(key, resolve));
+}
+
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 //  消息监听
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -236,15 +501,48 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   if (message.type === "SCRAPE") {
     sendResponse({ data: scrapePage() });
+    return false;
+
+  } else if (message.type === "SCRAPE_CONVERSATION") {
+    if (!config) {
+      sendResponse({ ok: false, error: "当前页面不支持对话抓取" });
+      return false;
+    }
+    sendResponse({
+      ok: true,
+      data: {
+        title: document.title,
+        url: location.href,
+        platform: config.name,
+        chatId: config.getChatId?.() ?? "",
+        messages: scrapeFullConversation(config),
+      },
+    });
+    return false;
+
+  } else if (message.type === "SCRAPE_PLATFORM_MEMORY") {
+    if (!config) {
+      sendResponse({ ok: false, error: "当前页面不支持平台记忆抓取" });
+      return false;
+    }
+    const result = scrapePlatformMemory(config);
+    if (result?.ok === false) {
+      sendResponse({ ok: false, error: result.error || "当前页面不支持平台记忆抓取" });
+      return false;
+    }
+    sendResponse({ ok: true, data: result });
+    return false;
 
   } else if (message.type === "TOGGLE_CAPTURE") {
     if (message.enabled) startCapture();
     else stopCapture();
     sendResponse({ ok: true });
+    return false;
 
   } else if (message.type === "INJECT_INPUT") {
     const result = injectInput(message.text, false, config);
     sendResponse(result);
+    return false;
 
   } else if (message.type === "SUBMIT_AND_WAIT") {
     const el = findInputElement(config);
@@ -268,14 +566,18 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         chrome.storage.local.set({ [jobId]: { ok: false, error: err.message } });
       });
 
+    return true;
+
   } else if (message.type === "UPLOAD_FILE") {
     uploadFile(message.fileBuffer, message.fileName, message.promptText, config)
       .then(result => sendResponse(result))
       .catch(err => sendResponse({ ok: false, error: err.message }));
 
+    return true;
+
   }
 
-  return true;
+  return false;
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -597,6 +899,7 @@ let _capturePhase = "idle";   // idle → wait-stop | wait-stable → idle
 let _prevMsgCount = 0;        // 上次捕获时的消息数，用于识别新增消息
 let _stableCount = 0;         // 内容连续稳定的轮次
 let _lastStableContent = null;// 稳定性检测用的上一次内容快照
+let _lastChatId = null;       // 当前捕获中的会话 ID，用于识别新建对话
 
 const STABLE_TICKS = 5;       // 5 × 600ms = 3s 内容不变则判定完成
 
@@ -613,6 +916,7 @@ function startCapture() {
   _prevMsgCount = _countMessages(config);
   _stableCount = 0;
   _lastStableContent = null;
+  _lastChatId = config.getChatId?.() ?? null;
   console.log("[MemAssist] 开始捕获，平台:", config.name, "，初始消息数:", _prevMsgCount);
 
   // 用轮询替代 MutationObserver，复用 findStopButton 的逻辑
@@ -625,12 +929,48 @@ function stopCapture() {
     _captureObserver = null;
   }
   _capturePhase = "idle";
+  _lastChatId = null;
   console.log("[MemAssist] 已停止捕获");
+}
+
+async function syncCapturePreference(reason = "unknown") {
+  let keepUpdated;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const data = await storageGet("keepUpdated");
+    if (typeof data.keepUpdated === "boolean") {
+      keepUpdated = data.keepUpdated;
+      break;
+    }
+    await delay(200 * (attempt + 1));
+  }
+
+  if (typeof keepUpdated !== "boolean") {
+    try {
+      const state = await runtimeSendMessage({ type: "GET_CAPTURE_STATE" });
+      keepUpdated = Boolean(state?.keepUpdated);
+    } catch (err) {
+      console.warn("[MemAssist] 获取捕获状态失败:", err?.message ?? err);
+    }
+  }
+
+  console.log("[MemAssist] keepUpdated =", keepUpdated, "，来源:", reason);
+  if (keepUpdated) startCapture();
+  else stopCapture();
 }
 
 function _captureStep(config) {
   const stopBtn = findStopButton(config);
   const currentCount = _countMessages(config);
+  const currentChatId = config.getChatId?.() ?? null;
+
+  if (currentChatId && currentChatId !== _lastChatId) {
+    console.log("[MemAssist] 检测到新会话，重置捕获基线:", currentChatId);
+    _lastChatId = currentChatId;
+    _prevMsgCount = 0;
+    _stableCount = 0;
+    _lastStableContent = null;
+    _capturePhase = "idle";
+  }
 
   if (_capturePhase === "idle") {
     if (stopBtn) {
@@ -706,15 +1046,19 @@ async function _onRoundComplete(config) {
   }
   console.log("[MemAssist] 发送 ROUND_CAPTURED，chatId:", chatId, "，用户消息前50字:", userText.slice(0, 50));
 
-  chrome.runtime.sendMessage({
-    type: "ROUND_CAPTURED",
-    chatId,
-    platform: config.name,
-    url: location.href,
-    userText,
-    assistantText,
-    timestamp: new Date().toISOString(),
-  });
+  try {
+    await chrome.runtime.sendMessage({
+      type: "ROUND_CAPTURED",
+      chatId,
+      platform: config.name,
+      url: location.href,
+      userText,
+      assistantText,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.warn("[MemAssist] ROUND_CAPTURED 发送失败:", err?.message ?? err);
+  }
 }
 
 function _getLastMessage(selectors) {
@@ -728,7 +1072,24 @@ function _getLastMessage(selectors) {
 // ── 页面加载时根据开关状态决定是否自动启动捕获 ────────────────────────────────
 
 console.log("[MemAssist] content.js 已加载，平台:", location.hostname);
-chrome.storage.local.get("keepUpdated", ({ keepUpdated }) => {
-  console.log("[MemAssist] keepUpdated =", keepUpdated);
-  if (keepUpdated) startCapture();
+syncCapturePreference("startup").catch(err => {
+  console.warn("[MemAssist] 初始化捕获状态失败:", err?.message ?? err);
+});
+
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== "local" || !changes.keepUpdated) return;
+  const nextValue = changes.keepUpdated.newValue;
+  console.log("[MemAssist] 检测到 keepUpdated 变化:", nextValue);
+  if (nextValue) startCapture();
+  else stopCapture();
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") {
+    syncCapturePreference("visibility").catch(() => {});
+  }
+});
+
+window.addEventListener("focus", () => {
+  syncCapturePreference("focus").catch(() => {});
 });

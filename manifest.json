@@ -17,7 +17,9 @@
 
   "host_permissions": [
     "<all_urls>",
-    "https://api.deepseek.com/*"
+    "https://api.deepseek.com/*",
+    "http://127.0.0.1/*",
+    "http://localhost/*"
   ],
 
   "action": {

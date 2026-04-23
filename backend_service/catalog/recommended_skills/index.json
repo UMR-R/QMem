@@ -1,0 +1,226 @@
+{
+  "folder": "recommended_skills",
+  "updated_at": "2026-04-23T18:28:33.291685+00:00",
+  "items": [
+    {
+      "id": "rec:anthropic_skills:Algorithmic-art",
+      "title": "Algorithmic-art",
+      "kind": "skill",
+      "folder": "rec_anthropic_skills_Algorithmic-art",
+      "json": "rec_anthropic_skills_Algorithmic-art/skill.json",
+      "recommendation_json": "rec_anthropic_skills_Algorithmic-art/recommendation.json",
+      "skill_md": "rec_anthropic_skills_Algorithmic-art/SKILL.md",
+      "forms_md": "rec_anthropic_skills_Algorithmic-art/forms.md",
+      "reference_md": "rec_anthropic_skills_Algorithmic-art/reference.md"
+    },
+    {
+      "id": "rec:anthropic_skills:Anthropic_Brand_Styling",
+      "title": "Anthropic Brand Styling",
+      "kind": "skill",
+      "folder": "rec_anthropic_skills_Anthropic_Brand_Styling",
+      "json": "rec_anthropic_skills_Anthropic_Brand_Styling/skill.json",
+      "recommendation_json": "rec_anthropic_skills_Anthropic_Brand_Styling/recommendation.json",
+      "skill_md": "rec_anthropic_skills_Anthropic_Brand_Styling/SKILL.md",
+      "forms_md": "rec_anthropic_skills_Anthropic_Brand_Styling/forms.md",
+      "reference_md": "rec_anthropic_skills_Anthropic_Brand_Styling/reference.md"
+    },
+    {
+      "id": "rec:anthropic_skills:Canvas-design",
+      "title": "Canvas-design",
+      "kind": "skill",
+      "folder": "rec_anthropic_skills_Canvas-design",
+      "json": "rec_anthropic_skills_Canvas-design/skill.json",
+      "recommendation_json": "rec_anthropic_skills_Canvas-design/recommendation.json",
+      "skill_md": "rec_anthropic_skills_Canvas-design/SKILL.md",
+      "forms_md": "rec_anthropic_skills_Canvas-design/forms.md",
+      "reference_md": "rec_anthropic_skills_Canvas-design/reference.md"
+    },
+    {
+      "id": "rec:anthropic_skills:Building_Llm-powered_Applications_With_Claude",
+      "title": "Building Llm-powered Applications With Claude",
+      "kind": "skill",
+      "folder": "rec_anthropic_skills_Building_Llm-powered_Applications_With_Claude",
+      "json": "rec_anthropic_skills_Building_Llm-powered_Applications_With_Claude/skill.json",
+      "recommendation_json": "rec_anthropic_skills_Building_Llm-powered_Applications_With_Claude/recommendation.json",
+      "skill_md": "rec_anthropic_skills_Building_Llm-powered_Applications_With_Claude/SKILL.md",
+      "forms_md": "rec_anthropic_skills_Building_Llm-powered_Applications_With_Claude/forms.md",
+      "reference_md": "rec_anthropic_skills_Building_Llm-powered_Applications_With_Claude/reference.md"
+    },
+    {
+      "id": "rec:anthropic_skills:Doc_Co-authoring_Workflow",
+      "title": "Doc Co-authoring Workflow",
+      "kind": "skill",
+      "folder": "rec_anthropic_skills_Doc_Co-authoring_Workflow",
+      "json": "rec_anthropic_skills_Doc_Co-authoring_Workflow/skill.json",
+      "recommendation_json": "rec_anthropic_skills_Doc_Co-authoring_Workflow/recommendation.json",
+      "skill_md": "rec_anthropic_skills_Doc_Co-authoring_Workflow/SKILL.md",
+      "forms_md": "rec_anthropic_skills_Doc_Co-authoring_Workflow/forms.md",
+      "reference_md": "rec_anthropic_skills_Doc_Co-authoring_Workflow/reference.md"
+    },
+    {
+      "id": "rec:anthropic_skills:Word_文档处理",
+      "title": "Word 文档处理",
+      "kind": "skill",
+      "folder": "rec_anthropic_skills_Word_文档处理",
+      "json": "rec_anthropic_skills_Word_文档处理/skill.json",
+      "recommendation_json": "rec_anthropic_skills_Word_文档处理/recommendation.json",
+      "skill_md": "rec_anthropic_skills_Word_文档处理/SKILL.md",
+      "forms_md": "rec_anthropic_skills_Word_文档处理/forms.md",
+      "reference_md": "rec_anthropic_skills_Word_文档处理/reference.md"
+    },
+    {
+      "id": "rec:anthropic_skills:Frontend-design",
+      "title": "Frontend-design",
+      "kind": "skill",
+      "folder": "rec_anthropic_skills_Frontend-design",
+      "json": "rec_anthropic_skills_Frontend-design/skill.json",
+      "recommendation_json": "rec_anthropic_skills_Frontend-design/recommendation.json",
+      "skill_md": "rec_anthropic_skills_Frontend-design/SKILL.md",
+      "forms_md": "rec_anthropic_skills_Frontend-design/forms.md",
+      "reference_md": "rec_anthropic_skills_Frontend-design/reference.md"
+    },
+    {
+      "id": "rec:anthropic_skills:Internal-comms",
+      "title": "Internal-comms",
+      "kind": "skill",
+      "folder": "rec_anthropic_skills_Internal-comms",
+      "json": "rec_anthropic_skills_Internal-comms/skill.json",
+      "recommendation_json": "rec_anthropic_skills_Internal-comms/recommendation.json",
+      "skill_md": "rec_anthropic_skills_Internal-comms/SKILL.md",
+      "forms_md": "rec_anthropic_skills_Internal-comms/forms.md",
+      "reference_md": "rec_anthropic_skills_Internal-comms/reference.md"
+    },
+    {
+      "id": "rec:anthropic_skills:MCP_Server_Development_Guide",
+      "title": "MCP Server Development Guide",
+      "kind": "skill",
+      "folder": "rec_anthropic_skills_MCP_Server_Development_Guide",
+      "json": "rec_anthropic_skills_MCP_Server_Development_Guide/skill.json",
+      "recommendation_json": "rec_anthropic_skills_MCP_Server_Development_Guide/recommendation.json",
+      "skill_md": "rec_anthropic_skills_MCP_Server_Development_Guide/SKILL.md",
+      "forms_md": "rec_anthropic_skills_MCP_Server_Development_Guide/forms.md",
+      "reference_md": "rec_anthropic_skills_MCP_Server_Development_Guide/reference.md"
+    },
+    {
+      "id": "rec:anthropic_skills:PDF_Processing_Guide",
+      "title": "PDF Processing Guide",
+      "kind": "skill",
+      "folder": "rec_anthropic_skills_PDF_Processing_Guide",
+      "json": "rec_anthropic_skills_PDF_Processing_Guide/skill.json",
+      "recommendation_json": "rec_anthropic_skills_PDF_Processing_Guide/recommendation.json",
+      "skill_md": "rec_anthropic_skills_PDF_Processing_Guide/SKILL.md",
+      "forms_md": "rec_anthropic_skills_PDF_Processing_Guide/forms.md",
+      "reference_md": "rec_anthropic_skills_PDF_Processing_Guide/reference.md"
+    },
+    {
+      "id": "rec:anthropic_skills:PPTX_Skill",
+      "title": "PPTX Skill",
+      "kind": "skill",
+      "folder": "rec_anthropic_skills_PPTX_Skill",
+      "json": "rec_anthropic_skills_PPTX_Skill/skill.json",
+      "recommendation_json": "rec_anthropic_skills_PPTX_Skill/recommendation.json",
+      "skill_md": "rec_anthropic_skills_PPTX_Skill/SKILL.md",
+      "forms_md": "rec_anthropic_skills_PPTX_Skill/forms.md",
+      "reference_md": "rec_anthropic_skills_PPTX_Skill/reference.md"
+    },
+    {
+      "id": "rec:anthropic_skills:Skill_Creator",
+      "title": "Skill Creator",
+      "kind": "skill",
+      "folder": "rec_anthropic_skills_Skill_Creator",
+      "json": "rec_anthropic_skills_Skill_Creator/skill.json",
+      "recommendation_json": "rec_anthropic_skills_Skill_Creator/recommendation.json",
+      "skill_md": "rec_anthropic_skills_Skill_Creator/SKILL.md",
+      "forms_md": "rec_anthropic_skills_Skill_Creator/forms.md",
+      "reference_md": "rec_anthropic_skills_Skill_Creator/reference.md"
+    },
+    {
+      "id": "rec:anthropic_skills:Slack_Gif_Creator",
+      "title": "Slack Gif Creator",
+      "kind": "skill",
+      "folder": "rec_anthropic_skills_Slack_Gif_Creator",
+      "json": "rec_anthropic_skills_Slack_Gif_Creator/skill.json",
+      "recommendation_json": "rec_anthropic_skills_Slack_Gif_Creator/recommendation.json",
+      "skill_md": "rec_anthropic_skills_Slack_Gif_Creator/SKILL.md",
+      "forms_md": "rec_anthropic_skills_Slack_Gif_Creator/forms.md",
+      "reference_md": "rec_anthropic_skills_Slack_Gif_Creator/reference.md"
+    },
+    {
+      "id": "rec:anthropic_skills:Theme_Factory_Skill",
+      "title": "Theme Factory Skill",
+      "kind": "skill",
+      "folder": "rec_anthropic_skills_Theme_Factory_Skill",
+      "json": "rec_anthropic_skills_Theme_Factory_Skill/skill.json",
+      "recommendation_json": "rec_anthropic_skills_Theme_Factory_Skill/recommendation.json",
+      "skill_md": "rec_anthropic_skills_Theme_Factory_Skill/SKILL.md",
+      "forms_md": "rec_anthropic_skills_Theme_Factory_Skill/forms.md",
+      "reference_md": "rec_anthropic_skills_Theme_Factory_Skill/reference.md"
+    },
+    {
+      "id": "rec:anthropic_skills:Web_Artifacts_Builder",
+      "title": "Web Artifacts Builder",
+      "kind": "skill",
+      "folder": "rec_anthropic_skills_Web_Artifacts_Builder",
+      "json": "rec_anthropic_skills_Web_Artifacts_Builder/skill.json",
+      "recommendation_json": "rec_anthropic_skills_Web_Artifacts_Builder/recommendation.json",
+      "skill_md": "rec_anthropic_skills_Web_Artifacts_Builder/SKILL.md",
+      "forms_md": "rec_anthropic_skills_Web_Artifacts_Builder/forms.md",
+      "reference_md": "rec_anthropic_skills_Web_Artifacts_Builder/reference.md"
+    },
+    {
+      "id": "rec:anthropic_skills:Web_Application_Testing",
+      "title": "Web Application Testing",
+      "kind": "skill",
+      "folder": "rec_anthropic_skills_Web_Application_Testing",
+      "json": "rec_anthropic_skills_Web_Application_Testing/skill.json",
+      "recommendation_json": "rec_anthropic_skills_Web_Application_Testing/recommendation.json",
+      "skill_md": "rec_anthropic_skills_Web_Application_Testing/SKILL.md",
+      "forms_md": "rec_anthropic_skills_Web_Application_Testing/forms.md",
+      "reference_md": "rec_anthropic_skills_Web_Application_Testing/reference.md"
+    },
+    {
+      "id": "rec:anthropic_skills:Requirements_For_Outputs",
+      "title": "Requirements For Outputs",
+      "kind": "skill",
+      "folder": "rec_anthropic_skills_Requirements_For_Outputs",
+      "json": "rec_anthropic_skills_Requirements_For_Outputs/skill.json",
+      "recommendation_json": "rec_anthropic_skills_Requirements_For_Outputs/recommendation.json",
+      "skill_md": "rec_anthropic_skills_Requirements_For_Outputs/SKILL.md",
+      "forms_md": "rec_anthropic_skills_Requirements_For_Outputs/forms.md",
+      "reference_md": "rec_anthropic_skills_Requirements_For_Outputs/reference.md"
+    },
+    {
+      "id": "rec:english_rewriter",
+      "title": "English Rewriter",
+      "kind": "skill",
+      "folder": "rec_english_rewriter",
+      "json": "rec_english_rewriter/skill.json",
+      "recommendation_json": "rec_english_rewriter/recommendation.json",
+      "skill_md": "rec_english_rewriter/SKILL.md",
+      "forms_md": "rec_english_rewriter/forms.md",
+      "reference_md": "rec_english_rewriter/reference.md"
+    },
+    {
+      "id": "rec:paper_summary",
+      "title": "读文献总结",
+      "kind": "skill",
+      "folder": "rec_paper_summary",
+      "json": "rec_paper_summary/skill.json",
+      "recommendation_json": "rec_paper_summary/recommendation.json",
+      "skill_md": "rec_paper_summary/SKILL.md",
+      "forms_md": "rec_paper_summary/forms.md",
+      "reference_md": "rec_paper_summary/reference.md"
+    },
+    {
+      "id": "rec:project_plan",
+      "title": "项目规划",
+      "kind": "skill",
+      "folder": "rec_project_plan",
+      "json": "rec_project_plan/skill.json",
+      "recommendation_json": "rec_project_plan/recommendation.json",
+      "skill_md": "rec_project_plan/SKILL.md",
+      "forms_md": "rec_project_plan/forms.md",
+      "reference_md": "rec_project_plan/reference.md"
+    }
+  ]
+}

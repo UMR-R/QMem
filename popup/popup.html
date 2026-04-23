@@ -3,140 +3,256 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Memory Assistant</title>
+  <title>迁忆</title>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
-
-  <!-- ── Header ── -->
-  <header class="header">
-    <div class="brand">
-      <div class="brand-icon">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-          <path d="M12 3C9.2 3 7 5 7 7.5c0 .6.1 1.1.3 1.6H7C5.3 9.1 4 10.4 4 12s1.3 2.9 3 2.9h10c1.7 0 3-1.3 3-2.9s-1.3-2.9-3-2.9h-.3c.2-.5.3-1 .3-1.6C17 5 14.8 3 12 3z" stroke="#6B63FF" stroke-width="1.7" fill="rgba(107,99,255,0.1)" stroke-linejoin="round"/>
-          <path d="M9 15v3M12 15v4M15 15v3" stroke="#6B63FF" stroke-width="1.7" stroke-linecap="round"/>
-          <circle cx="9.5" cy="11" r="1" fill="#6B63FF"/>
-          <circle cx="14.5" cy="11" r="1" fill="#6B63FF"/>
-          <path d="M10.5 13.2c.4.3.9.5 1.5.5s1.1-.2 1.5-.5" stroke="#6B63FF" stroke-width="1.4" stroke-linecap="round"/>
-        </svg>
-      </div>
-      <span class="brand-name">Memory</span>
-      <span class="brand-sub">Assistant</span>
-    </div>
-    <button class="pill-btn" id="apiKeyBtn">
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
-        <circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="2"/>
-        <path d="M5 20c0-3.31 3.13-6 7-6s7 2.69 7 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-      </svg>
-      API Key
-    </button>
-  </header>
-
-  <!-- ── API Key Panel ── -->
-  <div id="apiKeyPanel" class="api-panel hidden">
-    <span id="apiKeyStatus" class="api-status-label">API Key: 未配置</span>
-    <div class="api-input-row">
-      <input type="password" id="apiKeyInput" class="api-input" placeholder="sk-…" autocomplete="off"/>
-      <button id="apiKeySaveBtn" class="btn-save">保存</button>
-    </div>
-  </div>
-
-  <!-- ── Main ── -->
-  <main class="main">
-
-    <!-- Big circle = #syncBtn -->
-    <div class="circle-scene">
-      <div class="dashed-ring">
-        <button id="syncBtn" class="circle-btn" disabled>同步</button>
-      </div>
-    </div>
-
-    <!-- Dir badge + #selectDirBtn -->
-    <div class="dir-badge">
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
-        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
-      </svg>
-      <span id="dirName">未选择目录</span>
-      <button id="selectDirBtn" class="dir-change-btn">选择目录</button>
-    </div>
-
-    <!-- Toggles card -->
-    <div class="toggle-card">
-      <div class="toggle-row">
-        <div class="toggle-left">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-            <circle cx="12" cy="12" r="10" stroke="#6B63FF" stroke-width="2"/>
-            <polyline points="12 6 12 12 16 14" stroke="#6B63FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-          <span>保持更新</span>
+  <div class="app-shell">
+    <header class="app-header">
+      <div class="brand-block">
+        <div class="brand-icon" aria-hidden="true">
+          <span class="brand-core"></span>
+          <span class="brand-arrow"></span>
         </div>
-        <label class="ios-toggle">
-          <input type="checkbox" id="keepUpdatedToggle">
-          <span class="ios-track"></span>
-        </label>
+        <div class="brand-copy">
+          <h1>迁忆</h1>
+          <p>让你的对话记忆，随你而行</p>
+        </div>
       </div>
+      <button id="menuBtn" class="icon-btn" type="button" aria-label="更多">
+        <span></span><span></span><span></span>
+      </button>
+    </header>
 
-      <!-- realtimeRow is a plain block wrapper; JS shows/hides it -->
-      <div id="realtimeRow" style="display:none">
-        <div class="card-sep"></div>
-        <div class="toggle-row">
-          <div class="toggle-left">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" stroke="#6B63FF" stroke-width="2" stroke-linejoin="round"/>
-            </svg>
-            <span>实时更新</span>
+    <main class="app-main">
+      <section id="homeView" class="view is-active">
+        <div class="sync-stage">
+          <div class="sync-ring">
+            <button id="syncBtn" class="sync-button" type="button" aria-pressed="false">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M4 4v5h5" />
+                <path d="M20 20v-5h-5" />
+                <path d="M20 9A8 8 0 0 0 6.2 6.1L4 9" />
+                <path d="M4 15a8 8 0 0 0 13.8 2.9L20 15" />
+              </svg>
+              <strong>同步</strong>
+            </button>
           </div>
-          <label class="ios-toggle">
-            <input type="checkbox" id="realtimeUpdateToggle">
-            <span class="ios-track"></span>
+          <div class="sync-meta">
+            <div class="sync-status-line">
+              <span id="syncDot" class="status-dot"></span>
+              <span id="syncStatusText">同步已暂停</span>
+            </div>
+            <p id="syncHintText">点击开启后，持续记录你与大模型的对话</p>
+          </div>
+        </div>
+
+        <button id="gotoMigrateBtn" class="primary-strip-btn" type="button">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M14 5l7 7-7 7" />
+            <path d="M21 12H3" />
+          </svg>
+          <span>迁移</span>
+        </button>
+
+        <div class="dual-actions">
+          <button id="gotoSettingsBtn" class="secondary-card-btn" type="button">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <circle cx="12" cy="12" r="3"></circle>
+              <path d="M19.4 15a1.6 1.6 0 0 0 .3 1.7l.1.1a2 2 0 0 1 0 2.8 2 2 0 0 1-2.8 0l-.1-.1a1.6 1.6 0 0 0-1.7-.3 1.6 1.6 0 0 0-1 1.4V21a2 2 0 0 1-4 0v-.2a1.6 1.6 0 0 0-1-1.4 1.6 1.6 0 0 0-1.7.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.7 1.6 1.6 0 0 0-1.4-1H3a2 2 0 0 1 0-4h.2a1.6 1.6 0 0 0 1.4-1 1.6 1.6 0 0 0-.3-1.7l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.7.3H9a1.6 1.6 0 0 0 1-1.4V3a2 2 0 0 1 4 0v.2a1.6 1.6 0 0 0 1 1.4 1.6 1.6 0 0 0 1.7-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.7V9a1.6 1.6 0 0 0 1.4 1H21a2 2 0 0 1 0 4h-.2a1.6 1.6 0 0 0-1.4 1z"></path>
+            </svg>
+            <span>设置</span>
+          </button>
+          <button id="gotoSkillBtn" class="secondary-card-btn" type="button">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <rect x="5" y="3" width="14" height="18" rx="3"></rect>
+              <path d="M9 8h6"></path>
+              <path d="M9 12h6"></path>
+            </svg>
+            <span>Skill</span>
+          </button>
+        </div>
+
+        <div class="stats-card">
+          <div class="stat-row">
+            <span>最近同步</span>
+            <strong id="lastSyncValue">未开始</strong>
+          </div>
+          <div class="stat-row">
+            <span>已记录对话</span>
+            <strong id="conversationCountValue">0 条</strong>
+          </div>
+          <div class="stat-row">
+            <span>记忆条目</span>
+            <strong id="memoryCountValue">0 条</strong>
+          </div>
+        </div>
+      </section>
+
+      <section id="migrateView" class="view">
+        <div class="view-head">
+          <button data-back="home" class="back-btn" type="button" aria-label="返回">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M15 18l-6-6 6-6" />
+            </svg>
+          </button>
+          <h2>迁移</h2>
+          <span class="view-head-spacer"></span>
+        </div>
+
+        <div class="section-block">
+          <h3>整理记忆</h3>
+          <div id="organizeStatusCard" class="organize-status-card hidden">
+            <div class="organize-ring" aria-hidden="true"></div>
+            <div class="organize-copy">
+              <strong id="organizeStatusText">正在整理记忆...</strong>
+              <p id="organizeStatusHint">准备开始</p>
+            </div>
+          </div>
+          <div class="stacked-actions">
+            <div id="organizeBtnWrap" class="action-tooltip-wrap" title="">
+              <button id="organizeBtn" class="mid-primary-btn" type="button">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M12 3l8 4.5-8 4.5-8-4.5L12 3z"></path>
+                  <path d="M4 12l8 4.5 8-4.5"></path>
+                  <path d="M4 16.5L12 21l8-4.5"></path>
+                </svg>
+                <span>整理记忆</span>
+              </button>
+            </div>
+            <p id="organizeRequirementHint" class="action-requirement-hint hidden">请先在设置页配置 API Key</p>
+            <div class="paired-actions">
+              <button id="addCurrentConversationBtn" class="mid-secondary-btn" type="button">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M12 6v12"></path>
+                  <path d="M6 12h12"></path>
+                </svg>
+                <span>加入当前对话</span>
+              </button>
+              <button id="addPlatformMemoryBtn" class="mid-secondary-btn" type="button">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M12 5v14"></path>
+                  <path d="M5 12h14"></path>
+                </svg>
+                <span>加入平台记忆</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="section-divider"></div>
+
+        <div class="section-block">
+          <h3>勾选记忆内容</h3>
+          <div id="selectionList" class="selection-list"></div>
+        </div>
+
+        <div class="bottom-actions">
+          <button id="exportPackageBtn" class="ghost-action-btn" type="button">导出</button>
+          <button id="injectPackageBtn" class="solid-action-btn" type="button">注入</button>
+        </div>
+      </section>
+
+      <section id="skillView" class="view">
+        <div class="view-head">
+          <button data-back="home" class="back-btn" type="button" aria-label="返回">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M15 18l-6-6 6-6" />
+            </svg>
+          </button>
+          <h2>Skill</h2>
+          <span class="view-head-spacer"></span>
+        </div>
+
+        <div class="skill-tabs">
+          <button id="mySkillTab" class="skill-tab is-active" type="button">我的 Skill</button>
+          <button id="recommendedSkillTab" class="skill-tab" type="button">为你推荐</button>
+        </div>
+
+        <div id="recommendedSkillMeta" class="recommended-skill-meta hidden"></div>
+
+        <div id="skillList" class="skill-list"></div>
+
+        <div class="bottom-actions skill-bottom-actions">
+          <button id="deleteSkillBtn" class="ghost-action-btn hidden" type="button">删除</button>
+          <button id="saveRecommendedSkillBtn" class="ghost-action-btn hidden" type="button">加入我的 Skill</button>
+          <button id="exportSkillBtn" class="ghost-action-btn" type="button">导出</button>
+          <button id="injectSkillBtn" class="solid-action-btn" type="button">注入当前会话</button>
+        </div>
+      </section>
+
+      <section id="settingsView" class="view">
+        <div class="view-head">
+          <button data-back="home" class="back-btn" type="button" aria-label="返回">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M15 18l-6-6 6-6" />
+            </svg>
+          </button>
+          <h2>设置</h2>
+          <span class="view-head-spacer"></span>
+        </div>
+
+        <div class="settings-card">
+          <h3>API 配置</h3>
+          <label class="field-label" for="backendUrlInput">本地后端地址</label>
+          <div class="field-row">
+            <input id="backendUrlInput" class="text-input" type="text" placeholder="http://127.0.0.1:8765">
+            <button id="saveSettingsBtn" class="outline-mini-btn" type="button">保存</button>
+          </div>
+          <label class="field-label" for="apiKeyInput">API Key</label>
+          <div class="field-row">
+            <input id="apiKeyInput" class="text-input" type="password" placeholder="请输入 API Key" autocomplete="off">
+            <button id="testConnectionBtn" class="outline-mini-btn" type="button">测试连接</button>
+          </div>
+          <p id="apiKeyStatus" class="helper-text">API 可调用：待配置</p>
+        </div>
+
+        <div class="settings-card">
+          <h3>本地目录</h3>
+          <div class="field-row">
+            <input id="storageDirInput" class="text-input" type="text" placeholder="请输入或选择本地存储目录">
+            <button id="selectDirBtn" class="outline-mini-btn" type="button">选择目录</button>
+          </div>
+        </div>
+
+        <div class="settings-card">
+          <h3>同步策略</h3>
+          <label class="toggle-row">
+            <span>
+              <strong>同步对话</strong>
+              <em>持续记录对话到本地</em>
+            </span>
+            <input id="keepUpdatedToggle" class="toggle-input" type="checkbox">
+          </label>
+          <label class="toggle-row">
+            <span>
+              <strong>同步记忆</strong>
+              <em>新对话到来后自动提取记忆</em>
+            </span>
+            <input id="realtimeUpdateToggle" class="toggle-input" type="checkbox">
           </label>
         </div>
-      </div>
-    </div>
 
-    <!-- Export pill button -->
-    <button id="exportMemoryBtn" class="export-btn">导出并保存记忆</button>
+        <div class="settings-card">
+          <h3>数据管理</h3>
+          <button id="importHistoryBtn" class="settings-action-row" type="button">
+            <span>导入对话</span>
+            <small>支持 txt/md/json 的原始对话</small>
+          </button>
+          <button id="clearCacheBtn" class="settings-action-row danger-row" type="button">
+            <span>清理缓存</span>
+            <small>清理本地临时缓存，保留主记忆文件</small>
+          </button>
+        </div>
+      </section>
 
-    <!-- Result area -->
-    <div id="result" class="result hidden"></div>
-
-    <!-- Hidden file input -->
-    <input type="file" id="importFileInput" accept=".json" style="display:none">
-
-    <!-- Tag-based import panel -->
-    <div id="importPanel" class="import-panel hidden">
-      <div id="persistentList" class="persistent-list"></div>
-      <!-- Platform selector for bootstrap export -->
-      <div class="target-row">
-        <span class="target-label">目标平台</span>
-        <select id="exportTargetSelect" class="target-select">
-          <option value="claude">Claude</option>
-          <option value="chatgpt">ChatGPT</option>
-          <option value="deepseek">DeepSeek</option>
-          <option value="generic">通用</option>
-        </select>
-      </div>
-      <!-- Inject into tab OR download as file -->
-      <div class="btn-pair">
-        <button id="confirmImportBtn" class="btn-inject">注入当前对话</button>
-        <button id="exportBootstrapBtn" class="btn-export-bs">导出文件</button>
-      </div>
-    </div>
-
-  </main>
-
-  <!-- ── Footer ── -->
-  <footer class="footer">
-    <button class="footer-btn" id="importFileBtn">导入历史</button>
-    <span class="footer-sep">|</span>
-    <button class="footer-btn" id="rebuildBtn">重建节点</button>
-    <span class="footer-sep">|</span>
-    <button class="footer-btn" id="consolidateBtn">整理节点</button>
-    <span class="footer-sep">|</span>
-    <button class="footer-btn" id="importMemoryBtn">按标签导入</button>
-  </footer>
+      <div id="toast" class="toast hidden"></div>
+      <input id="importFileInput" type="file" accept=".json,.jsonl,.md,.txt" hidden>
+    </main>
+  </div>
 
   <script src="../config.js"></script>
+  <script src="api/backend.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

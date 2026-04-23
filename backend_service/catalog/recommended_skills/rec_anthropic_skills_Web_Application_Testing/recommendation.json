@@ -1,0 +1,31 @@
+{
+  "id": "rec:anthropic_skills:Web_Application_Testing",
+  "icon": "W",
+  "tags": [
+    "coding",
+    "writing"
+  ],
+  "keywords": [
+    "web",
+    "application",
+    "testing",
+    "test",
+    "local",
+    "applications",
+    "write",
+    "native",
+    "python",
+    "playwright",
+    "scripts"
+  ],
+  "persona_signals": [
+    "web",
+    "application",
+    "testing",
+    "test",
+    "local",
+    "applications"
+  ],
+  "usage_score": 0.96,
+  "source": "anthropic_skills:webapp-testing"
+}

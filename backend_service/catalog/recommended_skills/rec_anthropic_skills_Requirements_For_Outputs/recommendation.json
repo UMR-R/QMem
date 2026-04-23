@@ -1,0 +1,31 @@
+{
+  "id": "rec:anthropic_skills:Requirements_For_Outputs",
+  "icon": "R",
+  "tags": [
+    "product"
+  ],
+  "keywords": [
+    "requirements",
+    "outputs",
+    "may",
+    "ask",
+    "create",
+    "edit",
+    "analyze",
+    "contents",
+    "xlsx",
+    "file",
+    "have",
+    "different"
+  ],
+  "persona_signals": [
+    "requirements",
+    "outputs",
+    "may",
+    "ask",
+    "create",
+    "edit"
+  ],
+  "usage_score": 0.96,
+  "source": "anthropic_skills:xlsx"
+}
