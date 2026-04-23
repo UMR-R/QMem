@@ -1,0 +1,96 @@
+{
+  "folder": "recommended_skills",
+  "updated_at": "2026-04-23T15:58:31.731063+00:00",
+  "items": [
+    {
+      "id": "rec:linux_terminal",
+      "title": "Linux Terminal",
+      "kind": "recommended_skill",
+      "folder": "rec_linux_terminal",
+      "json": "rec_linux_terminal/skill.json",
+      "skill_md": "rec_linux_terminal/SKILL.md",
+      "forms_md": "rec_linux_terminal/forms.md",
+      "reference_md": "rec_linux_terminal/reference.md"
+    },
+    {
+      "id": "rec:english_rewriter",
+      "title": "English Rewriter",
+      "kind": "recommended_skill",
+      "folder": "rec_english_rewriter",
+      "json": "rec_english_rewriter/skill.json",
+      "skill_md": "rec_english_rewriter/SKILL.md",
+      "forms_md": "rec_english_rewriter/forms.md",
+      "reference_md": "rec_english_rewriter/reference.md"
+    },
+    {
+      "id": "rec:prompt_generator",
+      "title": "Prompt Generator",
+      "kind": "recommended_skill",
+      "folder": "rec_prompt_generator",
+      "json": "rec_prompt_generator/skill.json",
+      "skill_md": "rec_prompt_generator/SKILL.md",
+      "forms_md": "rec_prompt_generator/forms.md",
+      "reference_md": "rec_prompt_generator/reference.md"
+    },
+    {
+      "id": "rec:paper_summary",
+      "title": "读文献总结",
+      "kind": "recommended_skill",
+      "folder": "rec_paper_summary",
+      "json": "rec_paper_summary/skill.json",
+      "skill_md": "rec_paper_summary/SKILL.md",
+      "forms_md": "rec_paper_summary/forms.md",
+      "reference_md": "rec_paper_summary/reference.md"
+    },
+    {
+      "id": "rec:project_plan",
+      "title": "项目规划",
+      "kind": "recommended_skill",
+      "folder": "rec_project_plan",
+      "json": "rec_project_plan/skill.json",
+      "skill_md": "rec_project_plan/SKILL.md",
+      "forms_md": "rec_project_plan/forms.md",
+      "reference_md": "rec_project_plan/reference.md"
+    },
+    {
+      "id": "rec:code_review",
+      "title": "Code Review",
+      "kind": "recommended_skill",
+      "folder": "rec_code_review",
+      "json": "rec_code_review/skill.json",
+      "skill_md": "rec_code_review/SKILL.md",
+      "forms_md": "rec_code_review/forms.md",
+      "reference_md": "rec_code_review/reference.md"
+    },
+    {
+      "id": "rec:bug_triage",
+      "title": "Bug 排查",
+      "kind": "recommended_skill",
+      "folder": "rec_bug_triage",
+      "json": "rec_bug_triage/skill.json",
+      "skill_md": "rec_bug_triage/SKILL.md",
+      "forms_md": "rec_bug_triage/forms.md",
+      "reference_md": "rec_bug_triage/reference.md"
+    },
+    {
+      "id": "rec:prd_writer",
+      "title": "PRD 草拟",
+      "kind": "recommended_skill",
+      "folder": "rec_prd_writer",
+      "json": "rec_prd_writer/skill.json",
+      "skill_md": "rec_prd_writer/SKILL.md",
+      "forms_md": "rec_prd_writer/forms.md",
+      "reference_md": "rec_prd_writer/reference.md"
+    },
+    {
+      "id": "rec:pdf_reader",
+      "title": "读 PDF",
+      "kind": "recommended_skill",
+      "folder": "rec_pdf_reader",
+      "json": "rec_pdf_reader/skill.json",
+      "skill_md": "rec_pdf_reader/SKILL.md",
+      "forms_md": "rec_pdf_reader/forms.md",
+      "reference_md": "rec_pdf_reader/reference.md"
+    }
+  ]
+}

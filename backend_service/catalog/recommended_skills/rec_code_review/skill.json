@@ -1,0 +1,36 @@
+{
+  "id": "rec:code_review",
+  "icon": "码",
+  "title": "Code Review",
+  "description": "触发：需要评估代码改动质量与风险时 | 目标：发现行为风险、回归点和测试缺口 | 产出：结构化 review 结论",
+  "tags": [
+    "coding",
+    "review",
+    "engineering"
+  ],
+  "keywords": [
+    "code",
+    "review",
+    "bug",
+    "test",
+    "regression"
+  ],
+  "persona_signals": [
+    "code",
+    "engineering",
+    "debug",
+    "review"
+  ],
+  "usage_score": 0.88,
+  "source": "built_in",
+  "trigger": "需要对改动做质量审查或风险评估时",
+  "goal": "梳理关键风险、行为变化和测试缺口",
+  "steps": [
+    "识别改动范围",
+    "检查潜在回归与边界条件",
+    "输出结论和补测建议"
+  ],
+  "output_format": "Review 结论 / 风险清单",
+  "selected": false,
+  "kind": "recommended_skill"
+}

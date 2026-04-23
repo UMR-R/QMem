@@ -1,0 +1,36 @@
+{
+  "id": "rec:project_plan",
+  "icon": "计",
+  "title": "项目规划",
+  "description": "触发：需要把模糊目标拆成可推进的项目计划时 | 目标：明确范围、优先级和里程碑 | 产出：任务拆解与行动计划",
+  "tags": [
+    "planning",
+    "project",
+    "roadmap"
+  ],
+  "keywords": [
+    "project",
+    "plan",
+    "roadmap",
+    "tasks",
+    "priority"
+  ],
+  "persona_signals": [
+    "project",
+    "planning",
+    "workflow",
+    "roadmap"
+  ],
+  "usage_score": 0.9,
+  "source": "built_in",
+  "trigger": "目标还比较模糊，需要转成明确项目计划时",
+  "goal": "输出可执行的任务拆解、优先级与里程碑",
+  "steps": [
+    "梳理目标与边界",
+    "拆解任务并排序优先级",
+    "输出阶段计划与下一步"
+  ],
+  "output_format": "行动计划 / Roadmap",
+  "selected": false,
+  "kind": "recommended_skill"
+}

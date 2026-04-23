@@ -1,0 +1,35 @@
+{
+  "id": "rec:prd_writer",
+  "icon": "策",
+  "title": "PRD 草拟",
+  "description": "触发：需要把功能想法整理成正式产品文档时 | 目标：梳理用户、场景、范围和验收标准 | 产出：PRD 初稿",
+  "tags": [
+    "product",
+    "planning",
+    "writing"
+  ],
+  "keywords": [
+    "prd",
+    "product",
+    "spec",
+    "requirements",
+    "feature"
+  ],
+  "persona_signals": [
+    "product",
+    "planning",
+    "requirements"
+  ],
+  "usage_score": 0.84,
+  "source": "built_in",
+  "trigger": "需要把需求想法整理成正式产品文档时",
+  "goal": "输出包含用户、场景、范围和验收标准的 PRD",
+  "steps": [
+    "确认目标用户与场景",
+    "整理功能范围和边界",
+    "输出 PRD 结构与验收标准"
+  ],
+  "output_format": "PRD 初稿",
+  "selected": false,
+  "kind": "recommended_skill"
+}

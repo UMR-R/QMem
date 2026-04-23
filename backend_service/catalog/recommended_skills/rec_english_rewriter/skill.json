@@ -1,0 +1,35 @@
+{
+  "id": "rec:english_rewriter",
+  "icon": "EN",
+  "title": "English Rewriter",
+  "description": "触发：需要把中文或生硬英文改写成自然、专业、可发送的英文时 | 目标：保留原意并提升表达质量 | 产出：可直接发送的英文版本",
+  "tags": [
+    "writing",
+    "translation",
+    "language"
+  ],
+  "keywords": [
+    "english",
+    "rewrite",
+    "translate",
+    "polish",
+    "email"
+  ],
+  "persona_signals": [
+    "writing",
+    "translation",
+    "language"
+  ],
+  "usage_score": 0.95,
+  "source": "built_in",
+  "trigger": "需要把中文或普通英文改写成更自然的英文时",
+  "goal": "保留原意并输出更地道、专业的英文",
+  "steps": [
+    "识别原文语气和用途",
+    "改写为自然流畅的英文",
+    "补充简短解释或备选版本"
+  ],
+  "output_format": "英文改写稿 / 邮件文本",
+  "selected": false,
+  "kind": "recommended_skill"
+}

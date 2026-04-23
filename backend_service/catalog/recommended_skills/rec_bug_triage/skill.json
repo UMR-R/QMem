@@ -1,0 +1,35 @@
+{
+  "id": "rec:bug_triage",
+  "icon": "查",
+  "title": "Bug 排查",
+  "description": "触发：出现 bug 或异常行为需要排查时 | 目标：围绕复现、定位、验证给出排查路径 | 产出：排查步骤与修复建议",
+  "tags": [
+    "coding",
+    "debug",
+    "engineering"
+  ],
+  "keywords": [
+    "bug",
+    "debug",
+    "trace",
+    "repro",
+    "fix"
+  ],
+  "persona_signals": [
+    "code",
+    "engineering",
+    "debug"
+  ],
+  "usage_score": 0.86,
+  "source": "built_in",
+  "trigger": "出现 bug、错误日志或异常行为时",
+  "goal": "建立清晰的复现、定位和验证路径",
+  "steps": [
+    "先复现问题并收集上下文",
+    "定位最可疑的模块或输入",
+    "给出修复方向与验证方案"
+  ],
+  "output_format": "排查清单 / 修复建议",
+  "selected": false,
+  "kind": "recommended_skill"
+}
