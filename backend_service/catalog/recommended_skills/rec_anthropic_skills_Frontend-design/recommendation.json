@@ -1,0 +1,31 @@
+{
+  "id": "rec:anthropic_skills:Frontend-design",
+  "icon": "F",
+  "tags": [
+    "product"
+  ],
+  "keywords": [
+    "frontend-design",
+    "guides",
+    "creation",
+    "distinctive",
+    "production-grade",
+    "frontend",
+    "interfaces",
+    "avoid",
+    "generic",
+    "slop",
+    "aesthetics",
+    "implement"
+  ],
+  "persona_signals": [
+    "frontend-design",
+    "guides",
+    "creation",
+    "distinctive",
+    "production-grade",
+    "frontend"
+  ],
+  "usage_score": 0.96,
+  "source": "anthropic_skills:frontend-design"
+}

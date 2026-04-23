@@ -302,6 +302,7 @@ function setView(viewName) {
   for (const view of document.querySelectorAll(".view")) {
     view.classList.toggle("is-active", view.id === `${viewName}View`);
   }
+  renderSkillActions();
 }
 
 function renderSync() {
@@ -672,16 +673,14 @@ function buildSkillPreview(item) {
     };
   }
 
-  const title = truncateText(item?.title || "未命名 Skill", 28);
-  const metaParts = [];
-  if (item?.kind === "workflow") metaParts.push("工作流");
-  else if (item?.kind === "skill") metaParts.push("Skill");
-  if (item?.confidence) metaParts.push(`置信度 ${item.confidence}`);
-
+  const title = truncateText(item?.display_title || item?.title || "未命名 Skill", 28);
+  const displaySummary = item?.display_summary ? `描述：${item.display_summary}` : "";
+  const displayOutput = item?.display_output ? `产出：${item.display_output}` : "";
   const summaryCandidates = [
-    item?.catalog_summary || "",
+    displaySummary && displayOutput ? `${displaySummary} · ${displayOutput}` : "",
+    displaySummary,
+    displayOutput,
     item?.goal ? `目标：${item.goal}` : "",
-    item?.trigger ? `触发：${item.trigger}` : "",
     item?.output_format ? `产出：${item.output_format}` : "",
     item?.description || "",
   ].filter(Boolean);
@@ -702,7 +701,7 @@ function buildSkillPreview(item) {
   return {
     title,
     summary: truncateText(summary, 64),
-    meta: metaParts.join(" · "),
+    meta: "",
   };
 }
 
@@ -714,7 +713,7 @@ async function deleteSkill(skillId) {
     if (state.currentSkillTab === "recommended") {
       const result = await backendApi().getRecommendedSkills(state.backendUrl);
       renderRecommendedSkillMeta(result.meta || null);
-      renderSkillList(result.items || [], state.selectedRecommendedIds, { showDelete: false });
+      renderRecommendedSkillItems(result.items || [], result.meta || null);
     } else {
       const result = await backendApi().getMySkills(state.backendUrl);
       renderSkillList(result.items || [], state.selectedSkillIds, { showDelete: false });
@@ -756,8 +755,7 @@ function renderSkillList(items, selectedSet, options = {}) {
     const checkbox = wrapper.querySelector("input");
     if (checkbox) {
       checkbox.addEventListener("change", () => {
-        if (checkbox.checked) selectedSet.add(item.id);
-        else selectedSet.delete(item.id);
+        syncSkillSelection(item.id, checkbox.checked);
       });
     }
     const deleteBtn = wrapper.querySelector(".skill-delete-btn");
@@ -811,6 +809,33 @@ function renderRecommendedSkillMeta(meta) {
   el.textContent = [status, updatedText, sourceText].filter(Boolean).join(" · ");
   el.classList.remove("hidden");
 }
+function renderSkillActions() {
+  const saveBtn = document.getElementById("saveRecommendedSkillBtn");
+  if (!saveBtn) return;
+  saveBtn.classList.toggle("hidden", state.currentSkillTab !== "recommended");
+}
+
+function syncSkillSelection(skillId, checked) {
+  if (checked) {
+    state.selectedSkillIds.add(skillId);
+  } else {
+    state.selectedSkillIds.delete(skillId);
+  }
+  if (String(skillId).startsWith("rec:")) {
+    if (checked) {
+      state.selectedRecommendedIds.add(skillId);
+    } else {
+      state.selectedRecommendedIds.delete(skillId);
+    }
+  }
+}
+
+function renderRecommendedSkillItems(items, meta = null) {
+  renderRecommendedSkillMeta(meta);
+  renderSkillList((items || []).slice(0, 3), state.selectedRecommendedIds, { showDelete: false });
+  renderSkillActions();
+}
+
 
 async function refreshSummary() {
   try {
@@ -844,7 +869,11 @@ async function refreshSummary() {
     if (state.currentSkillTab === "my") {
       const skillResponse = await backendApi().getMySkills(state.backendUrl);
       renderSkillList(skillResponse.items || [], state.selectedSkillIds, { showDelete: false });
+    } else {
+      const recommendedResponse = await backendApi().getRecommendedSkills(state.backendUrl);
+      renderRecommendedSkillItems(recommendedResponse.items || [], recommendedResponse.meta || null);
     }
+    renderSkillActions();
     return;
   } catch {
     // Fallback to local extension storage before backend is fully wired.
@@ -1223,6 +1252,105 @@ async function scrapePlatformMemoryFromTab() {
   return result.data;
 }
 
+function _extractFirstJsonObject(text) {
+  const raw = String(text || "").trim();
+  if (!raw) throw new Error("平台没有返回可解析的内容");
+
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidate = (fenced?.[1] || raw).trim();
+  const start = candidate.indexOf('{');
+  if (start < 0) throw new Error("未找到 JSON 结构");
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < candidate.length; i++) {
+    const ch = candidate[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === '\\') {
+        escaped = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === '{') depth += 1;
+    if (ch === '}') {
+      depth -= 1;
+      if (depth === 0) return candidate.slice(start, i + 1);
+    }
+  }
+  throw new Error("JSON 结构不完整");
+}
+
+async function submitPromptAndWait(promptText, { timeoutMs = 120000 } = {}) {
+  const tab = await getActiveSupportedTab();
+  const injection = await injectTextIntoTab(promptText);
+  if (injection?.fallback === "clipboard") {
+    throw new Error("当前页面未就绪，无法自动提交采集指令");
+  }
+
+  const jobId = `platform-memory:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+  const ack = await tabsSendMessage(tab.id, {
+    type: "SUBMIT_AND_WAIT",
+    jobId,
+    timeoutMs,
+    skipDownload: true,
+    isMemory: true,
+  });
+  if (!ack?.ok) throw new Error(ack?.error || "平台记忆采集发送失败");
+
+  const deadline = Date.now() + timeoutMs + 5000;
+  while (Date.now() < deadline) {
+    const result = await storageGet(jobId);
+    const payload = result?.[jobId];
+    if (payload) {
+      await new Promise(resolve => chrome.storage.local.remove([jobId], resolve));
+      if (!payload.ok) throw new Error(payload.error || "平台记忆采集失败");
+      return { tab, text: String(payload.text || "").trim(), source: payload.source || "assistant" };
+    }
+    await sleep(900);
+  }
+  await new Promise(resolve => chrome.storage.local.remove([jobId], resolve));
+  throw new Error("等待平台记忆采集结果超时");
+}
+
+function normalizePlatformMemoryReport(report, tab) {
+  if (!report || typeof report !== 'object') {
+    throw new Error("平台返回的记忆内容不是对象");
+  }
+  return {
+    platform: inferTargetPlatformFromTab(tab),
+    url: tab.url || "",
+    title: report.title || tab.title || "",
+    heading: report.heading || report.agentName || tab.title || "",
+    agentName: report.agentName || report.heading || "",
+    capturedAt: new Date().toISOString(),
+    pageType: report.pageType || "saved_memory_report",
+    recordTypes: Array.isArray(report.recordTypes) ? report.recordTypes : [],
+    savedMemoryItems: Array.isArray(report.savedMemoryItems) ? report.savedMemoryItems.filter(Boolean) : [],
+    customInstructions: Array.isArray(report.customInstructions) ? report.customInstructions : [],
+    agentConfig: report.agentConfig && typeof report.agentConfig === "object" ? report.agentConfig : {},
+    platformSkills: Array.isArray(report.platformSkills) ? report.platformSkills : [],
+    memoryHints: Array.isArray(report.savedMemoryItems) ? report.savedMemoryItems.filter(Boolean).slice(0, 20) : [],
+    pageTextExcerpt: String(report.summary || report.heading || report.agentName || "").slice(0, 1200),
+  };
+}
+
+async function collectPlatformMemoryWithPrompt() {
+  const promptText = CONFIG.platformMemoryCollect;
+  if (!promptText?.trim()) throw new Error("平台记忆采集提示词未加载");
+  const { tab, text } = await submitPromptAndWait(promptText, { timeoutMs: 120000 });
+  const report = JSON.parse(_extractFirstJsonObject(text));
+  return normalizePlatformMemoryReport(report, tab);
+}
+
 async function injectPackage() {
   try {
     const selectedIds = await getSelectedIdsForBackend();
@@ -1265,19 +1393,14 @@ async function addCurrentConversation() {
       url: conversation.url,
       title: conversation.title || "",
       messages: conversation.messages,
-      process_now: state.apiKeyConfigured,
+      process_now: false,
     });
     const job = response.job_id
       ? await backendApi().getJob(state.backendUrl, response.job_id)
       : null;
     if (job?.status === "failed") throw new Error(job.error || "加入当前对话失败");
     await refreshSummary();
-    if (job?.result?.processed) {
-      const episodes = job.result?.process_result?.episodes ?? 0;
-      toast(`当前对话已加入记忆，并整理为 ${episodes} 条记忆`);
-    } else {
-      toast("当前对话已记录，可稍后整理");
-    }
+    toast("当前对话加入完成，可稍后点击整理记忆");
   } catch (err) {
     toast(`加入当前对话失败：${err.message}`, true);
   } finally {
@@ -1292,10 +1415,16 @@ async function addPlatformMemory() {
   button.style.opacity = "0.65";
 
   try {
-    toast("正在保存平台记忆...");
-    const snapshot = await scrapePlatformMemoryFromTab();
+    toast("正在采集平台记忆...");
+    let snapshot;
+    try {
+      snapshot = await collectPlatformMemoryWithPrompt();
+    } catch (promptErr) {
+      console.warn("[popup] prompt-based platform memory capture failed:", promptErr);
+      snapshot = await scrapePlatformMemoryFromTab();
+    }
     const response = await backendApi().importPlatformMemory(state.backendUrl, snapshot);
-    toast(response.message || "平台记忆已保存到本地");
+    toast("平台记忆加入完成，可稍后点击整理记忆");
   } catch (err) {
     toast(`加入平台记忆失败：${err.message}`, true);
   } finally {
@@ -1313,6 +1442,24 @@ function inferTargetPlatformFromTab(tab) {
     return "chatgpt";
   } catch {
     return "chatgpt";
+  }
+}
+
+async function saveRecommendedSkills() {
+  const selectedIds = [...state.selectedRecommendedIds];
+  if (selectedIds.length === 0) {
+    toast("请至少选择一个推荐 Skill", true);
+    return;
+  }
+  try {
+    const mergedIds = [...new Set([...state.selectedSkillIds, ...selectedIds])];
+    const result = await backendApi().saveSkills(state.backendUrl, { skill_ids: mergedIds, merge: true });
+    state.selectedSkillIds = new Set(result.saved_skill_ids || mergedIds);
+    state.selectedRecommendedIds = new Set([...state.selectedRecommendedIds, ...selectedIds]);
+    await storageSet({ [STORAGE_KEYS.savedSkills]: [...state.selectedSkillIds] });
+    toast(`已加入我的 Skill：${selectedIds.length} 项`);
+  } catch (err) {
+    toast(`加入失败：${err.message}`, true);
   }
 }
 
@@ -1415,12 +1562,24 @@ async function clearCache() {
   toast("临时缓存已清理");
 }
 
+async function ensureSyncStartsPaused() {
+  state.keepUpdated = false;
+  await storageSet({ [STORAGE_KEYS.keepUpdated]: false });
+  try {
+    await backendApi().toggleSync(state.backendUrl, { enabled: false });
+  } catch {
+    // Keep local paused state when backend is temporarily unavailable.
+  }
+  await broadcastCaptureToggle(false);
+}
+
 function bindEvents() {
   document.getElementById("menuBtn").addEventListener("click", () => setView("settings"));
   document.getElementById("gotoMigrateBtn").addEventListener("click", () => setView("migrate"));
   document.getElementById("gotoSettingsBtn").addEventListener("click", () => setView("settings"));
   document.getElementById("gotoSkillBtn").addEventListener("click", async () => {
     setView("skill");
+    renderSkillActions();
     try {
       const result = await backendApi().getMySkills(state.backendUrl);
       renderSkillList(result.items || [], state.selectedSkillIds, { showDelete: false });
@@ -1517,6 +1676,7 @@ function bindEvents() {
     document.getElementById("mySkillTab").classList.add("is-active");
     document.getElementById("recommendedSkillTab").classList.remove("is-active");
     renderRecommendedSkillMeta(null);
+    renderSkillActions();
     try {
       const result = await backendApi().getMySkills(state.backendUrl);
       renderSkillList(result.items || [], state.selectedSkillIds, { showDelete: false });
@@ -1531,17 +1691,17 @@ function bindEvents() {
     state.currentSkillTab = "recommended";
     document.getElementById("recommendedSkillTab").classList.add("is-active");
     document.getElementById("mySkillTab").classList.remove("is-active");
+    renderSkillActions();
     backendApi().getRecommendedSkills(state.backendUrl)
       .then(result => {
-        renderRecommendedSkillMeta(result.meta || null);
-        renderSkillList(result.items || [], state.selectedRecommendedIds, { showDelete: false });
+        renderRecommendedSkillItems(result.items || [], result.meta || null);
       })
       .catch(() => {
-        renderRecommendedSkillMeta(null);
-        renderSkillList(recommendedSkills, state.selectedRecommendedIds, { showDelete: false });
+        renderRecommendedSkillItems(recommendedSkills, null);
       });
   });
 
+  document.getElementById("saveRecommendedSkillBtn").addEventListener("click", saveRecommendedSkills);
   document.getElementById("exportSkillBtn").addEventListener("click", exportSkills);
   document.getElementById("injectSkillBtn").addEventListener("click", injectSkills);
 
@@ -1598,7 +1758,7 @@ async function init() {
   state.lastSyncAt = settings[STORAGE_KEYS.lastSyncAt] || null;
   state.dirHandle = await loadSavedDir();
   const savedSkillIds = settings[STORAGE_KEYS.savedSkills] || [];
-  state.selectedSkillIds = new Set(savedSkillIds.filter(id => !String(id).startsWith("rec:")));
+  state.selectedSkillIds = new Set(savedSkillIds);
   state.selectedRecommendedIds = new Set(savedSkillIds.filter(id => String(id).startsWith("rec:")));
 
   try {
@@ -1614,6 +1774,8 @@ async function init() {
   } catch {
     // Keep extension-local settings when backend is offline.
   }
+
+  await ensureSyncStartsPaused();
 
   bindEvents();
   renderDirectory();
@@ -1632,6 +1794,7 @@ async function init() {
     const pnData = allData["mw:persistent_nodes"] ?? { nodes: {} };
     renderSkillList(deriveMySkills(allData, pnData), state.selectedSkillIds, { showDelete: false });
   }
+  renderSkillActions();
 }
 
 init().catch(err => {

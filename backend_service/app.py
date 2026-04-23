@@ -88,18 +88,18 @@ FIELD_LABELS = {
             "role_identity": "个人背景",
             "domain_background": "领域背景",
             "organization_or_affiliation": "个人背景",
-            "common_languages": "个人背景",
+            "common_languages": "语言背景",
             "primary_task_types": "主要任务类型",
-            "long_term_research_or_work_focus": "个人背景",
+            "long_term_research_or_work_focus": "长期关注方向",
         },
         "en": {
             "name_or_alias": "Personal Background",
             "role_identity": "Personal Background",
             "domain_background": "Domain Background",
             "organization_or_affiliation": "Personal Background",
-            "common_languages": "Personal Background",
+            "common_languages": "Language Background",
             "primary_task_types": "Primary Task Types",
-            "long_term_research_or_work_focus": "Personal Background",
+            "long_term_research_or_work_focus": "Long-term Focus",
         },
     },
     "preferences": {
@@ -390,6 +390,7 @@ class InjectPackageRequest(SelectedIdsRequest):
 
 class SaveSkillsRequest(BaseModel):
     skill_ids: list[str]
+    merge: bool = True
 
 
 class ExportSkillsRequest(BaseModel):
@@ -730,6 +731,16 @@ def _parse_iso_datetime(value: str | None) -> datetime | None:
 def _needs_recommended_refresh(meta: dict[str, Any], force: bool = False) -> bool:
     if force:
         return True
+    status = str(meta.get("last_refresh_status") or "").strip().lower()
+    sources = {
+        str(item).strip().lower()
+        for item in meta.get("sources", [])
+        if str(item).strip()
+    }
+    if status in {"seeded", "unknown", "failed"}:
+        return True
+    if not sources or sources == {"built_in"}:
+        return True
     last_updated = _parse_iso_datetime(meta.get("last_updated_at"))
     if last_updated is None:
         return True
@@ -737,11 +748,17 @@ def _needs_recommended_refresh(meta: dict[str, Any], force: bool = False) -> boo
 
 
 def _fetch_remote_text(url: str, timeout: float = 12.0) -> str:
+    parsed = urllib.parse.urlparse(url)
+    accept = "text/plain, text/csv, text/markdown; charset=utf-8"
+    if parsed.netloc == "api.github.com":
+        accept = "application/vnd.github+json"
+    elif parsed.netloc == "raw.githubusercontent.com":
+        accept = "text/plain, text/markdown, application/octet-stream; charset=utf-8"
     request = urllib.request.Request(
         url,
         headers={
             "User-Agent": "MemAssist/0.2 (+https://127.0.0.1)",
-            "Accept": "text/plain, text/csv, text/markdown; charset=utf-8",
+            "Accept": accept,
         },
     )
     with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310
@@ -832,6 +849,116 @@ def _build_remote_skill_record(
     }
 
 
+def _strip_markdown_frontmatter(text: str) -> str:
+    raw = str(text or "")
+    if not raw.startswith("---\n"):
+        return raw
+    closing = raw.find("\n---\n", 4)
+    if closing == -1:
+        return raw
+    return raw[closing + 5:]
+
+
+def _parse_simple_frontmatter(text: str) -> dict[str, str]:
+    raw = str(text or "")
+    if not raw.startswith("---\n"):
+        return {}
+    closing = raw.find("\n---\n", 4)
+    if closing == -1:
+        return {}
+    block = raw[4:closing]
+    data: dict[str, str] = {}
+    for line in block.splitlines():
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        key = key.strip().lower()
+        value = value.strip().strip('"').strip("'")
+        if key:
+            data[key] = value
+    return data
+
+
+def _normalize_title_case_words(value: str) -> str:
+    words = []
+    for word in re.split(r"\s+", str(value or "").strip()):
+        lower = word.lower()
+        if lower in {"api", "mcp", "pdf", "ppt", "pptx", "docx", "csv", "json", "xml", "sql"}:
+            words.append(lower.upper())
+        else:
+            words.append(word.capitalize())
+    return " ".join(word for word in words if word)
+
+
+def _humanize_remote_skill_title(title: str, folder_name: str, description: str) -> str:
+    raw = str(title or "").strip() or folder_name.replace("-", " ").replace("_", " ").strip()
+    normalized = _normalize_title_case_words(raw)
+    lowered = normalized.lower()
+    description_l = str(description or "").lower()
+
+    if lowered in {"pdf", "pdf processing", "pdf skill"} or (lowered == "pdf" and "pdf" in description_l):
+        return "PDF 文档处理"
+    if lowered in {"docx", "word", "word document"} or ".docx" in description_l:
+        return "Word 文档处理"
+    if lowered in {"pptx", "powerpoint", "slides"} or ".pptx" in description_l:
+        return "PPT 演示文稿处理"
+    if lowered in {"mcp builder", "mcp"}:
+        return "MCP 服务构建"
+    if lowered in {"claude api", "api"} and "api" in description_l:
+        return "Claude API 集成"
+    if lowered == "internal comms":
+        return "内部沟通写作"
+    if lowered == "frontend design":
+        return "前端界面设计"
+    if lowered == "canvas design":
+        return "画布与视觉设计"
+    if lowered == "doc coauthoring":
+        return "文档协作写作"
+    if lowered == "algorithmic art":
+        return "算法艺术创作"
+    if len(normalized) <= 4 and normalized.isupper():
+        return f"{normalized} 能力"
+    return normalized
+
+
+def _extract_natural_paragraph(text: str) -> str:
+    stripped = _strip_markdown_frontmatter(text)
+    lines = stripped.splitlines()
+    paragraphs: list[str] = []
+    current: list[str] = []
+    in_code = False
+    for line in lines:
+        raw = line.rstrip()
+        clean = raw.strip()
+        if clean.startswith("```"):
+            in_code = not in_code
+            if current:
+                paragraphs.append(" ".join(current).strip())
+                current = []
+            continue
+        if in_code:
+            continue
+        if not clean:
+            if current:
+                paragraphs.append(" ".join(current).strip())
+                current = []
+            continue
+        if clean.startswith("#") or clean.startswith("|"):
+            if current:
+                paragraphs.append(" ".join(current).strip())
+                current = []
+            continue
+        if re.match(r"^[-*]\s+", clean):
+            continue
+        current.append(clean)
+    if current:
+        paragraphs.append(" ".join(current).strip())
+    for paragraph in paragraphs:
+        if len(paragraph) >= 32 and "name:" not in paragraph.lower() and "description:" not in paragraph.lower():
+            return paragraph[:320]
+    return paragraphs[0][:320] if paragraphs else ""
+
+
 def _parse_csv_prompt_source(raw_text: str, source: dict[str, Any]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     reader = csv.DictReader(io.StringIO(raw_text))
@@ -865,39 +992,59 @@ def _extract_markdown_sections(text: str) -> dict[str, str]:
 
 
 def _parse_markdown_skill_source(raw_text: str, source: dict[str, Any], folder_name: str) -> dict[str, Any] | None:
-    sections = _extract_markdown_sections(raw_text)
-    lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
-    title = folder_name.replace("-", " ").replace("_", " ").strip().title()
+    frontmatter = _parse_simple_frontmatter(raw_text)
+    stripped_text = _strip_markdown_frontmatter(raw_text)
+    sections = _extract_markdown_sections(stripped_text)
+    lines = [line.strip() for line in stripped_text.splitlines() if line.strip()]
+
+    raw_title = frontmatter.get("title") or frontmatter.get("name") or folder_name.replace("-", " ").replace("_", " ").strip()
     if lines and lines[0].startswith("# "):
-        title = lines[0][2:].strip() or title
+        raw_title = lines[0][2:].strip() or raw_title
 
     description = ""
-    for key in ["summary", "overview", "body"]:
+    for key in ["summary", "overview", "purpose", "body"]:
         value = sections.get(key, "")
-        if value:
-            description = re.sub(r"\s+", " ", value).strip()
+        natural = _extract_natural_paragraph(value)
+        if natural:
+            description = re.sub(r"\s+", " ", natural).strip()
             break
     if not description:
-        description = title
+        description = _extract_natural_paragraph(stripped_text)
+    if not description:
+        description = str(frontmatter.get("description") or "").strip()
+
+    title = _humanize_remote_skill_title(raw_title, folder_name, description)
 
     step_candidates: list[str] = []
     for key in sections:
-        if "step" in key or "workflow" in key or "process" in key:
+        if "step" in key or "workflow" in key or "process" in key or "quick reference" in key:
             for line in sections[key].splitlines():
                 cleaned = re.sub(r"^[-*0-9. )]+", "", line).strip()
-                if cleaned:
-                    step_candidates.append(cleaned)
+                if not cleaned or cleaned.startswith("```") or cleaned.startswith("|"):
+                    continue
+                if "name:" in cleaned.lower() or "description:" in cleaned.lower():
+                    continue
+                step_candidates.append(cleaned)
     if len(step_candidates) < 2:
         bullet_lines = []
-        for line in raw_text.splitlines():
+        in_code = False
+        for line in stripped_text.splitlines():
+            clean = line.strip()
+            if clean.startswith("```"):
+                in_code = not in_code
+                continue
+            if in_code or clean.startswith("|"):
+                continue
             if re.match(r"^\s*[-*]\s+", line):
-                bullet_lines.append(re.sub(r"^\s*[-*]\s+", "", line).strip())
+                bullet = re.sub(r"^\s*[-*]\s+", "", line).strip()
+                if bullet and "name:" not in bullet.lower() and "description:" not in bullet.lower():
+                    bullet_lines.append(bullet)
         step_candidates.extend(bullet_lines[:3])
 
     record = _build_remote_skill_record(
         source_id=source["id"],
         title=title,
-        prompt_text=description,
+        prompt_text=description or title,
         usage_bias=float(source.get("usage_bias", 0.9)),
     )
     if not record:
@@ -907,11 +1054,11 @@ def _parse_markdown_skill_source(raw_text: str, source: dict[str, Any], folder_n
     if len(step_candidates) >= 2:
         record["steps"] = step_candidates[:4]
     record["trigger"] = record.get("trigger") or f"需要使用 {title} 相关能力时"
-    record["goal"] = record.get("goal") or description[:80]
+    record["goal"] = record.get("goal") or (description[:80] if description else title)
     record["description"] = (
         f"触发：{record['trigger']} | 目标：{record['goal']} | 步骤：{'；'.join(record.get('steps', [])[:3])} | 产出：{record.get('output_format', '结构化结果')}"
     )
-    record["skill_md_content"] = raw_text.strip()
+    record["skill_md_content"] = stripped_text.strip()
     return record
 
 
@@ -975,12 +1122,28 @@ def _refresh_recommended_skill_catalog(force: bool = False) -> tuple[list[dict[s
         except (urllib.error.URLError, TimeoutError, ValueError) as exc:
             errors.append(f"{source['id']}: {exc}")
 
+    combined_items = [*fetched_items, *DEFAULT_RECOMMENDED_SKILLS] if fetched_items else [*DEFAULT_RECOMMENDED_SKILLS]
+    remote_keywords: set[str] = set()
+    for item in fetched_items:
+        for token in [*(item.get("keywords") or []), *(item.get("tags") or []), *(item.get("persona_signals") or [])]:
+            token_str = str(token).strip().lower()
+            if token_str:
+                remote_keywords.add(token_str)
+
     deduped: list[dict[str, Any]] = []
     seen_titles: set[str] = set()
-    for item in [*DEFAULT_RECOMMENDED_SKILLS, *fetched_items]:
+    for item in combined_items:
         title_key = str(item.get("title", "")).strip().lower()
         if not title_key or title_key in seen_titles:
             continue
+        if fetched_items and str(item.get("source") or "") == "built_in":
+            built_in_keywords = {
+                str(token).strip().lower()
+                for token in [*(item.get("keywords") or []), *(item.get("tags") or []), *(item.get("persona_signals") or [])]
+                if str(token).strip()
+            }
+            if built_in_keywords and len(built_in_keywords & remote_keywords) >= 2:
+                continue
         seen_titles.add(title_key)
         deduped.append(item)
 
@@ -1205,7 +1368,7 @@ def _localized_field_label(group: str, field: str, locale: str | None) -> str:
 
 def load_display_texts(settings: dict[str, Any]) -> dict[str, Any]:
     data = read_json_file(get_display_texts_path(settings, create=True))
-    return data if isinstance(data, dict) else {"profile": {}, "preferences": {}}
+    return data if isinstance(data, dict) else {"profile": {}, "preferences": {}, "persistent": {}}
 
 
 def save_display_texts(settings: dict[str, Any], data: dict[str, Any]) -> None:
@@ -1213,6 +1376,7 @@ def save_display_texts(settings: dict[str, Any], data: dict[str, Any]) -> None:
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "profile": data.get("profile", {}),
         "preferences": data.get("preferences", {}),
+        "persistent": data.get("persistent", {}),
     }
     get_display_texts_path(settings, create=True).write_text(
         json.dumps(payload, ensure_ascii=False, indent=2),
@@ -1303,6 +1467,28 @@ def _looks_like_english_ui_text(value: Any) -> bool:
     return bool(re.search(r"[A-Za-z]", text))
 
 
+def _looks_like_response_style_text(value: Any) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return False
+    lowered = text.lower()
+    direct_keywords = [
+        "中文", "英文", "双语", "简洁", "详细", "严谨", "活泼", "正式", "口语", "分点", "列表", "表格", "自然段", "结论先行", "步骤化",
+        "concise", "detailed", "formal", "casual", "professional", "bullet", "bullets", "numbered", "table", "tables", "structured", "tone", "style", "format", "formatting", "granularity",
+    ]
+    if any(keyword in lowered for keyword in direct_keywords):
+        return True
+    noise_keywords = [
+        "zero-shot", "few-shot", "llm", "model", "memory", "migration", "audit", "mapping", "standardization", "validation", "benchmark",
+        "免训练", "零样本", "小样本", "大模型", "记忆", "迁移", "可审计", "映射", "标准化", "验证", "产品", "市场分析",
+        "paper", "research", "ssh", "pdf", "excel", "workflow", "skill", "prompt", "mcp", "server",
+    ]
+    if any(keyword in lowered for keyword in noise_keywords):
+        return False
+    short_terms = {"简洁", "详细", "严谨", "活泼", "礼貌", "直接", "精炼", "正式", "专业", "清晰"}
+    return text in short_terms
+
+
 def _ensure_bilingual_display_value(
     llm: LLMClient,
     raw_value: Any,
@@ -1353,6 +1539,41 @@ def _ensure_bilingual_display_value(
         zh_text = str(result.get("zh") or zh_text or raw_text).strip()
         en_text = str(result.get("en") or en_text or raw_text).strip()
     return zh_text or raw_text, en_text or raw_text
+
+
+def _get_persistent_display_entry(
+    settings: dict[str, Any],
+    display_cache: dict[str, Any],
+    item_id: str,
+    raw_text: str,
+) -> dict[str, Any]:
+    persistent_cache = display_cache.setdefault("persistent", {})
+    cached = persistent_cache.get(item_id)
+    if isinstance(cached, dict):
+        return cached
+
+    entry = _make_display_entry(
+        title_zh="兴趣发现",
+        title_en="Topics & Habits",
+        desc_zh=raw_text,
+        desc_en=raw_text,
+    )
+    if raw_text and _looks_like_english_ui_text(raw_text):
+        try:
+            llm = get_llm(settings)
+            zh_text, en_text = _ensure_bilingual_display_value(llm, raw_text, raw_text, raw_text)
+            entry = _make_display_entry(
+                title_zh="兴趣发现",
+                title_en="Topics & Habits",
+                desc_zh=str(zh_text).strip() or raw_text,
+                desc_en=str(en_text).strip() or raw_text,
+            )
+        except Exception:
+            pass
+
+    persistent_cache[item_id] = entry
+    save_display_texts(settings, display_cache)
+    return entry
 
 
 def get_storage_root(settings: dict[str, Any], *, create: bool = False) -> Path:
@@ -2122,6 +2343,34 @@ def _project_signal_count(project: ProjectMemory) -> int:
     return buckets
 
 
+def _looks_like_reference_analysis_project(project: ProjectMemory) -> bool:
+    text_parts = [
+        project.project_name,
+        project.project_goal,
+        project.current_stage,
+        *(entry.text for entry in project.relevant_entities[:4]),
+        *(entry.text for entry in project.important_constraints[:4]),
+        *(entry.text for entry in project.unresolved_questions[:4]),
+        *(entry.text for entry in project.next_actions[:4]),
+    ]
+    haystack = ' '.join(str(part or '').lower() for part in text_parts)
+    reference_tokens = {
+        'baseline', 'benchmark', 'dataset', 'paper', 'survey', 'algorithm', 'method', 'ablation',
+        'compare', 'comparison', 'literature', 'related work', 'sota', 'reference', 'references',
+        'arxiv', 'cvpr', 'iccv', 'neurips', 'iclr', 'aaai',
+    }
+    project_tokens = {
+        'submission', 'submitted', 'prototype', 'system', 'repo', 'repository', 'codebase', 'experiment',
+        'milestone', 'deliverable', 'implementation', 'deploy', 'deployment', 'roadmap', '计划', '实验',
+        '投稿', '系统', '实现', '代码库', '原型', '里程碑', '部署',
+    }
+    reference_hits = sum(1 for token in reference_tokens if token in haystack)
+    project_hits = sum(1 for token in project_tokens if token in haystack)
+    if reference_hits >= 2 and project_hits == 0:
+        return True
+    return False
+
+
 def _looks_like_stable_project(project: ProjectMemory) -> bool:
     episode_count = len(set(project.source_episode_ids))
     signal_count = _project_signal_count(project)
@@ -2153,6 +2402,9 @@ def _looks_like_stable_project(project: ProjectMemory) -> bool:
     }
     token_hits = sum(1 for token in exploratory_tokens if token in name)
     if episode_count < 2 and token_hits >= 2 and signal_count < 3:
+        return False
+
+    if _looks_like_reference_analysis_project(project) and signal_count < 4:
         return False
 
     return True
@@ -2376,24 +2628,78 @@ def _extract_catalog_skill_summary(item: dict[str, Any]) -> str:
             if line.strip().lower() == "## summary":
                 for next_line in lines[idx + 1:]:
                     clean = next_line.strip()
-                    if clean:
-                        return clean[:240]
+                    if not clean or clean.startswith("#") or clean.startswith("```"):
+                        continue
+                    if "name:" in clean.lower() or "description:" in clean.lower():
+                        continue
+                    return clean[:240]
                 break
     skill_md = str(item.get("skill_md_content") or "").strip()
-    if skill_md:
-        cleaned_lines = []
-        for line in skill_md.splitlines():
-            clean = line.strip()
-            if not clean:
-                continue
-            if clean.startswith("#"):
-                continue
-            if clean.startswith("**Type:**"):
-                continue
-            cleaned_lines.append(clean)
-        if cleaned_lines:
-            return " ".join(cleaned_lines[:3])[:240]
+    natural = _extract_natural_paragraph(skill_md)
+    if natural:
+        return natural[:240]
     return ""
+
+
+def _build_recommended_display_text(item: dict[str, Any]) -> tuple[str, str, str]:
+    title = str(item.get("title") or "").strip() or "未命名 Skill"
+    title_l = title.lower()
+    text = " ".join([
+        title,
+        str(item.get("goal") or ""),
+        str(item.get("trigger") or ""),
+        str(item.get("description") or ""),
+        str(item.get("catalog_summary") or ""),
+        *[str(step) for step in item.get("steps", [])],
+    ]).lower()
+    mappings = [
+        (("pdf",), "PDF 文档处理", "提取文档结构、关键信息与引用证据", "结构化摘要 / 要点清单"),
+        (("docx", "word"), "Word 文档处理", "整理、改写并输出可复用的文档内容", "文档草稿 / 修订稿"),
+        (("ppt", "pptx", "slides"), "PPT 演示稿处理", "提炼演示结构并生成可展示内容", "演示大纲 / 幻灯片草稿"),
+        (("english rewriter",), "英文改写润色", "把中文或生硬英文改成自然、专业、可发送的英文", "英文邮件 / 英文文本"),
+        (("llm-powered", "claude"), "Claude 应用开发", "构建基于 Claude 的应用流程、提示词与调用方案", "开发说明 / 实现方案"),
+        (("algorithmic", "art"), "算法艺术创作", "把生成规则转成可执行的视觉创作方案", "创作方案 / 视觉稿"),
+        (("brand", "styling"), "品牌风格套用", "按既定品牌风格改写文案与视觉说明", "品牌化文案 / 风格说明"),
+        (("doc co-authoring", "co-authoring"), "文档协作写作", "多人协作整理文档内容并统一结构与语气", "协作文档 / 修订建议"),
+        (("frontend", "design"), "前端界面设计", "规划界面结构、风格方向与实现要点", "界面方案 / 设计说明"),
+        (("canvas", "design"), "画布视觉设计", "生成适合画布场景的视觉构图与设计说明", "视觉方案 / 设计稿"),
+        (("internal", "comms"), "内部沟通写作", "整理适合团队内部传播的说明、同步与 FAQ 文案", "内部公告 / 沟通稿"),
+        (("mcp", "server"), "MCP 服务开发", "创建或整理 MCP 服务的实现、配置与调试步骤", "开发步骤 / 配置说明"),
+        (("api",), "API 集成说明", "整理接口接入方式、参数与调用步骤", "接入说明 / 示例代码"),
+    ]
+    for keywords, mapped_title, short_desc, output in mappings:
+        if any(keyword in title_l for keyword in keywords) or all(keyword in text for keyword in keywords):
+            return mapped_title, short_desc, output
+    goal = str(item.get("goal") or "").strip()
+    output_format = str(item.get("output_format") or "").strip() or "结构化结果"
+    short_desc = str(item.get("catalog_summary") or "").strip() or goal or str(item.get("description") or "").strip()
+    if short_desc:
+        lowered = short_desc.lower()
+        if "llm-powered" in lowered or "claude" in lowered:
+            short_desc = "构建基于 Claude 的应用能力与调用流程"
+            output_format = "开发说明 / 实现方案"
+        elif "brand" in lowered and "style" in lowered:
+            short_desc = "按品牌规范整理视觉与文案风格"
+            output_format = "品牌化文案 / 风格说明"
+        elif "document" in lowered or "co-author" in lowered:
+            short_desc = "协助多人共同撰写、整理和修订文档"
+            output_format = "协作文档 / 修订建议"
+        elif "mcp" in lowered:
+            short_desc = "创建、配置并调试 MCP 服务"
+            output_format = "开发步骤 / 配置说明"
+        elif "frontend" in lowered:
+            short_desc = "规划前端界面结构、交互和设计方向"
+            output_format = "界面方案 / 设计说明"
+        elif "canvas" in lowered:
+            short_desc = "生成适合画布场景的视觉设计方案"
+            output_format = "视觉方案 / 设计稿"
+        elif "internal" in lowered and "comms" in lowered:
+            short_desc = "撰写适合团队内部同步和传播的文案"
+            output_format = "内部公告 / 沟通稿"
+    short_desc = (short_desc or "可复用的工作能力")[:36]
+    if not re.search(r"[\u4e00-\u9fff]", title):
+        title = re.sub(r"\s+", " ", title).strip()
+    return title, short_desc, output_format
 
 
 def _normalize_skill_record(item: dict[str, Any]) -> dict[str, Any]:
@@ -2450,6 +2756,10 @@ def _normalize_skill_record(item: dict[str, Any]) -> dict[str, Any]:
         if steps:
             parts.append(f"步骤：{'；'.join(steps[:3])}")
         normalized["description"] = " | ".join(parts[:4])
+    display_title, display_summary, display_output = _build_recommended_display_text(normalized)
+    normalized["display_title"] = display_title
+    normalized["display_summary"] = display_summary
+    normalized["display_output"] = display_output
     return normalized
 
 
@@ -2589,6 +2899,8 @@ def build_display_texts(
                 raw_text = str(raw).strip()
                 if not raw_text:
                     continue
+                if field in {"style_preference", "terminology_preference", "formatting_constraints", "revision_preference", "response_granularity"} and not _looks_like_response_style_text(raw_text):
+                    continue
                 item_id = f"profile:{field}:{_safe_slug(raw_text, 'item')}"
                 cache["profile"][item_id] = _make_display_entry(
                     title_zh=title_zh,
@@ -2648,6 +2960,8 @@ def build_display_texts(
             raw_text = str(value).strip()
             desc_zh, desc_en = _ensure_bilingual_display_value(llm, raw_text, desc_zh, desc_en)
 
+        if field in {"style_preference", "terminology_preference", "formatting_constraints", "revision_preference", "response_granularity"} and raw_text and not _looks_like_response_style_text(raw_text):
+            continue
         if not raw_text:
             continue
         cache["preferences"][f"preferences:{field}"] = _make_display_entry(
@@ -2801,13 +3115,15 @@ def memory_items_for_category(settings: dict[str, Any], category: str, locale: s
             title = node.get("description") or node.get("key") or node_id
             if _is_noise_memory_text(title):
                 continue
+            item_id = f"persistent:{node_id}"
+            display_entry = _get_persistent_display_entry(settings, display_cache, item_id, str(title))
             items.append(
                 {
-                    "id": f"persistent:{node_id}",
+                    "id": item_id,
                     "title": title,
                     "description": "",
-                    "display_title": title,
-                    "display_description": "",
+                    "display_title": _display_text(display_entry.get("title"), locale, title),
+                    "display_description": _display_text(display_entry.get("description"), locale, str(title)),
                     "selected": False,
                 }
             )
@@ -2829,6 +3145,8 @@ def memory_items_for_category(settings: dict[str, Any], category: str, locale: s
                         entry_text = str(entry).strip()
                         if not entry_text:
                             continue
+                        if field in {"style_preference", "terminology_preference", "formatting_constraints", "revision_preference", "response_granularity"} and not _looks_like_response_style_text(entry_text):
+                            continue
                         item_id = f"profile:{field}:{_safe_slug(entry_text, 'item')}"
                         display_entry = display_cache.get("profile", {}).get(item_id, {})
                         items.append(
@@ -2836,11 +3154,7 @@ def memory_items_for_category(settings: dict[str, Any], category: str, locale: s
                                 "id": item_id,
                                 "title": label,
                                 "description": entry_text,
-                                "display_title": _display_text(
-                                    display_entry.get("title"),
-                                    locale,
-                                    _localized_field_label("profile", field, locale),
-                                ),
+                                "display_title": _localized_field_label("profile", field, locale),
                                 "display_description": _display_text(
                                     display_entry.get("description"),
                                     locale,
@@ -2857,11 +3171,7 @@ def memory_items_for_category(settings: dict[str, Any], category: str, locale: s
                             "id": item_id,
                             "title": label,
                             "description": str(value)[:80],
-                            "display_title": _display_text(
-                                display_entry.get("title"),
-                                locale,
-                                _localized_field_label("profile", field, locale),
-                            ),
+                            "display_title": _localized_field_label("profile", field, locale),
                             "display_description": _display_text(
                                 display_entry.get("description"),
                                 locale,
@@ -2898,6 +3208,8 @@ def memory_items_for_category(settings: dict[str, Any], category: str, locale: s
                         entry_text = str(entry).strip()
                         if not entry_text:
                             continue
+                        if field in {"style_preference", "terminology_preference", "formatting_constraints", "revision_preference", "response_granularity"} and not _looks_like_response_style_text(entry_text):
+                            continue
                         item_id = f"preferences:{field}:{_safe_slug(entry_text, 'item')}"
                         display_entry = display_cache.get("preferences", {}).get(item_id, {})
                         localized_fallback = (
@@ -2910,11 +3222,7 @@ def memory_items_for_category(settings: dict[str, Any], category: str, locale: s
                                 "id": item_id,
                                 "title": label,
                                 "description": entry_text,
-                                "display_title": _display_text(
-                                    display_entry.get("title"),
-                                    locale,
-                                    _localized_field_label("preferences", field, locale),
-                                ),
+                                "display_title": _localized_field_label("preferences", field, locale),
                                 "display_description": _display_text(
                                     display_entry.get("description"),
                                     locale,
@@ -2925,17 +3233,15 @@ def memory_items_for_category(settings: dict[str, Any], category: str, locale: s
                         )
                 else:
                     description = str(value)
+                    if field in {"style_preference", "terminology_preference", "formatting_constraints", "revision_preference", "response_granularity"} and not _looks_like_response_style_text(description):
+                        continue
                     item_id = f"preferences:{field}"
                     items.append(
                         {
                             "id": item_id,
                             "title": label,
                             "description": description[:80],
-                            "display_title": _display_text(
-                                display_cache.get("preferences", {}).get(item_id, {}).get("title"),
-                                locale,
-                                _localized_field_label("preferences", field, locale),
-                            ),
+                            "display_title": _localized_field_label("preferences", field, locale),
                             "display_description": _display_text(
                                 display_cache.get("preferences", {}).get(item_id, {}).get("description"),
                                 locale,
@@ -3118,6 +3424,15 @@ def derive_my_skills(settings: dict[str, Any]) -> list[dict[str, Any]]:
             if len(items) >= 6:
                 break
 
+    if saved_ids:
+        recommended_items, _ = rank_recommended_skills(settings)
+        for item in recommended_items:
+            if item.get("id") not in saved_ids or item.get("id") in dismissed_ids:
+                continue
+            saved_item = dict(item)
+            saved_item["selected"] = True
+            items.append(saved_item)
+
     deduped: list[dict[str, Any]] = []
     seen_titles: set[str] = set()
     for item in items:
@@ -3214,6 +3529,26 @@ def load_all_raw_conversations(settings: dict[str, Any]) -> list[RawConversation
         except Exception:  # noqa: BLE001
             continue
     return conversations
+
+
+def _load_raw_conversation_object_map(settings: dict[str, Any]) -> dict[str, RawConversation]:
+    conversation_map: dict[str, RawConversation] = {}
+    for conv in load_all_raw_conversations(settings):
+        conv_id = str(conv.conv_id or "").strip()
+        if not conv_id:
+            continue
+        conversation_map[conv_id] = conv
+    return conversation_map
+
+
+def _load_raw_conversation_map(settings: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    conversation_map: dict[str, dict[str, Any]] = {}
+    for conv in load_all_raw_conversations(settings):
+        conv_id = str(conv.conv_id or "").strip()
+        if not conv_id:
+            continue
+        conversation_map[conv_id] = raw_conversation_payload(conv)
+    return conversation_map
 
 
 def parse_selected_ids(selected_ids: list[str]) -> dict[str, set[str]]:
@@ -3332,6 +3667,149 @@ def _filter_preference_fields(data: dict[str, Any], selected_fields: set[str], s
     return filtered
 
 
+def _normalize_snippet_text(value: str) -> str:
+    return re.sub(r"\s+", " ", str(value or "")).strip()
+
+
+def _extract_snippet_hint_segments(excerpt: str) -> list[str]:
+    text = str(excerpt or "").strip()
+    if not text:
+        return []
+    segments = re.split(r"\[[A-Z_]+\]:", text)
+    cleaned = []
+    for segment in segments:
+        normalized = _normalize_snippet_text(segment)
+        if len(normalized) >= 12:
+            cleaned.append(normalized)
+    if cleaned:
+        return cleaned[:4]
+    normalized = _normalize_snippet_text(text)
+    return [normalized] if len(normalized) >= 12 else []
+
+
+def _collect_raw_support_from_episode_ids(
+    episodes_dir: Path,
+    episode_ids: list[str] | set[str],
+) -> tuple[set[str], dict[str, list[str]]]:
+    raw_ids: set[str] = set()
+    excerpt_hints: dict[str, list[str]] = {}
+    for episode_id in episode_ids:
+        ep_id = str(episode_id or "").strip()
+        if not ep_id:
+            continue
+        episode = read_json_file(episodes_dir / f"{ep_id}.json")
+        if not isinstance(episode, dict):
+            continue
+        conv_id = str(episode.get("conv_id") or "").strip()
+        if conv_id:
+            raw_ids.add(conv_id)
+        for link in episode.get("evidence_links", []) or []:
+            if not isinstance(link, dict):
+                continue
+            source_type = str(link.get("source_type") or "").strip().lower()
+            source_id = str(link.get("source_id") or "").strip()
+            if source_type in {"l0_raw", "chat_history"} and source_id:
+                raw_ids.add(source_id)
+                excerpt = str(link.get("excerpt") or "").strip()
+                if excerpt:
+                    excerpt_hints.setdefault(source_id, []).append(excerpt)
+            elif source_type in {"l0_raw", "chat_history"} and conv_id:
+                excerpt = str(link.get("excerpt") or "").strip()
+                if excerpt:
+                    excerpt_hints.setdefault(conv_id, []).append(excerpt)
+    return raw_ids, excerpt_hints
+
+
+def _collect_raw_support_from_memory_object(
+    memory_obj: Any,
+    episodes_dir: Path,
+) -> tuple[set[str], dict[str, list[str]]]:
+    raw_ids: set[str] = set()
+    excerpt_hints: dict[str, list[str]] = {}
+    if memory_obj is None:
+        return raw_ids, excerpt_hints
+    evidence_links = getattr(memory_obj, "evidence_links", []) or []
+    for link in evidence_links:
+        source_type = str(getattr(link, "source_type", "") or "").strip().lower()
+        source_id = str(getattr(link, "source_id", "") or "").strip()
+        if source_type in {"l0_raw", "chat_history"} and source_id:
+            raw_ids.add(source_id)
+            excerpt = str(getattr(link, "excerpt", "") or "").strip()
+            if excerpt:
+                excerpt_hints.setdefault(source_id, []).append(excerpt)
+    source_episode_ids = getattr(memory_obj, "source_episode_ids", []) or []
+    episode_raw_ids, episode_hints = _collect_raw_support_from_episode_ids(episodes_dir, source_episode_ids)
+    raw_ids.update(episode_raw_ids)
+    for conv_id, hints in episode_hints.items():
+        excerpt_hints.setdefault(conv_id, []).extend(hints)
+    return raw_ids, excerpt_hints
+
+
+def _merge_raw_hint_maps(target: dict[str, list[str]], source: dict[str, list[str]]) -> None:
+    for conv_id, hints in source.items():
+        bucket = target.setdefault(conv_id, [])
+        for hint in hints:
+            clean = str(hint or "").strip()
+            if clean and clean not in bucket:
+                bucket.append(clean)
+
+
+def _build_relevant_raw_snippets(
+    conversations: dict[str, RawConversation],
+    hint_map: dict[str, list[str]],
+    *,
+    window: int = 1,
+) -> list[dict[str, Any]]:
+    snippets: list[dict[str, Any]] = []
+    for conv_id in sorted(hint_map):
+        conv = conversations.get(conv_id)
+        if conv is None:
+            continue
+        hints = [hint for hint in hint_map.get(conv_id, []) if str(hint).strip()]
+        matched_indexes: set[int] = set()
+        for hint in hints:
+            for segment in _extract_snippet_hint_segments(hint):
+                segment_norm = _normalize_snippet_text(segment).lower()
+                if not segment_norm:
+                    continue
+                segment_head = segment_norm[:48]
+                for idx, msg in enumerate(conv.messages):
+                    msg_norm = _normalize_snippet_text(msg.content).lower()
+                    if not msg_norm:
+                        continue
+                    if segment_norm in msg_norm or (segment_head and segment_head in msg_norm):
+                        matched_indexes.add(idx)
+        if not matched_indexes:
+            continue
+        snippet_indexes: set[int] = set()
+        for idx in matched_indexes:
+            start = max(0, idx - window)
+            end = min(len(conv.messages), idx + window + 1)
+            snippet_indexes.update(range(start, end))
+        ordered_indexes = sorted(snippet_indexes)
+        snippet_messages = [
+            {
+                "id": conv.messages[idx].msg_id,
+                "role": conv.messages[idx].role,
+                "content": conv.messages[idx].content,
+                "timestamp": conv.messages[idx].timestamp,
+            }
+            for idx in ordered_indexes
+        ]
+        if not snippet_messages:
+            continue
+        snippets.append(
+            {
+                "conversation_id": conv.conv_id,
+                "platform": conv.platform,
+                "title": conv.title,
+                "matched_excerpts": hints[:3],
+                "messages": snippet_messages,
+            }
+        )
+    return snippets
+
+
 def build_selected_memory_payload(
     settings: dict[str, Any],
     selected_ids: list[str],
@@ -3345,6 +3823,9 @@ def build_selected_memory_payload(
         "memory": {},
     }
     episodes_dir = get_storage_root(settings) / "episodes"
+    raw_conversation_map: dict[str, RawConversation] | None = None
+    raw_conversation_ids: set[str] = set()
+    raw_excerpt_hints: dict[str, list[str]] = {}
 
     if selected["profile_fields"]:
         profile = wiki.load_profile()
@@ -3354,6 +3835,9 @@ def build_selected_memory_payload(
                 selected["profile_fields"],
                 selected["profile_values"],
             )
+            profile_raw_ids, profile_hints = _collect_raw_support_from_memory_object(profile, episodes_dir)
+            raw_conversation_ids.update(profile_raw_ids)
+            _merge_raw_hint_maps(raw_excerpt_hints, profile_hints)
 
     if selected["preferences_fields"]:
         preferences = wiki.load_preferences()
@@ -3364,18 +3848,29 @@ def build_selected_memory_payload(
                 selected["preferences_fields"],
                 selected["preferences_values"],
             )
+            pref_raw_ids, pref_hints = _collect_raw_support_from_memory_object(preferences, episodes_dir)
+            raw_conversation_ids.update(pref_raw_ids)
+            _merge_raw_hint_maps(raw_excerpt_hints, pref_hints)
 
     if selected["projects"]:
         projects = _valid_projects(wiki)
         if "*" not in selected["projects"]:
             projects = [project for project in projects if project.project_name in selected["projects"]]
         payload["memory"]["projects"] = [project.model_dump(mode="json") for project in projects]
+        for project in projects:
+            project_raw_ids, project_hints = _collect_raw_support_from_memory_object(project, episodes_dir)
+            raw_conversation_ids.update(project_raw_ids)
+            _merge_raw_hint_maps(raw_excerpt_hints, project_hints)
 
     if selected["workflows"]:
         workflows = _valid_workflows(wiki)
         if "*" not in selected["workflows"]:
             workflows = [workflow for workflow in workflows if workflow.workflow_name in selected["workflows"]]
         payload["memory"]["workflows"] = [workflow.model_dump(mode="json") for workflow in workflows]
+        for workflow in workflows:
+            workflow_raw_ids, workflow_hints = _collect_raw_support_from_memory_object(workflow, episodes_dir)
+            raw_conversation_ids.update(workflow_raw_ids)
+            _merge_raw_hint_maps(raw_excerpt_hints, workflow_hints)
 
     if selected["persistent"]:
         persistent = load_persistent_nodes(settings)
@@ -3400,8 +3895,20 @@ def build_selected_memory_payload(
                 episode = read_json_file(episodes_dir / f"{ep_id}.json")
                 if episode:
                     evidence.append(episode)
+            episode_raw_ids, episode_hints = _collect_raw_support_from_episode_ids(episodes_dir, selected_episode_ids)
+            raw_conversation_ids.update(episode_raw_ids)
+            _merge_raw_hint_maps(raw_excerpt_hints, episode_hints)
             if evidence:
                 payload["memory"]["episodic_evidence"] = evidence
+
+    if raw_conversation_ids:
+        if raw_conversation_map is None:
+            raw_conversation_map = _load_raw_conversation_object_map(settings)
+        for conv_id in raw_conversation_ids:
+            raw_excerpt_hints.setdefault(conv_id, [])
+        raw_snippets = _build_relevant_raw_snippets(raw_conversation_map, raw_excerpt_hints)
+        if raw_snippets:
+            payload["memory"]["relevant_raw_snippets"] = raw_snippets
 
     if not payload["memory"]:
         raise HTTPException(status_code=400, detail="请至少选择一项记忆内容")
@@ -3461,11 +3968,12 @@ def _collect_recommendation_signals(settings: dict[str, Any]) -> set[str]:
     profile = wiki.load_profile()
     if profile:
         for value in [
-            profile.primary_domain,
-            profile.professional_role,
-            profile.communication_tone,
+            profile.role_identity,
+            profile.organization_or_affiliation,
+            *profile.domain_background,
+            *profile.common_languages,
             *profile.primary_task_types,
-            *profile.recurring_topics,
+            *profile.long_term_research_or_work_focus,
         ]:
             for token in str(value or "").lower().replace("/", " ").replace("_", " ").split():
                 if token:
@@ -4344,26 +4852,40 @@ def conversations_current_import(payload: CurrentConversationImportRequest) -> d
     conversation = build_raw_conversation_from_payload(payload)
     imported = persist_raw_conversations(root, [conversation], platform_hint=payload.platform)
 
-    processed = False
-    process_result: dict[str, Any] | None = None
-
-    if payload.process_now and settings.get("api_key", "").strip():
-        job = create_job(
-            "current_conversation_import",
-            status="running",
-            progress={"current": 0, "total": 1, "message": "正在整理当前对话"},
-        )
-        _run_organize_job(job["id"], settings)
-        process_result = JOB_REGISTRY[job["id"]].get("result")
-        processed = True
-
     settings = update_timestamp(settings)
     job = create_job(
         "current_conversation_import",
         status="completed",
         progress={"current": imported, "total": imported, "message": "当前对话已加入记忆"},
-        result={"imported_conversations": imported, "processed": processed, "process_result": process_result},
+        result={
+            "imported_conversations": imported,
+            "processed": False,
+            "processing_started": False,
+            "organize_job_id": None,
+        },
     )
+
+    if payload.process_now and settings.get("api_key", "").strip():
+        organize_job = create_job(
+            "memory_organize",
+            status="running",
+            progress={"current": 0, "total": 1, "message": "正在整理当前对话"},
+        )
+        thread = threading.Thread(target=_run_organize_job, args=(organize_job["id"], dict(settings)), daemon=True)
+        thread.start()
+        job["result"] = {
+            "imported_conversations": imported,
+            "processed": False,
+            "processing_started": True,
+            "organize_job_id": organize_job["id"],
+        }
+        job["progress"] = {
+            "current": imported,
+            "total": imported,
+            "message": "当前对话已加入记忆，后台正在整理",
+        }
+        JOB_REGISTRY[job["id"]] = job
+
     return {"ok": True, "job_id": job["id"]}
 
 
@@ -4462,9 +4984,14 @@ def skills_recommended_refresh(payload: RefreshRecommendedSkillsRequest | None =
 @app.post("/api/skills/save")
 def skills_save(payload: SaveSkillsRequest) -> dict[str, Any]:
     settings = load_settings()
-    settings["saved_skill_ids"] = payload.skill_ids
+    saved_ids = set(settings.get("saved_skill_ids", [])) if payload.merge else set()
+    saved_ids.update(payload.skill_ids)
+    dismissed_ids = set(settings.get("dismissed_skill_ids", []))
+    dismissed_ids.difference_update(payload.skill_ids)
+    settings["saved_skill_ids"] = sorted(saved_ids)
+    settings["dismissed_skill_ids"] = sorted(dismissed_ids)
     save_settings(settings)
-    return {"ok": True, "saved_count": len(payload.skill_ids)}
+    return {"ok": True, "saved_count": len(payload.skill_ids), "saved_skill_ids": settings["saved_skill_ids"]}
 
 
 @app.post("/api/skills/export")

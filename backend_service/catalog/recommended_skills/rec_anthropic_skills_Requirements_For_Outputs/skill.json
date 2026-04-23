@@ -1,0 +1,21 @@
+{
+  "id": "rec:anthropic_skills:Requirements_For_Outputs",
+  "title": "Requirements For Outputs",
+  "description": "触发：需要处理与Requirements For Outputs相关的任务时 | 目标：A user may ask you to create, edit, or analyze the contents  | 步骤：Choose tool**: pandas for data, openpyxl for formulas/formatting；Create/Load**: Create new workbook or load existing file；Modify**: Add/edit data, formulas, and formatting | 产出：计划草案 / 模板",
+  "kind": "skill",
+  "trigger": "需要处理与Requirements For Outputs相关的任务时",
+  "goal": "A user may ask you to create, edit, or analyze the contents",
+  "steps": [
+    "Choose tool**: pandas for data, openpyxl for formulas/formatting",
+    "Create/Load**: Create new workbook or load existing file",
+    "Modify**: Add/edit data, formulas, and formatting",
+    "Save**: Write to file"
+  ],
+  "output_format": "计划草案 / 模板",
+  "guardrails": [],
+  "source_types": [
+    "recommended_catalog"
+  ],
+  "confidence": "medium",
+  "selected": false
+}

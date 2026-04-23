@@ -1,0 +1,24 @@
+{
+  "id": "rec:project_plan",
+  "icon": "计",
+  "tags": [
+    "planning",
+    "project",
+    "roadmap"
+  ],
+  "keywords": [
+    "project",
+    "plan",
+    "roadmap",
+    "tasks",
+    "priority"
+  ],
+  "persona_signals": [
+    "project",
+    "planning",
+    "workflow",
+    "roadmap"
+  ],
+  "usage_score": 0.9,
+  "source": "built_in"
+}

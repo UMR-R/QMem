@@ -1,0 +1,23 @@
+{
+  "id": "rec:english_rewriter",
+  "icon": "EN",
+  "tags": [
+    "writing",
+    "translation",
+    "language"
+  ],
+  "keywords": [
+    "english",
+    "rewrite",
+    "translate",
+    "polish",
+    "email"
+  ],
+  "persona_signals": [
+    "writing",
+    "translation",
+    "language"
+  ],
+  "usage_score": 0.95,
+  "source": "built_in"
+}

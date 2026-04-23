@@ -1,0 +1,23 @@
+{
+  "id": "rec:anthropic_skills:PPTX_Skill",
+  "icon": "P",
+  "tags": [
+    "general"
+  ],
+  "keywords": [
+    "pptx",
+    "read",
+    "editing",
+    "full",
+    "details"
+  ],
+  "persona_signals": [
+    "pptx",
+    "read",
+    "editing",
+    "full",
+    "details"
+  ],
+  "usage_score": 0.96,
+  "source": "anthropic_skills:pptx"
+}

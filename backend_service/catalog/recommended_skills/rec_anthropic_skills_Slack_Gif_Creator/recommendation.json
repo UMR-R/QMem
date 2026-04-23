@@ -1,0 +1,30 @@
+{
+  "id": "rec:anthropic_skills:Slack_Gif_Creator",
+  "icon": "S",
+  "tags": [
+    "general"
+  ],
+  "keywords": [
+    "slack",
+    "gif",
+    "creator",
+    "toolkit",
+    "providing",
+    "utilities",
+    "knowledge",
+    "creating",
+    "animated",
+    "gifs",
+    "optimized"
+  ],
+  "persona_signals": [
+    "slack",
+    "gif",
+    "creator",
+    "toolkit",
+    "providing",
+    "utilities"
+  ],
+  "usage_score": 0.96,
+  "source": "anthropic_skills:slack-gif-creator"
+}

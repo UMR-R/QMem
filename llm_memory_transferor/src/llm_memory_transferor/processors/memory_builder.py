@@ -277,12 +277,18 @@ class MemoryBuilder:
             relevant = [ep for ep in episodes if ep.relates_to_preferences] or episodes
             return self._build_episode_digest(relevant[:40], l1_text)[:6000]
         elif filter_type == "projects":
-            # Prefer flagged episodes but always include all — project names may have
-            # been missed during episode extraction. Use verbose mode for richer context.
+            # Prefer episodes that already point to a project. Only add a small
+            # amount of unflagged context as fallback, otherwise literature surveys
+            # and comparison tables can inflate every referenced paper/algorithm
+            # into a fake project.
             flagged = [ep for ep in episodes if ep.relates_to_projects]
-            unflagged = [ep for ep in episodes if not ep.relates_to_projects]
-            relevant = (flagged + unflagged)[:50]
-            return self._build_episode_digest(relevant, l1_text, verbose=True)[:8000]
+            if flagged:
+                backfill = max(0, min(8, 12 - len(flagged)))
+                unflagged = [ep for ep in episodes if not ep.relates_to_projects][:backfill]
+                relevant = (flagged + unflagged)[:40]
+            else:
+                relevant = episodes[:15]
+            return self._build_episode_digest(relevant, l1_text, verbose=True)[:7000]
         elif filter_type == "workflows":
             relevant = [ep for ep in episodes if ep.relates_to_workflows] or episodes
             return self._build_episode_digest(relevant[:40], l1_text, verbose=True)[:6000]

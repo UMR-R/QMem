@@ -716,6 +716,10 @@ button {
   margin-top: 14px;
 }
 
+.skill-bottom-actions {
+  grid-template-columns: 1fr 1fr 1.18fr;
+}
+
 .ghost-action-btn,
 .solid-action-btn {
   min-height: 50px;

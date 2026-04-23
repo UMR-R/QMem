@@ -37,6 +37,7 @@ extract the user's stable output and interaction preferences. Output ONLY valid 
 Rules:
 - Preferences should contain interaction and usage preferences, not identity facts.
 - style_preference: e.g. ["no bullet points", "use numbered lists", "terse responses"].
+- style_preference / formatting / revision fields must only contain output style, tone, formatting, or revision habits. Do NOT put research methods, model strategies, technical topics, or task/domain content here (e.g. zero-shot, memory migration, LLM research, PDF processing).
 - forbidden_expressions: phrases the user explicitly asked NOT to use.
 - language_preference: the language the user prefers the assistant to use in responses (e.g. "English", "Chinese", "English+Chinese mix").
 - primary_task_types: repeated kinds of help the user asks for (e.g. paper writing, product design, debugging, information retrieval). These belong in preferences/usage patterns, not in profile.
@@ -61,13 +62,15 @@ identify the user's active long-running projects. Output ONLY valid JSON:
   }
 ]
 Rules:
-- A project is any named system, model, paper, tool, or body of work the user is actively building or researching.
-  Examples: a model called "FaceGPT", a paper submitted to CVPR, a codebase the user is developing.
-- Infer projects from named entities, recurring topics, and paper/model names that appear across multiple episodes — even if individual episodes only asked for writing help, debugging, or evaluation.
+- A project must be a user-owned, actively advanced body of work: a research project, paper submission, codebase, product, system, or experiment line that the user is pushing forward over time.
+- Do NOT create a separate project just because a conversation mentions a paper, algorithm, baseline, benchmark, dataset, or tool.
+- When the user is analyzing reference papers or comparing multiple algorithms inside one larger research effort, keep those references inside the parent project rather than turning each paper/algorithm into its own project.
+- Prefer the higher-level project the work belongs to (for example a paper submission, a research direction, a system being built, or an experiment campaign).
+- Only output a project when there is evidence of project structure such as goals, stage, open questions, constraints, decisions, next actions, or repeated follow-up work.
 - key_terms: {term: definition} dict of project-specific vocabulary.
 - finished_decisions: things already decided and agreed upon.
 - unresolved_questions: open items that need future work.
-- Return [] only if there is genuinely no named ongoing work across all episodes."""
+- Return [] if the conversation set contains only topic exploration, literature comparison, or one-off analysis without a clear user-owned project."""
 
 _WORKFLOWS_SYSTEM = """You are a memory extraction specialist. Given chat history and platform memory signals,
 identify recurring workflow patterns the user applies frequently. Output ONLY valid JSON:
@@ -114,10 +117,11 @@ Rules:
 - open_issues: questions or tasks left unresolved.
 - relates_to_profile: true if the conversation reveals stable facts about the user (identity, role, domain, language).
 - relates_to_preferences: true if the conversation reveals how the user wants responses formatted or styled.
-- relates_to_projects: list of project names for any named system, paper, model, tool, or piece of work the user is building or researching.
-  Examples: if the user discusses "FaceGPT", include "FaceGPT". If they discuss a CVPR paper submission, include the paper name or "CVPR paper".
-  Include the project even if the immediate task is writing help, debugging, or evaluation — the project is what the work belongs to.
-  Use [] only if the conversation has no connection to any named ongoing work.
+- relates_to_projects: list the higher-level user-owned projects this conversation belongs to.
+  Examples: a paper submission, a long-running research project, a system being built, or an experiment campaign.
+  Do NOT list every paper name, algorithm name, benchmark, dataset, or tool mentioned in the conversation.
+  If the conversation is mainly analyzing reference papers or comparing methods inside a larger project, return only the parent project name.
+  Use [] if the conversation has no connection to a clear ongoing user-owned project.
 - relates_to_workflows: list of workflow/process names if a recurring task pattern was followed (e.g. "paper revision", "prompt engineering"); [] otherwise.
 - A conversation may relate to multiple memory types simultaneously — set all that apply.
 - A conversation may relate to NO memory type (e.g. casual chat, greetings, one-off unrelated questions) — leave all flags false/[]. This is valid and expected.
@@ -168,6 +172,7 @@ Rules:
 - profile_updates: only fields that changed or are newly confirmed.
 - preference_updates: only newly expressed preferences or repeated usage-pattern signals.
 - Put repeated "what the user often asks for" into preference_updates.add_primary_task_types, not profile_updates.
+- project_updates should target user-owned ongoing projects only; do NOT create/update a project just because a reference paper, algorithm, benchmark, or external tool was discussed.
 - Do NOT move objective identity/background facts into preferences, and do NOT move response preferences into profile.
 - is_noise: true if the conversation has no memory-worthy content.
 - Be conservative: when in doubt, mark as noise or accumulate."""
