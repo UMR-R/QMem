@@ -99,6 +99,8 @@ const state = {
     persistent: 0,
   },
   categoryLabels: { ...CATEGORY_LABELS },
+  selectionListScrollTop: 0,
+  selectionChipScrollLefts: {},
 };
 
 function openDB() {
@@ -397,6 +399,33 @@ function buildSelectionPreview(categoryId, item) {
   return { title, description };
 }
 
+function selectionScrollKey(categoryId, groupLabel) {
+  return `${categoryId}:${encodeURIComponent(String(groupLabel || ""))}`;
+}
+
+function snapshotSelectionScroll(listEl) {
+  if (!listEl) return;
+  state.selectionListScrollTop = listEl.scrollTop;
+  const next = {};
+  listEl.querySelectorAll(".selection-chip-row[data-scroll-key]").forEach(row => {
+    next[row.dataset.scrollKey] = row.scrollLeft;
+  });
+  state.selectionChipScrollLefts = next;
+}
+
+function restoreSelectionScroll(listEl) {
+  if (!listEl) return;
+  requestAnimationFrame(() => {
+    listEl.scrollTop = state.selectionListScrollTop || 0;
+    listEl.querySelectorAll(".selection-chip-row[data-scroll-key]").forEach(row => {
+      const key = row.dataset.scrollKey;
+      if (key && typeof state.selectionChipScrollLefts[key] === "number") {
+        row.scrollLeft = state.selectionChipScrollLefts[key];
+      }
+    });
+  });
+}
+
 function setOrganizeStatus(active, text = "正在整理记忆...", hint = "准备开始") {
   const card = document.getElementById("organizeStatusCard");
   card.classList.toggle("hidden", !active);
@@ -444,6 +473,7 @@ async function toggleCategorySelection(category, checked) {
 function renderSelectionList() {
   const listEl = document.getElementById("selectionList");
   if (!listEl) return;
+  snapshotSelectionScroll(listEl);
 
   const categories = [
     { id: "profile", label: state.categoryLabels.profile || CATEGORY_LABELS.profile, count: state.categories.profile },
@@ -506,6 +536,7 @@ function renderSelectionList() {
         grouped.forEach((groupItems, groupLabel) => {
           const subgroup = document.createElement("div");
           subgroup.className = "selection-subgroup";
+          const scrollKey = selectionScrollKey(category.id, groupLabel);
           const chips = groupItems.map(item => {
             const preview = buildSelectionPreview(category.id, item);
             return `
@@ -517,7 +548,7 @@ function renderSelectionList() {
           }).join("");
           subgroup.innerHTML = `
             <div class="selection-subgroup-title">${groupLabel}</div>
-            <div class="selection-chip-row">${chips}</div>
+            <div class="selection-chip-row" data-scroll-key="${scrollKey}">${chips}</div>
           `;
           subgroup.querySelectorAll("input").forEach(checkbox => {
             checkbox.addEventListener("change", event => {
@@ -554,6 +585,7 @@ function renderSelectionList() {
 
     listEl.appendChild(group);
   });
+  restoreSelectionScroll(listEl);
 }
 
 async function initializeDefaultMemorySelection() {
