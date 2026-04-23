@@ -23,11 +23,10 @@ memory_assistant/
 │   └── offscreen.js
 ├── prompts/
 │   ├── schema.txt
-│   ├── episode_extract.txt
-│   ├── persistent_node_distill.txt
 │   ├── persistent_node_distill_bg.txt
 │   ├── delta_extract.txt
-│   └── cold_start.txt
+│   ├── cold_start.txt
+│   └── platform_memory_collect.txt
 └── icons/
 ```
 
@@ -57,12 +56,7 @@ Chrome extension manifest v3. Declares permissions (`storage`, `downloads`, `cli
 
 ### `config.js`
 
-Loaded by `popup.html` via `<script>`. Contains the hardcoded fallback versions of all prompts (used if the corresponding `.txt` file fails to load) and a `CONFIG.loadPrompts()` function that fetches `prompts/*.txt` at popup init and overwrites the in-memory defaults.
-
-Prompt assembly rules (enforced here):
-- Target AI prompt = `episodicTag` only (architecture is **not** prepended)
-- DeepSeek system prompt (popup) = `architecture` + `persistentDistill`
-- DeepSeek system prompt (background) = `persistent_distill_background` (self-contained, no prepend)
+Loaded by `popup.html` via `<script>`. Contains the hardcoded fallback versions of the prompts still used by the popup and a `CONFIG.loadPrompts()` function that fetches the active `prompts/*.txt` files at popup init and overwrites the in-memory defaults.
 
 ---
 
@@ -181,7 +175,6 @@ Runs in the **MAIN world** (direct page access, no extension sandbox). Wraps `na
 
 - On open: loads config (`CONFIG.loadPrompts()`), restores UI state, and triggers a file sync (flushes `chrome.storage.local` → disk via `l2_wiki.js`)
 - **同步**: sends `FLUSH_NOW` to the Service Worker, then calls `PROCESS_ALL_RAW` (up to 10 conversations at a time) and writes results to disk
-- **导出并保存记忆**: sends the `episodicTag` prompt to the current tab's AI, captures the reply, then calls DeepSeek (`architecture` + `persistentDistill`) to update persistent nodes
 - **重建节点**: iterates all unprocessed episodes and runs persistent distillation on each
 - **整理节点**: sends all existing nodes to DeepSeek and applies the returned merge operations
 - **按标签导入**: shows the persistent node panel; 注入当前对话 uploads the memory package to the current AI tab; 导出文件 generates a `.txt` bootstrap file
@@ -198,12 +191,10 @@ An offscreen document (Chrome MV3 mechanism for background DOM access). Used whe
 
 | File | Used by | Purpose |
 |---|---|---|
-| `schema.txt` | popup.js (prepended to `persistent_node_distill`) | Defines the two-layer schema (episodic + persistent) shared between popup DeepSeek calls |
-| `episode_extract.txt` | popup.js → target AI | Extracts structured episodic memory from the current conversation; contains `{{EXISTING_TAGS}}` placeholder |
-| `persistent_node_distill.txt` | popup.js → DeepSeek | Full persistent node maintenance rules (detailed merge/aggregation logic); combined with `schema.txt` |
 | `persistent_node_distill_bg.txt` | memory_engine.js → DeepSeek | Self-contained version (embeds schema); compact rules for automatic per-episode processing in the Service Worker |
 | `delta_extract.txt` | memory_engine.js → DeepSeek | Incremental delta extraction per conversation round; outputs the delta JSON schema above |
 | `cold_start.txt` | popup.js → target AI | Cold-start prompt sent when injecting a memory package into a new AI session |
+| `platform_memory_collect.txt` | popup.js → target AI | Collects saved memory / custom instructions / agent config from the current AI page |
 
 ---
 

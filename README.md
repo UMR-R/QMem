@@ -175,19 +175,17 @@ All prompts live as plain-text files in the `prompts/` directory. Edit them dire
 
 | File | Sent to | Triggered by |
 |---|---|---|
-| `prompts/episode_extract.txt` | Target AI (current page) | 导出并保存记忆 |
-| `prompts/schema.txt` | Prepended to `persistent_node_distill.txt` as DeepSeek system prompt | 导出并保存记忆 / 重建节点 / 整理节点 |
-| `prompts/persistent_node_distill.txt` | DeepSeek API (popup) — full ruleset | After 导出并保存记忆 / 重建节点 / 整理节点 |
 | `prompts/persistent_node_distill_bg.txt` | DeepSeek API (Service Worker) — compact, self-contained | 实时更新 per-round / 同步 |
 | `prompts/delta_extract.txt` | DeepSeek API (Service Worker) — incremental delta per round | 实时更新 per-round / 同步 |
 | `prompts/cold_start.txt` | Target AI | 注入当前对话 / 导出文件 |
+| `prompts/platform_memory_collect.txt` | Target AI (current page) | 加入平台记忆 |
 
 To apply edits: save the file → go to `chrome://extensions/` → click the reload icon → reopen the popup.
 
 **Notes:**
-- `episode_extract.txt` contains a `{{EXISTING_TAGS}}` placeholder that is replaced at runtime with your existing tag list — keep it when editing.
-- `schema.txt` defines the two-layer memory schema. It is prepended to `persistent_node_distill.txt` for popup calls, but **not** to `episode_extract.txt` — the target AI only needs to know how to extract, not the full schema.
-- `persistent_node_distill.txt` vs `persistent_node_distill_bg.txt`: the popup version is combined with `schema.txt` at runtime and contains the full ruleset (detailed merge logic, sub-topic aggregation, granularity rules). The background version is self-contained — it embeds the schema definition directly — and uses a compact format suited for automatic per-round processing by the Service Worker.
+- `persistent_node_distill_bg.txt` is the active persistent-node maintenance prompt used by the Service Worker / local backend.
+- `delta_extract.txt` is the active incremental update prompt used for per-round memory deltas.
+- `platform_memory_collect.txt` is the prompt used when collecting saved memory / agent config / skills from the current AI page.
 
 ---
 

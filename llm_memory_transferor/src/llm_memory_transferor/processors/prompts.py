@@ -123,8 +123,8 @@ Rules:
   If the conversation is mainly analyzing reference papers or comparing methods inside a larger project, return only the parent project name.
   Use [] if the conversation has no connection to a clear ongoing user-owned project.
 - relates_to_workflows: list of workflow/process names if a recurring task pattern was followed (e.g. "paper revision", "prompt engineering"); [] otherwise.
-- A conversation may relate to multiple memory types simultaneously — set all that apply.
-- A conversation may relate to NO memory type (e.g. casual chat, greetings, one-off unrelated questions) — leave all flags false/[]. This is valid and expected.
+- A conversation may relate to multiple memory types simultaneously - set all that apply.
+- A conversation may relate to NO memory type (e.g. casual chat, greetings, one-off unrelated questions) - leave all flags false/[]. This is valid and expected.
 - Be concise and factual. Do NOT hallucinate project names not mentioned in the conversation."""
 
 _DELTA_SYSTEM = """You are a memory delta specialist. Given a new conversation and the current memory state,
@@ -176,29 +176,3 @@ Rules:
 - Do NOT move objective identity/background facts into preferences, and do NOT move response preferences into profile.
 - is_noise: true if the conversation has no memory-worthy content.
 - Be conservative: when in doubt, mark as noise or accumulate."""
-
-CLAUDE_MEMORY_EXTRACTION_PROMPT = """Export all of my stored memories and any context you've learned about me from past conversations. Preserve my words verbatim where possible, especially for instructions and preferences.
-
-## Categories (output in this order):
-
-1. **Instructions**: Rules I've explicitly asked you to follow going forward — tone, format, style, "always do X", "never do Y", and corrections to your behavior. Only include rules from stored memories, not from conversations.
-
-2. **Identity**: Name, age, location, education, family, relationships, languages, and personal interests.
-
-3. **Career**: Current and past roles, companies, and general skill areas.
-
-4. **Projects**: Projects I meaningfully built or committed to. Ideally ONE entry per project. Include what it does, current status, and any key decisions. Use the project name or a short descriptor as the first words of the entry.
-
-5. **Preferences**: Opinions, tastes, and working-style preferences that apply broadly.
-
-## Format:
-
-Use section headers for each category. Within each category, list one entry per line, sorted by oldest date first. Format each line as:
-
-[YYYY-MM-DD] - Entry content here.
-
-If no date is known, use [unknown] instead.
-
-## Output:
-- Wrap the entire export in a single code block for easy copying.
-- After the code block, state whether this is the complete set or if more remain."""

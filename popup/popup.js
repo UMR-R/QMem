@@ -112,6 +112,9 @@ const state = {
   selectionChipScrollLefts: {},
 };
 
+const DEFAULT_BACKEND_URL = "http://127.0.0.1:8765";
+const BACKEND_START_COMMAND = "uvicorn backend_service.app:app --host 127.0.0.1 --port 8765 --reload";
+
 function openDB() {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, 1);
@@ -298,6 +301,18 @@ function toast(message, isError = false) {
   toastEl.style.background = isError ? "rgba(176, 43, 43, 0.94)" : "rgba(22, 33, 58, 0.92)";
   clearTimeout(toastEl._timer);
   toastEl._timer = setTimeout(() => toastEl.classList.add("hidden"), 3200);
+}
+
+function showCommandModal(command = BACKEND_START_COMMAND) {
+  const modal = document.getElementById("commandModal");
+  const commandEl = document.getElementById("commandModalText");
+  commandEl.textContent = command;
+  modal.classList.remove("hidden");
+  commandEl.focus();
+}
+
+function closeCommandModal() {
+  document.getElementById("commandModal").classList.add("hidden");
 }
 
 function setView(viewName) {
@@ -941,8 +956,10 @@ async function refreshSummary() {
 }
 
 async function saveSettings(showToast = true) {
+  const backendUrlInput = document.getElementById("backendUrlInput");
+  const rawBackendUrl = backendUrlInput.value.trim();
   state.apiKey = document.getElementById("apiKeyInput").value.trim();
-  state.backendUrl = document.getElementById("backendUrlInput").value.trim() || "http://127.0.0.1:8765";
+  state.backendUrl = rawBackendUrl || DEFAULT_BACKEND_URL;
   state.storagePath = document.getElementById("storageDirInput").value.trim();
   await storageSet({
     [STORAGE_KEYS.apiProvider]: state.apiProvider,
@@ -971,6 +988,9 @@ async function saveSettings(showToast = true) {
   renderActionAvailability();
   if (showToast) {
     toast("设置已保存到本地后端");
+  }
+  if (showToast) {
+    showCommandModal(BACKEND_START_COMMAND);
   }
 }
 
@@ -1645,6 +1665,13 @@ function bindEvents() {
 
   document.getElementById("saveSettingsBtn").addEventListener("click", saveSettings);
   document.getElementById("testConnectionBtn").addEventListener("click", testConnection);
+  document.getElementById("closeCommandModalBtn").addEventListener("click", closeCommandModal);
+  document.getElementById("commandModal").addEventListener("click", event => {
+    if (event.target.id === "commandModal") closeCommandModal();
+  });
+  document.addEventListener("keydown", event => {
+    if (event.key === "Escape") closeCommandModal();
+  });
 
   document.getElementById("keepUpdatedToggle").addEventListener("change", async event => {
     state.keepUpdated = event.target.checked;

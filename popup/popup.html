@@ -87,6 +87,15 @@
             <strong id="memoryCountValue">0 条</strong>
           </div>
         </div>
+
+        <a
+          class="contact-link"
+          href="https://github.com/UMR-R/memory_assistant"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          联系我们
+        </a>
       </section>
 
       <section id="migrateView" class="view">
@@ -199,6 +208,7 @@
             <input id="backendUrlInput" class="text-input" type="text" placeholder="http://127.0.0.1:8765">
             <button id="saveSettingsBtn" class="outline-mini-btn" type="button">保存</button>
           </div>
+          <p class="helper-text">可选地址：http://127.0.0.1:8765</p>
           <label class="field-label" for="apiKeyInput">API Key</label>
           <div class="field-row">
             <input id="apiKeyInput" class="text-input" type="password" placeholder="请输入 API Key" autocomplete="off">
@@ -246,6 +256,16 @@
         </div>
       </section>
 
+      <div id="commandModal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="commandModalTitle">
+        <div class="modal-card">
+          <div class="modal-head">
+            <h3 id="commandModalTitle">启动本地后端</h3>
+            <button id="closeCommandModalBtn" class="modal-close-btn" type="button" aria-label="关闭弹窗">×</button>
+          </div>
+          <p class="modal-copy">请打开Terminal，执行以下命令启动本地后端：</p>
+          <pre id="commandModalText" class="modal-command" tabindex="0"></pre>
+        </div>
+      </div>
       <div id="toast" class="toast hidden"></div>
       <input id="importFileInput" type="file" accept=".json,.jsonl,.md,.txt" hidden>
     </main>
