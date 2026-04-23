@@ -679,6 +679,7 @@ function buildSkillPreview(item) {
   if (item?.confidence) metaParts.push(`置信度 ${item.confidence}`);
 
   const summaryCandidates = [
+    item?.catalog_summary || "",
     item?.goal ? `目标：${item.goal}` : "",
     item?.trigger ? `触发：${item.trigger}` : "",
     item?.output_format ? `产出：${item.output_format}` : "",
@@ -1210,7 +1211,13 @@ async function scrapePlatformMemoryFromTab() {
   const tab = await getActiveSupportedTab();
   const result = await tabsSendMessage(tab.id, { type: "SCRAPE_PLATFORM_MEMORY" });
   if (!result?.ok) throw new Error(result?.error ?? "当前页面不支持抓取平台记忆");
-  if (!result?.data?.pageTextExcerpt && !(result?.data?.memoryHints || []).length) {
+  const hasStructuredContent = Boolean(
+    (result?.data?.savedMemoryItems || []).length
+    || (result?.data?.customInstructions || []).length
+    || (result?.data?.platformSkills || []).length
+    || Object.keys(result?.data?.agentConfig || {}).length
+  );
+  if (!hasStructuredContent && !result?.data?.pageTextExcerpt && !(result?.data?.memoryHints || []).length) {
     throw new Error("当前页面没有可保存的平台记忆信息");
   }
   return result.data;

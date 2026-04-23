@@ -17,7 +17,7 @@ from typing import Any
 from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 ROOT = Path(__file__).resolve().parent
@@ -356,9 +356,15 @@ class PlatformMemoryImportRequest(BaseModel):
     heading: str = ""
     agentName: str = ""
     chatId: str = ""
-    memoryHints: list[str] = []
+    memoryHints: list[str] = Field(default_factory=list)
     pageTextExcerpt: str = ""
     capturedAt: str = ""
+    pageType: str = ""
+    recordTypes: list[str] = Field(default_factory=list)
+    savedMemoryItems: list[str] = Field(default_factory=list)
+    customInstructions: list[dict[str, Any] | str] = Field(default_factory=list)
+    agentConfig: dict[str, Any] = Field(default_factory=dict)
+    platformSkills: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class SummaryResponse(BaseModel):
@@ -527,25 +533,51 @@ def save_recommended_skill_asset_library(items: list[dict[str, Any]], meta: dict
         scripts_dir.mkdir(exist_ok=True)
 
         normalized = _normalize_skill_record(item)
-        normalized["kind"] = normalized.get("kind", "recommended_skill")
+        canonical_skill = {
+            "id": normalized.get("id"),
+            "title": normalized.get("title"),
+            "description": normalized.get("description"),
+            "kind": normalized.get("kind") if normalized.get("kind") in {"skill", "workflow"} else "skill",
+            "trigger": normalized.get("trigger", ""),
+            "goal": normalized.get("goal", ""),
+            "steps": normalized.get("steps", []),
+            "output_format": normalized.get("output_format", ""),
+            "guardrails": normalized.get("guardrails", []),
+            "source_types": normalized.get("source_types") or ["recommended_catalog"],
+            "confidence": normalized.get("confidence", "medium"),
+            "selected": bool(normalized.get("selected", False)),
+        }
+        recommendation_meta = {
+            "id": normalized.get("id"),
+            "icon": normalized.get("icon"),
+            "tags": normalized.get("tags", []),
+            "keywords": normalized.get("keywords", []),
+            "persona_signals": normalized.get("persona_signals", []),
+            "usage_score": normalized.get("usage_score", 0.5),
+            "source": normalized.get("source", "built_in"),
+        }
         (asset_dir / "skill.json").write_text(
-            json.dumps(normalized, ensure_ascii=False, indent=2),
+            json.dumps(canonical_skill, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        (asset_dir / "recommendation.json").write_text(
+            json.dumps(recommendation_meta, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
 
         skill_md = str(normalized.get("skill_md_content") or "").strip()
         if not skill_md:
-            skill_md = "\n".join(_build_skill_markdown_lines(normalized)).strip()
+            skill_md = "\n".join(_build_skill_markdown_lines(canonical_skill)).strip()
         (asset_dir / "SKILL.md").write_text(skill_md.rstrip() + "\n", encoding="utf-8")
 
         forms_md = str(normalized.get("forms_md_content") or "").strip()
         if not forms_md:
-            forms_md = "\n".join(_build_skill_forms_lines(normalized)).strip()
+            forms_md = "\n".join(_build_skill_forms_lines(canonical_skill)).strip()
         (asset_dir / "forms.md").write_text(forms_md.rstrip() + "\n", encoding="utf-8")
 
         reference_md = str(normalized.get("reference_md_content") or "").strip()
         if not reference_md:
-            reference_md = "\n".join(_build_skill_reference_lines(normalized)).strip()
+            reference_md = "\n".join(_build_skill_reference_lines(canonical_skill)).strip()
         (asset_dir / "reference.md").write_text(reference_md.rstrip() + "\n", encoding="utf-8")
 
         scripts_readme = str(normalized.get("scripts_readme") or "").strip()
@@ -557,9 +589,10 @@ def save_recommended_skill_asset_library(items: list[dict[str, Any]], meta: dict
             {
                 "id": normalized.get("id"),
                 "title": normalized.get("title"),
-                "kind": normalized.get("kind", "recommended_skill"),
+                "kind": canonical_skill.get("kind", "skill"),
                 "folder": slug,
                 "json": f"{slug}/skill.json",
+                "recommendation_json": f"{slug}/recommendation.json",
                 "skill_md": f"{slug}/SKILL.md",
                 "forms_md": f"{slug}/forms.md",
                 "reference_md": f"{slug}/reference.md",
@@ -636,6 +669,28 @@ def load_recommended_skill_catalog() -> tuple[list[dict[str, Any]], dict[str, An
                 continue
             record = read_json_file(json_path)
             if isinstance(record, dict):
+                recommendation_path = RECOMMENDED_SKILLS_DIR / str(entry.get("recommendation_json") or "")
+                recommendation = read_json_file(recommendation_path) if recommendation_path.exists() else {}
+                if isinstance(recommendation, dict):
+                    record = {**record, **recommendation}
+
+                skill_md_path = RECOMMENDED_SKILLS_DIR / str(entry.get("skill_md") or "")
+                forms_md_path = RECOMMENDED_SKILLS_DIR / str(entry.get("forms_md") or "")
+                reference_md_path = RECOMMENDED_SKILLS_DIR / str(entry.get("reference_md") or "")
+                scripts_readme_path = skill_md_path.parent / "scripts" / "README.md"
+
+                if skill_md_path.exists():
+                    record["skill_md_content"] = skill_md_path.read_text(encoding="utf-8")
+                    record["skill_md_path"] = str(skill_md_path.relative_to(RECOMMENDED_SKILLS_DIR))
+                if forms_md_path.exists():
+                    record["forms_md_content"] = forms_md_path.read_text(encoding="utf-8")
+                    record["forms_md_path"] = str(forms_md_path.relative_to(RECOMMENDED_SKILLS_DIR))
+                if reference_md_path.exists():
+                    record["reference_md_content"] = reference_md_path.read_text(encoding="utf-8")
+                    record["reference_md_path"] = str(reference_md_path.relative_to(RECOMMENDED_SKILLS_DIR))
+                if scripts_readme_path.exists():
+                    record["scripts_readme"] = scripts_readme_path.read_text(encoding="utf-8")
+                    record["scripts_readme_path"] = str(scripts_readme_path.relative_to(RECOMMENDED_SKILLS_DIR))
                 items.append(record)
     except json.JSONDecodeError:
         items = []
@@ -658,7 +713,6 @@ def load_recommended_skill_catalog() -> tuple[list[dict[str, Any]], dict[str, An
         "last_error": meta.get("last_error"),
     }
     return items, normalized_meta
-
 
 def save_recommended_skill_catalog(items: list[dict[str, Any]], meta: dict[str, Any]) -> None:
     save_recommended_skill_asset_library(items, meta)
@@ -1166,6 +1220,55 @@ def save_display_texts(settings: dict[str, Any], data: dict[str, Any]) -> None:
     )
 
 
+def _preferences_payload_fallback(settings: dict[str, Any]) -> dict[str, Any]:
+    display_cache = load_display_texts(settings).get("preferences", {})
+    if not isinstance(display_cache, dict) or not display_cache:
+        return {}
+
+    payload: dict[str, Any] = {}
+    list_fields = {"primary_task_types", "style_preference", "terminology_preference", "formatting_constraints", "forbidden_expressions", "revision_preference"}
+
+    for item_id, entry in display_cache.items():
+        if not str(item_id).startswith("preferences:"):
+            continue
+        suffix = str(item_id).split(":", 1)[1]
+        if not suffix:
+            continue
+        field, has_item, _ = suffix.partition(":")
+        if field in {"id", "created_at", "updated_at", "version", "evidence_links", "source_episode_ids"}:
+            continue
+        if not field:
+            continue
+
+        desc = ""
+        if isinstance(entry, dict):
+            desc_data = entry.get("description")
+            if isinstance(desc_data, dict):
+                desc = str(desc_data.get("en") or desc_data.get("zh") or "").strip()
+            else:
+                desc = str(desc_data or "").strip()
+        if not desc:
+            continue
+
+        if has_item:
+            payload.setdefault(field, [])
+            if desc not in payload[field]:
+                payload[field].append(desc)
+        elif field in list_fields and ("," in desc or "，" in desc):
+            values = [part.strip() for part in re.split(r"[,，]", desc) if part.strip()]
+            if values:
+                payload[field] = values
+        else:
+            payload[field] = desc
+
+    profile = get_wiki(settings).load_profile()
+    if profile and getattr(profile, "primary_task_types", None):
+        payload.setdefault("primary_task_types", [])
+        payload["primary_task_types"] = list(dict.fromkeys(payload["primary_task_types"] + list(profile.primary_task_types)))
+
+    return payload
+
+
 def _make_display_entry(
     *,
     title_zh: str,
@@ -1185,6 +1288,10 @@ def _display_text(value: dict[str, Any] | None, locale: str | None, fallback: st
     bucket = _locale_bucket(locale)
     text = str(value.get(bucket) or "").strip()
     return text or fallback
+
+
+def _split_display_list_text(text: str) -> list[str]:
+    return [part.strip() for part in re.split(r"[,，]", str(text or "")) if part.strip()]
 
 
 def _looks_like_english_ui_text(value: Any) -> bool:
@@ -1400,19 +1507,120 @@ def update_platform_memory_index(
     index_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def build_platform_memory_record(payload: PlatformMemoryImportRequest) -> dict[str, Any]:
-    hints = []
-    seen = set()
-    for item in payload.memoryHints:
-        text = str(item).strip()
-        if not text or text in seen:
+def _unique_string_list(values: list[Any], *, max_items: int = 24) -> list[str]:
+    items: list[str] = []
+    seen: set[str] = set()
+    for value in values or []:
+        text = str(value or "").replace("\n", " ").strip()
+        normalized = " ".join(text.split()).lower()
+        if not text or not normalized or normalized in seen:
             continue
-        seen.add(text)
-        hints.append(text)
+        seen.add(normalized)
+        items.append(" ".join(text.split()))
+        if len(items) >= max_items:
+            break
+    return items
+
+
+def _normalize_custom_instruction_blocks(values: list[Any]) -> list[dict[str, str]]:
+    normalized: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for value in values or []:
+        label = "instruction"
+        content = ""
+        if isinstance(value, dict):
+            label = str(value.get("label") or value.get("title") or label).strip() or label
+            content = str(value.get("content") or value.get("text") or "").strip()
+        else:
+            content = str(value or "").strip()
+        if not content:
+            continue
+        key = f"{label.lower()}::{content.lower()}"
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append({"label": label, "content": content})
+    return normalized[:12]
+
+
+def _normalize_platform_skill_records(values: list[Any]) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for value in values or []:
+        if isinstance(value, dict):
+            name = str(value.get("name") or value.get("title") or "").strip()
+            summary = str(value.get("summary") or value.get("description") or "").strip()
+            trigger = str(value.get("trigger") or "").strip()
+            output_format = str(value.get("output_format") or "").strip()
+            steps = _unique_string_list(list(value.get("steps") or []), max_items=8)
+            references = _unique_string_list(list(value.get("references") or []), max_items=8)
+        else:
+            name = str(value or "").strip()
+            summary = ""
+            trigger = ""
+            output_format = ""
+            steps = []
+            references = []
+        if not name:
+            continue
+        key = name.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(
+            {
+                "name": name,
+                "summary": summary,
+                "trigger": trigger,
+                "steps": steps,
+                "output_format": output_format,
+                "references": references,
+            }
+        )
+    return normalized[:16]
+
+
+def _normalize_agent_config(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    return {
+        "name": str(value.get("name") or "").strip(),
+        "description": str(value.get("description") or "").strip(),
+        "instructions": str(value.get("instructions") or "").strip(),
+        "conversation_starters": _unique_string_list(list(value.get("conversation_starters") or []), max_items=8),
+        "knowledge": _unique_string_list(list(value.get("knowledge") or []), max_items=8),
+        "tools": _unique_string_list(list(value.get("tools") or []), max_items=8),
+    }
+
+
+def build_platform_memory_record(payload: PlatformMemoryImportRequest) -> dict[str, Any]:
+    hints = _unique_string_list(list(payload.memoryHints or []), max_items=30)
+    saved_memory = _unique_string_list(list(payload.savedMemoryItems or []), max_items=24)
+    custom_instructions = _normalize_custom_instruction_blocks(list(payload.customInstructions or []))
+    agent_config = _normalize_agent_config(payload.agentConfig)
+    platform_skills = _normalize_platform_skill_records(list(payload.platformSkills or []))
+    record_types = _unique_string_list(
+        list(payload.recordTypes or [])
+        + (["saved_memory"] if saved_memory else [])
+        + (["custom_instruction"] if custom_instructions else [])
+        + (["agent_config"] if agent_config else [])
+        + (["platform_skill"] if platform_skills else []),
+        max_items=8,
+    )
 
     excerpt = (payload.pageTextExcerpt or "").strip()
     if len(excerpt) > 8000:
         excerpt = excerpt[:8000]
+
+    summary_candidates = [
+        payload.heading,
+        payload.title,
+        payload.agentName,
+        saved_memory[0] if saved_memory else "",
+        agent_config.get("description", ""),
+        platform_skills[0].get("name", "") if platform_skills else "",
+    ]
+    summary = next((str(item).strip() for item in summary_candidates if str(item or "").strip()), "")
 
     return {
         "platform": payload.platform,
@@ -1422,10 +1630,17 @@ def build_platform_memory_record(payload: PlatformMemoryImportRequest) -> dict[s
         "agent_name": payload.agentName,
         "chat_id": payload.chatId,
         "captured_at": payload.capturedAt or datetime.now(timezone.utc).isoformat(),
-        "memory": hints,
-        "summary": payload.heading or payload.title or payload.agentName,
+        "page_type": payload.pageType or (record_types[0] if record_types else "platform_context"),
+        "record_types": record_types,
+        "memory": saved_memory or hints,
+        "saved_memory": saved_memory,
+        "custom_instructions": custom_instructions,
+        "agent_config": agent_config,
+        "platform_skills": platform_skills,
+        "context_hints": hints,
+        "summary": summary,
         "page_excerpt": excerpt,
-        "source_type": "platform_memory_snapshot",
+        "source_type": "platform_memory_asset",
     }
 
 
@@ -1435,7 +1650,13 @@ def platform_memory_signature(record: dict[str, Any]) -> str:
         "title": record.get("title", ""),
         "heading": record.get("heading", ""),
         "agent_name": record.get("agent_name", ""),
+        "page_type": record.get("page_type", ""),
+        "record_types": record.get("record_types", []),
         "memory": record.get("memory", []),
+        "saved_memory": record.get("saved_memory", []),
+        "custom_instructions": record.get("custom_instructions", []),
+        "agent_config": record.get("agent_config", {}),
+        "platform_skills": record.get("platform_skills", []),
         "page_excerpt": record.get("page_excerpt", ""),
     }
     return _hash_payload(payload)
@@ -1448,6 +1669,7 @@ def _normalized_platform_text(value: str) -> str:
 
 def _platform_identity_key(record: dict[str, Any]) -> str:
     for value in (
+        record.get("agent_config", {}).get("name", "") if isinstance(record.get("agent_config"), dict) else "",
         record.get("agent_name", ""),
         record.get("heading", ""),
         record.get("title", ""),
@@ -1479,6 +1701,14 @@ def _platform_memory_match_score(existing: dict[str, Any], current: dict[str, An
         return 1.0
 
     score = 0.0
+    existing_types = {str(item).strip().lower() for item in existing.get("record_types", []) if str(item).strip()}
+    current_types = {str(item).strip().lower() for item in current.get("record_types", []) if str(item).strip()}
+    if existing_types and current_types:
+        if existing_types == current_types:
+            score += 0.2
+        elif existing_types & current_types:
+            score += 0.1
+
     if _platform_identity_key(existing) == _platform_identity_key(current):
         score += 0.5
 
@@ -1492,6 +1722,26 @@ def _platform_memory_match_score(existing: dict[str, Any], current: dict[str, An
     if existing_memory and current_memory:
         overlap = len(existing_memory & current_memory) / max(len(existing_memory | current_memory), 1)
         score += overlap * 0.3
+
+    existing_saved = {str(item).strip().lower() for item in existing.get("saved_memory", []) if str(item).strip()}
+    current_saved = {str(item).strip().lower() for item in current.get("saved_memory", []) if str(item).strip()}
+    if existing_saved and current_saved:
+        overlap = len(existing_saved & current_saved) / max(len(existing_saved | current_saved), 1)
+        score += overlap * 0.25
+
+    existing_skills = {
+        str(item.get("name") or "").strip().lower()
+        for item in existing.get("platform_skills", [])
+        if isinstance(item, dict) and str(item.get("name") or "").strip()
+    }
+    current_skills = {
+        str(item.get("name") or "").strip().lower()
+        for item in current.get("platform_skills", [])
+        if isinstance(item, dict) and str(item.get("name") or "").strip()
+    }
+    if existing_skills and current_skills:
+        overlap = len(existing_skills & current_skills) / max(len(existing_skills | current_skills), 1)
+        score += overlap * 0.2
 
     excerpt_existing = _normalized_platform_text(str(existing.get("page_excerpt", "")))[:400]
     excerpt_current = _normalized_platform_text(str(current.get("page_excerpt", "")))[:400]
@@ -1510,18 +1760,50 @@ def _merge_platform_memory_records(primary: dict[str, Any], incoming: dict[str, 
     merged["agent_name"] = primary.get("agent_name") or incoming.get("agent_name", "")
     merged["summary"] = primary.get("summary") or incoming.get("summary", "")
     merged["chat_id"] = primary.get("chat_id") or incoming.get("chat_id", "")
-    merged["source_type"] = "platform_memory_snapshot"
+    merged["page_type"] = primary.get("page_type") or incoming.get("page_type", "")
+    merged["source_type"] = "platform_memory_asset"
+    merged["record_types"] = _unique_string_list(
+        [*(primary.get("record_types") or []), *(incoming.get("record_types") or [])],
+        max_items=8,
+    )
 
-    merged_memory: list[str] = []
-    seen_memory: set[str] = set()
-    for item in [*(primary.get("memory") or []), *(incoming.get("memory") or [])]:
-        text = str(item).strip()
-        normalized = text.lower()
-        if not text or normalized in seen_memory:
-            continue
-        seen_memory.add(normalized)
-        merged_memory.append(text)
-    merged["memory"] = merged_memory
+    merged["memory"] = _unique_string_list(
+        [*(primary.get("memory") or []), *(incoming.get("memory") or [])],
+        max_items=30,
+    )
+    merged["saved_memory"] = _unique_string_list(
+        [*(primary.get("saved_memory") or []), *(incoming.get("saved_memory") or [])],
+        max_items=24,
+    )
+    merged["context_hints"] = _unique_string_list(
+        [*(primary.get("context_hints") or []), *(incoming.get("context_hints") or [])],
+        max_items=24,
+    )
+    merged["custom_instructions"] = _normalize_custom_instruction_blocks(
+        [*(primary.get("custom_instructions") or []), *(incoming.get("custom_instructions") or [])]
+    )
+    merged_agent = dict(primary.get("agent_config") or {})
+    incoming_agent = dict(incoming.get("agent_config") or {})
+    merged["agent_config"] = {
+        "name": merged_agent.get("name") or incoming_agent.get("name", ""),
+        "description": merged_agent.get("description") or incoming_agent.get("description", ""),
+        "instructions": merged_agent.get("instructions") or incoming_agent.get("instructions", ""),
+        "conversation_starters": _unique_string_list(
+            [*(merged_agent.get("conversation_starters") or []), *(incoming_agent.get("conversation_starters") or [])],
+            max_items=8,
+        ),
+        "knowledge": _unique_string_list(
+            [*(merged_agent.get("knowledge") or []), *(incoming_agent.get("knowledge") or [])],
+            max_items=8,
+        ),
+        "tools": _unique_string_list(
+            [*(merged_agent.get("tools") or []), *(incoming_agent.get("tools") or [])],
+            max_items=8,
+        ),
+    }
+    merged["platform_skills"] = _normalize_platform_skill_records(
+        [*(primary.get("platform_skills") or []), *(incoming.get("platform_skills") or [])]
+    )
 
     merged["captured_at"] = primary.get("captured_at") or incoming.get("captured_at")
     merged["first_captured_at"] = (
@@ -1540,6 +1822,14 @@ def _merge_platform_memory_records(primary: dict[str, Any], incoming: dict[str, 
     else:
         merged["page_excerpt"] = primary_excerpt
 
+    if not merged.get("summary"):
+        merged["summary"] = (
+            merged.get("heading")
+            or merged.get("title")
+            or merged.get("agent_name")
+            or next(iter(merged.get("saved_memory") or []), "")
+            or next((item.get("name", "") for item in merged.get("platform_skills", []) if isinstance(item, dict)), "")
+        )
     merged["signature"] = platform_memory_signature(merged)
     return merged
 
@@ -1946,6 +2236,164 @@ def _is_concrete_skill_record(
     if not str(output_format or "").strip():
         return False
     return True
+
+
+def load_platform_memory_records(settings: dict[str, Any]) -> list[dict[str, Any]]:
+    root = get_l1_root(settings, create=True)
+    records: list[dict[str, Any]] = []
+    for path in sorted(root.glob("*.json")):
+        if not path.is_file() or path.name == "index.json":
+            continue
+        data = read_json_file(path)
+        if isinstance(data, dict):
+            records.append(data)
+    return records
+
+
+def _extract_ordered_steps_from_text(text: str) -> list[str]:
+    lines = [line.strip() for line in str(text or "").splitlines() if line.strip()]
+    explicit_steps: list[str] = []
+    for line in lines:
+        if re.match(r"^(\d+[.)、]|[-*•]|第[一二三四五六七八九十0-9]+步)", line):
+            explicit_steps.append(re.sub(r"^(\d+[.)、]|[-*•]|第[一二三四五六七八九十0-9]+步)\s*", "", line).strip())
+    if explicit_steps:
+        return _unique_string_list(explicit_steps, max_items=8)
+
+    sentence_chunks = re.split(r"[。；;]\s*|\n+", str(text or ""))
+    candidate_steps = [
+        chunk.strip()
+        for chunk in sentence_chunks
+        if 4 <= len(chunk.strip()) <= 80
+    ]
+    return _unique_string_list(candidate_steps, max_items=6)
+
+
+def _platform_workflows_from_records(settings: dict[str, Any]) -> list[WorkflowMemory]:
+    workflows: list[WorkflowMemory] = []
+    for record in load_platform_memory_records(settings):
+        agent = record.get("agent_config")
+        if not isinstance(agent, dict):
+            continue
+        name = str(agent.get("name") or record.get("agent_name") or record.get("title") or "").strip()
+        instructions = str(agent.get("instructions") or "").strip()
+        steps = _extract_ordered_steps_from_text(instructions)
+        if not steps:
+            starter_steps = [str(item).strip() for item in agent.get("conversation_starters", []) if str(item).strip()]
+            steps = _unique_string_list(starter_steps, max_items=6)
+        starter_list = [str(item).strip() for item in agent.get("conversation_starters", []) if str(item).strip()]
+        workflow = WorkflowMemory(
+            workflow_name=name,
+            trigger_condition=str(agent.get("description") or (starter_list[0] if starter_list else "当用户需要执行该平台流程")).strip(),
+            typical_steps=steps,
+            preferred_artifact_format="平台配置流程",
+            review_style=str(agent.get("description") or "").strip(),
+            escalation_rule="如平台配置发生变化，以平台原始配置为准复核",
+            reuse_frequency="per-project",
+            occurrence_count=max(int(record.get("capture_count", 1) or 1), 3),
+        )
+        if not _looks_like_stable_workflow(workflow):
+            continue
+        workflow.add_evidence("l1_signal", "platform_memory", str(record.get("summary") or name)[:120])
+        workflows.append(workflow)
+    return workflows
+
+
+def _platform_skills_from_records(settings: dict[str, Any]) -> list[dict[str, Any]]:
+    skills: list[dict[str, Any]] = []
+    for record in load_platform_memory_records(settings):
+        agent = record.get("agent_config")
+        if isinstance(agent, dict):
+            agent_title = str(agent.get("name") or record.get("agent_name") or record.get("title") or "").strip()
+            agent_steps = _extract_ordered_steps_from_text(str(agent.get("instructions") or ""))
+            agent_goal = str(agent.get("description") or "").strip()
+            starter_list = [str(item).strip() for item in agent.get("conversation_starters", []) if str(item).strip()]
+            agent_trigger = starter_list[0] if starter_list else f"当用户需要执行 {agent_title} 对应流程时"
+            if _is_concrete_skill_record(
+                title=agent_title,
+                trigger=agent_trigger,
+                goal=agent_goal or agent_title,
+                steps=agent_steps,
+                output_format="平台 Agent 执行结果",
+            ):
+                skills.append(
+                    {
+                        "id": f"platform_agent:{agent_title}",
+                        "title": agent_title,
+                        "description": agent_goal or f"从平台 Agent 配置导入的可复用能力：{agent_title}",
+                        "kind": "skill",
+                        "trigger": agent_trigger,
+                        "goal": agent_goal or f"复用 {agent_title} 这项 Agent 能力",
+                        "steps": agent_steps,
+                        "output_format": "平台 Agent 执行结果",
+                        "guardrails": ["优先遵循平台原始 Agent 配置"],
+                        "source_types": ["agent_config", "platform_memory"],
+                        "confidence": "high",
+                        "selected": False,
+                    }
+                )
+        for item in record.get("platform_skills", []) or []:
+            if not isinstance(item, dict):
+                continue
+            title = str(item.get("name") or "").strip()
+            steps = [str(step).strip() for step in item.get("steps", []) if str(step).strip()]
+            summary = str(item.get("summary") or "").strip()
+            trigger = str(item.get("trigger") or f"当用户需要执行 {title} 时").strip()
+            output_format = str(item.get("output_format") or "结构化执行结果").strip()
+            if not steps:
+                steps = _extract_ordered_steps_from_text(summary)
+            if not _is_concrete_skill_record(
+                title=title,
+                trigger=trigger,
+                goal=summary or title,
+                steps=steps,
+                output_format=output_format,
+            ):
+                continue
+            skills.append(
+                {
+                    "id": f"platform_skill:{title}",
+                    "title": title,
+                    "description": summary or f"从平台记忆导入的正式 skill：{title}",
+                    "kind": "skill",
+                    "trigger": trigger,
+                    "goal": summary or f"复用 {title} 这项平台能力",
+                    "steps": steps,
+                    "output_format": output_format,
+                    "guardrails": ["优先遵循平台原始 skill 配置"],
+                    "source_types": ["platform_skill", "platform_memory"],
+                    "confidence": "high",
+                    "selected": False,
+                }
+            )
+    return skills
+
+
+def _extract_catalog_skill_summary(item: dict[str, Any]) -> str:
+    reference_md = str(item.get("reference_md_content") or "").strip()
+    if reference_md:
+        lines = reference_md.splitlines()
+        for idx, line in enumerate(lines):
+            if line.strip().lower() == "## summary":
+                for next_line in lines[idx + 1:]:
+                    clean = next_line.strip()
+                    if clean:
+                        return clean[:240]
+                break
+    skill_md = str(item.get("skill_md_content") or "").strip()
+    if skill_md:
+        cleaned_lines = []
+        for line in skill_md.splitlines():
+            clean = line.strip()
+            if not clean:
+                continue
+            if clean.startswith("#"):
+                continue
+            if clean.startswith("**Type:**"):
+                continue
+            cleaned_lines.append(clean)
+        if cleaned_lines:
+            return " ".join(cleaned_lines[:3])[:240]
+    return ""
 
 
 def _normalize_skill_record(item: dict[str, Any]) -> dict[str, Any]:
@@ -2427,26 +2875,36 @@ def memory_items_for_category(settings: dict[str, Any], category: str, locale: s
 
     if category == "preferences":
         prefs = wiki.load_preferences()
-        if prefs:
+        prefs_payload = prefs.model_dump(mode="json") if prefs else _preferences_payload_fallback(settings)
+        if prefs_payload:
             items = []
             labels = FIELD_LABELS["preferences"]["zh"]
             for field, label in labels.items():
                 if field == "primary_task_types":
-                    value = getattr(prefs, field, None)
+                    value = prefs_payload.get(field)
                     if not value:
                         profile = wiki.load_profile()
                         value = getattr(profile, "primary_task_types", None) if profile else None
                 else:
-                    value = getattr(prefs, field, None)
+                    value = prefs_payload.get(field)
                 if not value:
                     continue
                 if isinstance(value, list):
-                    for entry in value:
+                    parent_display_entry = display_cache.get("preferences", {}).get(f"preferences:{field}", {})
+                    parent_localized_parts = _split_display_list_text(
+                        _display_text(parent_display_entry.get("description"), locale, "")
+                    )
+                    for index, entry in enumerate(value):
                         entry_text = str(entry).strip()
                         if not entry_text:
                             continue
                         item_id = f"preferences:{field}:{_safe_slug(entry_text, 'item')}"
                         display_entry = display_cache.get("preferences", {}).get(item_id, {})
+                        localized_fallback = (
+                            parent_localized_parts[index]
+                            if index < len(parent_localized_parts)
+                            else entry_text
+                        )
                         items.append(
                             {
                                 "id": item_id,
@@ -2460,7 +2918,7 @@ def memory_items_for_category(settings: dict[str, Any], category: str, locale: s
                                 "display_description": _display_text(
                                     display_entry.get("description"),
                                     locale,
-                                    entry_text,
+                                    localized_fallback,
                                 ),
                                 "selected": False,
                             }
@@ -2568,6 +3026,10 @@ def derive_my_skills(settings: dict[str, Any]) -> list[dict[str, Any]]:
                 "selected": skill_id in saved_ids,
             }
         )
+
+    for platform_skill in _platform_skills_from_records(settings):
+        platform_skill["selected"] = platform_skill["id"] in saved_ids
+        items.append(platform_skill)
 
     if len(items) < 5:
         active_projects = [project for project in _valid_projects(wiki) if project.is_active]
@@ -2895,9 +3357,10 @@ def build_selected_memory_payload(
 
     if selected["preferences_fields"]:
         preferences = wiki.load_preferences()
-        if preferences:
+        preferences_payload = preferences.model_dump(mode="json") if preferences else _preferences_payload_fallback(settings)
+        if preferences_payload:
             payload["memory"]["preferences"] = _filter_preference_fields(
-                preferences.model_dump(mode="json"),
+                preferences_payload,
                 selected["preferences_fields"],
                 selected["preferences_values"],
             )
@@ -3078,6 +3541,7 @@ def rank_recommended_skills(settings: dict[str, Any]) -> tuple[list[dict[str, An
         enriched["selected"] = enriched["id"] in saved_ids
         enriched["match_score"] = score
         enriched["match_reason"] = "高度匹配" if overlap >= 3 else "较匹配" if overlap >= 1 else "通用推荐"
+        enriched["catalog_summary"] = _extract_catalog_skill_summary(enriched)
         ranked.append(enriched)
 
     ranked.sort(key=lambda item: (-item.get("match_score", 0), item.get("title", "")))
@@ -3145,6 +3609,9 @@ def build_skill_inject_text(settings: dict[str, Any], skill_ids: list[str], targ
                 "guardrails": item.get("guardrails", []),
                 "source_types": item.get("source_types", []),
                 "confidence": item.get("confidence", ""),
+                "skill_md": item.get("skill_md_content", ""),
+                "forms_md": item.get("forms_md_content", ""),
+                "reference_md": item.get("reference_md_content", ""),
             }
             for item in skill_records
         ],
@@ -3154,18 +3621,42 @@ def build_skill_inject_text(settings: dict[str, Any], skill_ids: list[str], targ
         f"{json.dumps(payload, ensure_ascii=False, indent=2)}"
     )
 
-
 def build_skill_export_text(settings: dict[str, Any], skill_ids: list[str]) -> tuple[str, str]:
     skill_records = build_skill_records(settings, skill_ids)
     if not skill_records:
         return "", ""
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "skills": skill_records,
+        "skills": [
+            {
+                "id": item.get("id"),
+                "title": item.get("title"),
+                "kind": item.get("kind", "skill"),
+                "folder": _safe_slug(str(item.get("id") or item.get("title") or "skill")),
+                "skill": {
+                    "id": item.get("id"),
+                    "title": item.get("title"),
+                    "description": item.get("description"),
+                    "kind": item.get("kind", "skill"),
+                    "trigger": item.get("trigger", ""),
+                    "goal": item.get("goal", ""),
+                    "steps": item.get("steps", []),
+                    "output_format": item.get("output_format", ""),
+                    "guardrails": item.get("guardrails", []),
+                    "source_types": item.get("source_types", []),
+                    "confidence": item.get("confidence", ""),
+                    "selected": bool(item.get("selected", False)),
+                },
+                "SKILL.md": item.get("skill_md_content", ""),
+                "forms.md": item.get("forms_md_content", ""),
+                "reference.md": item.get("reference_md_content", ""),
+                "scripts/README.md": item.get("scripts_readme", ""),
+            }
+            for item in skill_records
+        ],
     }
     filename = f"skills_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
     return filename, json.dumps(payload, ensure_ascii=False, indent=2)
-
 
 def test_openai_compat_connection(api_key: str, base_url: str) -> tuple[bool, str]:
     if not api_key:
@@ -3416,12 +3907,31 @@ def rebuild_persistent_memory(
     workflows_context = builder._filter_digest(episodes, l1_text, "workflows")
     workflows_data = builder.llm.extract_json(_WORKFLOWS_SYSTEM, workflows_context)
     workflows = builder._build_workflows(workflows_data, l1_text, earliest_ts, workflow_ep_map, ep_by_id)
-    workflows = [workflow for workflow in workflows if _looks_like_stable_workflow(workflow)]
+    platform_workflows = _platform_workflows_from_records(settings)
+    workflow_map: dict[str, WorkflowMemory] = {}
+    for workflow in [*workflows, *platform_workflows]:
+        if not _looks_like_stable_workflow(workflow):
+            continue
+        existing = workflow_map.get(workflow.workflow_name)
+        if existing is None:
+            workflow_map[workflow.workflow_name] = workflow
+            continue
+        if len(workflow.typical_steps) > len(existing.typical_steps):
+            existing.typical_steps = workflow.typical_steps
+        existing.trigger_condition = existing.trigger_condition or workflow.trigger_condition
+        existing.preferred_artifact_format = existing.preferred_artifact_format or workflow.preferred_artifact_format
+        existing.review_style = existing.review_style or workflow.review_style
+        existing.escalation_rule = existing.escalation_rule or workflow.escalation_rule
+        existing.reuse_frequency = existing.reuse_frequency or workflow.reuse_frequency
+        existing.occurrence_count = max(existing.occurrence_count, workflow.occurrence_count)
+        existing.source_episode_ids = list(dict.fromkeys(existing.source_episode_ids + workflow.source_episode_ids))
+    workflows = list(workflow_map.values())
     wiki.save_workflows(workflows)
     save_workflow_asset_library(settings, workflows)
 
     stage("正在重建索引...", 5)
     index = wiki.rebuild_index()
+    derive_my_skills(settings)
     return {
         "profile": True,
         "preferences": True,

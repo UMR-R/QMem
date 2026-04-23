@@ -12,7 +12,7 @@ from pydantic import BaseModel
 class L1Signal(BaseModel):
     """A single external memory artifact from a platform."""
 
-    signal_type: str  # "saved_memory" | "summary" | "profile" | "preference" | "custom_instruction"
+    signal_type: str  # "saved_memory" | "summary" | "profile" | "preference" | "custom_instruction" | "agent_config" | "platform_skill"
     platform: str
     raw_text: str = ""
     raw_json: dict[str, Any] = {}
@@ -101,6 +101,18 @@ class L1SignalLayer:
         if not isinstance(data, dict):
             return signals
 
+        source_type = str(data.get("source_type") or "").strip().lower()
+        page_type = str(data.get("page_type") or "").strip().lower()
+        record_types = {
+            str(item).strip().lower()
+            for item in data.get("record_types", [])
+            if str(item).strip()
+        }
+        if source_type == "platform_memory_snapshot" or (
+            page_type == "platform_context" and not record_types
+        ):
+            return signals
+
         # Try to detect signal type from keys
         if "memory" in data or "memories" in data:
             content = data.get("memory") or data.get("memories") or ""
@@ -110,6 +122,17 @@ class L1SignalLayer:
                     platform=platform,
                     raw_text=content if isinstance(content, str) else "",
                     raw_json=data if isinstance(content, dict) else {},
+                    source_file=source_file,
+                )
+            )
+        if "saved_memory" in data:
+            content = data.get("saved_memory") or []
+            signals.append(
+                L1Signal(
+                    signal_type="saved_memory",
+                    platform=platform,
+                    raw_text="\n".join(str(item).strip() for item in content if str(item).strip()) if isinstance(content, list) else str(content),
+                    raw_json={"saved_memory": content} if isinstance(content, (list, dict)) else {},
                     source_file=source_file,
                 )
             )
@@ -133,14 +156,29 @@ class L1SignalLayer:
                     source_file=source_file,
                 )
             )
-        if "preferences" in data or "custom_instructions" in data:
-            pref = data.get("preferences") or data.get("custom_instructions") or {}
+        if "preferences" in data:
+            pref = data.get("preferences") or {}
             signals.append(
                 L1Signal(
                     signal_type="preference",
                     platform=platform,
                     raw_text=pref if isinstance(pref, str) else "",
                     raw_json=pref if isinstance(pref, dict) else {},
+                    source_file=source_file,
+                )
+            )
+        if "custom_instructions" in data:
+            inst = data.get("custom_instructions") or []
+            signals.append(
+                L1Signal(
+                    signal_type="custom_instruction",
+                    platform=platform,
+                    raw_text="\n".join(
+                        str(item.get("content") if isinstance(item, dict) else item).strip()
+                        for item in inst
+                        if str(item.get("content") if isinstance(item, dict) else item).strip()
+                    ) if isinstance(inst, list) else str(inst),
+                    raw_json={"custom_instructions": inst} if isinstance(inst, (list, dict)) else {},
                     source_file=source_file,
                 )
             )
@@ -151,6 +189,32 @@ class L1SignalLayer:
                     signal_type="custom_instruction",
                     platform=platform,
                     raw_text=str(inst),
+                    source_file=source_file,
+                )
+            )
+        if "agent_config" in data:
+            agent = data.get("agent_config") or {}
+            signals.append(
+                L1Signal(
+                    signal_type="agent_config",
+                    platform=platform,
+                    raw_text=str(agent.get("instructions") or agent.get("description") or "") if isinstance(agent, dict) else "",
+                    raw_json=agent if isinstance(agent, dict) else {},
+                    source_file=source_file,
+                )
+            )
+        if "platform_skills" in data:
+            skills = data.get("platform_skills") or []
+            signals.append(
+                L1Signal(
+                    signal_type="platform_skill",
+                    platform=platform,
+                    raw_text="\n".join(
+                        str(item.get("name") or item.get("title") or "").strip()
+                        for item in skills
+                        if isinstance(item, dict) and str(item.get("name") or item.get("title") or "").strip()
+                    ) if isinstance(skills, list) else str(skills),
+                    raw_json={"platform_skills": skills} if isinstance(skills, (list, dict)) else {},
                     source_file=source_file,
                 )
             )

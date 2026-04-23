@@ -977,11 +977,21 @@ button {
   color: var(--text);
 }
 
+.settings-action-row span {
+  font-size: var(--font-subtitle-size);
+  font-weight: var(--font-subtitle-weight);
+  line-height: 1.4;
+  color: inherit;
+}
+
 .settings-action-row + .settings-action-row {
   border-top: 1px solid #edf1f8;
 }
 
-.settings-action-row small {
+.settings-action-row small,
+#apiKeyStatus,
+.toggle-row em,
+.field-label {
   color: var(--muted);
   font-size: var(--font-caption-size);
   font-weight: var(--font-caption-weight);

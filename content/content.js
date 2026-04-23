@@ -213,51 +213,244 @@ function scrapeFullConversation(config) {
   return messages.map(({ role, text }) => ({ role, text }));
 }
 
-function scrapePlatformMemory(config) {
-  const mainRoot = document.querySelector("main, [role='main'], article") || document.body;
-  const rawText = (mainRoot?.innerText || document.body?.innerText || "").trim();
-  const condensedText = rawText.replace(/\n{3,}/g, "\n\n").trim();
-  const lines = condensedText
+function _uniqueTexts(values, max = 24) {
+  const result = [];
+  const seen = new Set();
+  for (const value of values || []) {
+    const text = String(value || "").replace(/\s+/g, " ").trim();
+    if (!text) continue;
+    const key = text.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(text);
+    if (result.length >= max) break;
+  }
+  return result;
+}
+
+function _normalizePlatformPageText(root) {
+  const rawText = (root?.innerText || document.body?.innerText || "").trim();
+  return rawText.replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function _collectVisibleLines(root) {
+  return _normalizePlatformPageText(root)
     .split("\n")
     .map(line => line.trim())
     .filter(Boolean);
+}
 
-  const keywords = [
-    "memory", "saved memory", "custom instruction", "instruction", "persona", "agent", "gpt",
-    "skill", "skills", "tool", "tools", "workspace", "profile",
-    "记忆", "平台记忆", "自定义指令", "提示词", "技能", "工具", "工作区", "画像",
-  ];
-  const memoryHints = [];
-  const seen = new Set();
-  for (const line of lines) {
-    const lower = line.toLowerCase();
-    if (keywords.some(keyword => lower.includes(keyword))) {
-      const clipped = line.slice(0, 240);
-      if (!seen.has(clipped)) {
-        seen.add(clipped);
-        memoryHints.push(clipped);
-      }
-    }
-    if (memoryHints.length >= 30) break;
+function _textHasAny(text, keywords) {
+  const lower = String(text || "").toLowerCase();
+  return keywords.some(keyword => lower.includes(keyword));
+}
+
+function _looksLikeUiChrome(line) {
+  return _textHasAny(line, [
+    "settings", "setting", "personalization", "manage memories", "saved memory", "memory updated",
+    "learn more", "turn on", "turn off", "enable", "disable", "delete", "edit", "search", "back",
+    "chat history", "new chat", "temporary chat", "customize", "configure", "share", "save",
+    "设置", "个性化", "管理记忆", "已保存的记忆", "记忆已更新", "了解更多", "打开", "关闭",
+    "删除", "编辑", "搜索", "返回", "聊天记录", "新建聊天", "保存", "配置", "分享",
+  ]);
+}
+
+function _looksLikeSavedMemoryLine(line) {
+  const text = String(line || "").trim();
+  if (!text || text.length < 4 || text.length > 220) return false;
+  if (_looksLikeUiChrome(text)) return false;
+  return true;
+}
+
+function _extractSectionFieldCandidates() {
+  const fields = [];
+  const inputs = document.querySelectorAll("textarea, input[type='text'], input:not([type]), [contenteditable='true']");
+  for (const el of inputs) {
+    const raw = "value" in el ? el.value : el.innerText;
+    const content = String(raw || "").replace(/\s+/g, " ").trim();
+    if (!content || content.length < 4) continue;
+    const label = el.getAttribute("aria-label")
+      || el.getAttribute("placeholder")
+      || el.closest("label, section, article, form, div")?.querySelector("label, h2, h3, h4, legend")?.innerText
+      || "";
+    fields.push({ label: String(label || "").trim(), content });
   }
+  return fields;
+}
 
+function _extractCardLikeItems() {
+  const cards = [];
+  const nodes = document.querySelectorAll("article, li, [role='listitem'], button, a, section");
+  for (const node of nodes) {
+    const text = String(node.innerText || "").trim();
+    if (!text || text.length < 8 || text.length > 320) continue;
+    const lines = text.split("\n").map(line => line.trim()).filter(Boolean);
+    if (lines.length < 2) continue;
+    const name = lines[0];
+    const summary = lines.slice(1).join(" ").slice(0, 220);
+    if (!_looksLikeSavedMemoryLine(name) || _looksLikeUiChrome(summary)) continue;
+    cards.push({ name, summary });
+  }
+  return cards;
+}
+
+function scrapePlatformMemory(config) {
+  const mainRoot = document.querySelector("main, [role='main'], article") || document.body;
+  const condensedText = _normalizePlatformPageText(mainRoot);
+  const lines = _collectVisibleLines(mainRoot);
+  const title = document.title || "";
   const heading = document.querySelector("h1, h2")?.innerText?.trim() || "";
-  const title = document.title || heading || config?.name || "platform_memory";
-  const agentName = heading || title
+  const agentName = (heading || title || config?.name || "platform_memory")
     .replace(/\s*[-|·]\s*ChatGPT.*$/i, "")
     .replace(/\s*[-|·]\s*DeepSeek.*$/i, "")
     .trim();
+  const url = location.href;
+  const urlLower = url.toLowerCase();
+  const pageTextLower = condensedText.toLowerCase();
+
+  const savedMemorySignals = [
+    "saved memory", "manage memories", "memory updated", "reference saved memories",
+    "已保存的记忆", "管理记忆", "记忆已更新", "参考已保存记忆",
+  ];
+  const customInstructionSignals = [
+    "custom instructions", "how would you like chatgpt", "what traits should chatgpt have",
+    "anything else chatgpt should know", "自定义指令", "你希望 chatgpt", "chatgpt 应该了解",
+  ];
+  const agentSignals = [
+    "conversation starters", "knowledge", "actions", "instructions", "configure", "builder",
+    "对话开场白", "知识", "操作", "说明", "配置", "构建器",
+  ];
+  const platformSkillSignals = [
+    "skill", "skills", "tool", "tools", "workspace", "capability",
+    "技能", "工具", "工作区", "能力",
+  ];
+
+  const hasSavedMemory = _textHasAny(`${urlLower}\n${pageTextLower}`, savedMemorySignals);
+  const hasCustomInstructions = _textHasAny(`${urlLower}\n${pageTextLower}`, customInstructionSignals);
+  const hasAgentConfig = _textHasAny(`${urlLower}\n${pageTextLower}`, agentSignals) || /\/g\/|\/gpts\/|\/editor/.test(urlLower);
+  const hasPlatformSkills = _textHasAny(`${urlLower}\n${pageTextLower}`, platformSkillSignals);
+  const looksLikeChatPage = Boolean(config?.getChatId?.()) || /\/c\/|\/chat\//.test(urlLower);
+
+  if (looksLikeChatPage && !hasSavedMemory && !hasCustomInstructions && !hasAgentConfig && !hasPlatformSkills) {
+    return {
+      ok: false,
+      error: "请先打开平台的已保存记忆、Agent/GPT 配置或 Skill 页面，再加入平台记忆",
+    };
+  }
+
+  const fieldCandidates = _extractSectionFieldCandidates();
+  const cardCandidates = _extractCardLikeItems();
+
+  const savedMemoryItems = hasSavedMemory
+    ? _uniqueTexts(
+        [
+          ...lines.filter(_looksLikeSavedMemoryLine),
+          ...fieldCandidates.map(item => item.content),
+        ].filter(item => !_looksLikeUiChrome(item)),
+        24
+      )
+    : [];
+
+  const customInstructions = hasCustomInstructions
+    ? _uniqueTexts(
+        fieldCandidates
+          .filter(item => _looksLikeSavedMemoryLine(item.content))
+          .map(item => `${item.label || "instruction"}: ${item.content}`),
+        8
+      ).map(item => {
+        const [label, ...rest] = item.split(": ");
+        return {
+          label: rest.length ? label : "instruction",
+          content: rest.length ? rest.join(": ").trim() : item,
+        };
+      })
+    : [];
+
+  const conversationStarters = hasAgentConfig
+    ? _uniqueTexts(
+        cardCandidates
+          .map(item => item.name)
+          .filter(item => item.length <= 120 && !_looksLikeUiChrome(item)),
+        8
+      )
+    : [];
+
+  const instructionField = fieldCandidates.find(item =>
+    _textHasAny(`${item.label}\n${item.content}`, ["instruction", "说明", "自定义指令", "instructions"])
+  );
+  const knowledgeLines = hasAgentConfig
+    ? _uniqueTexts(
+        lines.filter(line => _textHasAny(line, ["knowledge", "知识", "file", "document", "pdf"])),
+        8
+      )
+    : [];
+  const toolLines = hasAgentConfig
+    ? _uniqueTexts(
+        lines.filter(line => _textHasAny(line, ["action", "actions", "tool", "tools", "操作", "工具", "browser", "code", "search"])),
+        8
+      )
+    : [];
+
+  const agentConfig = hasAgentConfig
+    ? {
+        name: agentName,
+        description: heading || title,
+        instructions: instructionField?.content || "",
+        conversation_starters: conversationStarters,
+        knowledge: knowledgeLines,
+        tools: toolLines,
+      }
+    : {};
+
+  const platformSkills = hasPlatformSkills
+    ? cardCandidates.slice(0, 12).map(item => ({
+        name: item.name,
+        summary: item.summary,
+      }))
+    : [];
+
+  const memoryHints = _uniqueTexts([
+    ...savedMemoryItems,
+    ...customInstructions.map(item => item.content),
+    ...conversationStarters,
+    ...platformSkills.map(item => `${item.name}: ${item.summary}`),
+  ], 30);
+
+  if (!memoryHints.length && !savedMemoryItems.length && !customInstructions.length && !Object.keys(agentConfig).length && !platformSkills.length) {
+    return {
+      ok: false,
+      error: "当前页面没有可保存的平台记忆信息",
+    };
+  }
+
+  const recordTypes = [];
+  if (savedMemoryItems.length) recordTypes.push("saved_memory");
+  if (customInstructions.length) recordTypes.push("custom_instruction");
+  if (Object.keys(agentConfig).length) recordTypes.push("agent_config");
+  if (platformSkills.length) recordTypes.push("platform_skill");
+
+  let pageType = "platform_context";
+  if (recordTypes.includes("saved_memory")) pageType = "saved_memory";
+  else if (recordTypes.includes("agent_config")) pageType = "agent_config";
+  else if (recordTypes.includes("platform_skill")) pageType = "platform_skill";
+  else if (recordTypes.includes("custom_instruction")) pageType = "custom_instruction";
 
   return {
     title,
     heading,
     agentName,
-    url: location.href,
+    url,
     platform: config?.name || location.hostname,
     chatId: config?.getChatId?.() ?? "",
     memoryHints,
     pageTextExcerpt: condensedText.slice(0, 8000),
     capturedAt: new Date().toISOString(),
+    pageType,
+    recordTypes,
+    savedMemoryItems,
+    customInstructions,
+    agentConfig,
+    platformSkills,
   };
 }
 
@@ -332,10 +525,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       sendResponse({ ok: false, error: "当前页面不支持平台记忆抓取" });
       return false;
     }
-    sendResponse({
-      ok: true,
-      data: scrapePlatformMemory(config),
-    });
+    const result = scrapePlatformMemory(config);
+    if (result?.ok === false) {
+      sendResponse({ ok: false, error: result.error || "当前页面不支持平台记忆抓取" });
+      return false;
+    }
+    sendResponse({ ok: true, data: result });
     return false;
 
   } else if (message.type === "TOGGLE_CAPTURE") {
