@@ -1598,8 +1598,9 @@ def _get_persistent_display_entry(
     raw_text: str,
 ) -> dict[str, Any]:
     persistent_cache = display_cache.setdefault("persistent", {})
+    source_hash = _hash_payload(raw_text)
     cached = persistent_cache.get(item_id)
-    if isinstance(cached, dict):
+    if isinstance(cached, dict) and cached.get("source_hash") == source_hash:
         return cached
 
     entry = _make_display_entry(
@@ -1621,6 +1622,7 @@ def _get_persistent_display_entry(
         except Exception:
             pass
 
+    entry["source_hash"] = source_hash
     persistent_cache[item_id] = entry
     save_display_texts(settings, display_cache)
     return entry
