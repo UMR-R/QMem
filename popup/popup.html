@@ -35,15 +35,15 @@
                 <path d="M20 9A8 8 0 0 0 6.2 6.1L4 9" />
                 <path d="M4 15a8 8 0 0 0 13.8 2.9L20 15" />
               </svg>
-              <strong>同步</strong>
+              <strong>同步对话</strong>
             </button>
           </div>
           <div class="sync-meta">
             <div class="sync-status-line">
               <span id="syncDot" class="status-dot"></span>
-              <span id="syncStatusText">同步已暂停</span>
+              <span id="syncStatusText">同步对话已暂停</span>
             </div>
-            <p id="syncHintText">点击开启后，持续记录你与大模型的对话</p>
+            <p id="syncHintText">点击开启后，持续记录你与大模型的对话到本地</p>
           </div>
         </div>
 
@@ -226,14 +226,7 @@
         </div>
 
         <div class="settings-card">
-          <h3>同步策略</h3>
-          <label class="toggle-row">
-            <span>
-              <strong>同步对话</strong>
-              <em>持续记录对话到本地</em>
-            </span>
-            <input id="keepUpdatedToggle" class="toggle-input" type="checkbox">
-          </label>
+          <h3>记忆策略</h3>
           <label class="toggle-row">
             <span>
               <strong>同步记忆</strong>

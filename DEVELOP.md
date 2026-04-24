@@ -1,244 +1,328 @@
-# Memory Assistant — Developer Guide
+# Memory Assistant Developer Guide
 
-## Project structure
+## Current Architecture
 
+The project is no longer just a pure Chrome-extension pipeline. It is now a combined system:
+
+- Chrome extension
+- local FastAPI backend
+- Python memory pipeline in `llm_memory_transferor/`
+
+At a high level:
+
+```text
+content script / popup
+  -> backend_service
+  -> MemoryBuilder / MemoryUpdater
+  -> wiki files + persistent nodes
 ```
+
+## Project Structure
+
+```text
 memory_assistant/
 ├── manifest.json
 ├── config.js
+├── popup/
+│   ├── popup.html
+│   ├── popup.css
+│   └── popup.js
+├── content/
+│   ├── content.js
+│   └── clipboard_interceptor.js
 ├── background/
 │   ├── background.js
 │   ├── memory_engine.js
 │   ├── llm_client.js
 │   └── l2_wiki.js
-├── content/
-│   ├── content.js
-│   └── clipboard_interceptor.js
-├── popup/
-│   ├── popup.html
-│   ├── popup.css
-│   └── popup.js
-├── offscreen/
-│   ├── offscreen.html
-│   └── offscreen.js
+├── backend_service/
+│   └── app.py
 ├── prompts/
 │   ├── schema.txt
 │   ├── persistent_node_distill_bg.txt
-│   ├── delta_extract.txt
+│   ├── delta_system.txt
 │   ├── cold_start.txt
 │   └── platform_memory_collect.txt
-└── icons/
+└── llm_memory_transferor/
+    └── src/llm_memory_transferor/
+        ├── processors/
+        ├── layers/
+        └── utils/
 ```
 
----
+## Runtime Environments
 
-## Execution environments
+The extension still runs in several isolated environments, but many important memory actions now depend on the backend:
 
-The extension runs in three separate, isolated environments:
+| Environment | Responsibility |
+|---|---|
+| `content/` | Detect supported sites, scrape current conversation, inject prompts/text into active page |
+| `popup/` | User-facing controls, settings, organize/import/export/inject actions |
+| `background/` | Background capture and incremental memory updates |
+| `backend_service/` | Organize pipeline, memory storage, export/inject APIs, skill APIs |
+| `llm_memory_transferor/` | Python memory models, builders, wiki persistence, updater logic |
 
-| Environment | Lifetime | File System API | Notes |
-|---|---|---|---|
-| **Service Worker** | Event-driven, suspended after ~30s idle | No | Handles all background tasks |
-| **Popup** | While popup window is open | Yes | Destroyed when user dismisses it |
-| **Content Script** | Page lifetime | No | Injected into every tab |
+## Current Main Flows
 
-**Key constraint:** because the File System Access API is unavailable in the Service Worker, all disk writes go through the popup. The Service Worker buffers everything in `chrome.storage.local`; the popup flushes to disk on open.
+### 1. Organize Memory
 
----
+Triggered by popup `整理记忆`.
 
-## Module descriptions
+Flow:
 
-### `manifest.json`
+1. `popup/popup.js` calls `POST /api/memory/organize`
+2. `backend_service/app.py` starts organize job
+3. raw conversations are loaded
+4. `MemoryBuilder` rebuilds:
+   - episodes
+   - profile
+   - preferences
+   - projects
+   - workflows
+5. persistent nodes are distilled using `prompts/persistent_node_distill_bg.txt`
+6. results are written into the wiki / backend-managed storage
 
-Chrome extension manifest v3. Declares permissions (`storage`, `downloads`, `clipboardRead`, `idle`, `alarms`, `offscreen`), registers the Service Worker entry point, and injects both content scripts into all URLs.
+Relevant code:
 
----
+- `popup/popup.js`
+- `backend_service/app.py`
+- `llm_memory_transferor/src/llm_memory_transferor/processors/memory_builder.py`
 
-### `config.js`
+### 2. Add Current Conversation
 
-Loaded by `popup.html` via `<script>`. Contains the hardcoded fallback versions of the prompts still used by the popup and a `CONFIG.loadPrompts()` function that fetches the active `prompts/*.txt` files at popup init and overwrites the in-memory defaults.
+Triggered by popup `加入当前对话`.
 
----
+Flow:
 
-### `background/background.js`
+1. popup scrapes current conversation from the active tab
+2. popup calls backend import API
+3. conversation is stored as raw data
+4. user can organize later, or let later flows process it
 
-**Service Worker entry point.** Responsibilities:
+Relevant code:
 
-- **Message routing** — listens for messages from content scripts and popup:
-  - `ROUND_CAPTURED` — a new conversation round was captured; calls `memory_engine.updateMemory`
-  - `FLUSH_NOW` — popup requests an immediate flush of pending data
-  - `PROCESS_ALL_RAW` — process up to N unprocessed raw conversations (batch mode)
-  - `SAVE_DOCUMENT` — save a raw document string to storage
-- **Periodic flush** — sets a 15-minute alarm (`chrome.alarms`) to flush pending data
-- **Idle detection** — triggers a flush when the browser goes idle (`chrome.idle`)
+- `popup/popup.js` -> `addCurrentConversation()`
+- `backend_service/app.py`
 
----
+### 3. Add Platform Memory
 
-### `background/memory_engine.js`
+Triggered by popup `加入平台记忆`.
 
-**Core memory update logic.** All state is kept in `chrome.storage.local`; disk writes happen in the popup. Storage keys are namespaced with `mw:` (e.g. `mw:profile`, `mw:preferences`, `mw:projects:<name>`, `mw:episodes:<id>`, `mw:persistent_nodes`).
+Flow:
 
-Two update modes, both exported as `updateMemory(chatData, apiKey, opts)`:
+1. popup loads `prompts/platform_memory_collect.txt`
+2. popup injects the prompt into the current AI page
+3. current AI reports saved memory / custom instructions / agent config / platform skills
+4. popup parses the JSON result
+5. popup sends the snapshot to backend import API
 
-| Mode | When used | How it works |
-|---|---|---|
-| **Per-round** (`batchMode: false`) | 实时更新, live capture | One DeepSeek call per conversation round; applies `delta_system` prompt |
-| **Batch** (`batchMode: true`) | 同步 / 历史导入 | Concatenates all rounds into one prompt; single DeepSeek call — ~N× faster |
+If prompt-based collection fails, popup falls back to page scraping.
 
-After each update, `_buildAndSaveEpisode` creates an `EpisodicMemory` record and asynchronously triggers `_updatePersistentNodes`, which calls DeepSeek with `persistent_distill_background` to update the persistent node store.
+Relevant code:
 
-**`delta_system` output schema** (what DeepSeek returns per round):
+- `config.js`
+- `popup/popup.js` -> `collectPlatformMemoryWithPrompt()`
+- `backend_service/app.py`
 
-```json
-{
-  "is_noise": false,
-  "profile_updates": {},
-  "preference_updates": {
-    "add_style": [],
-    "add_forbidden": [],
-    "update_language": "",
-    "update_granularity": ""
-  },
-  "project_updates": [{
-    "project_name": "",
-    "action": "update | create",
-    "stage_update": "",
-    "new_decisions": [],
-    "new_questions": [],
-    "resolved_questions": [],
-    "new_next_actions": []
-  }],
-  "workflow_updates": [{
-    "workflow_name": "",
-    "action": "confirm | create",
-    "steps_update": []
-  }],
-  "episode": {
-    "topic": "",
-    "summary": "",
-    "key_decisions": [],
-    "open_issues": [],
-    "related_project": ""
-  }
-}
-```
+### 4. Background Incremental Update
 
-If `is_noise` is `true` the round is skipped entirely.
+Triggered when sync policies are enabled and new rounds arrive.
 
----
+Flow:
 
-### `background/llm_client.js`
+1. `content/content.js` detects a new assistant reply
+2. background receives captured round
+3. `background/memory_engine.js` uses `delta_system.txt`
+4. incremental memory delta is produced
+5. persistent node maintenance may also run with `persistent_node_distill_bg.txt`
 
-Thin wrapper over the DeepSeek API (`deepseek-chat`, temperature 0 for JSON calls). Exports two functions:
+This is separate from the full Python organize pipeline.
 
-- `extractJson(system, user, apiKey)` — calls the API and returns a parsed JSON object. Falls back through three parse strategies: direct `JSON.parse` → markdown code block extraction → regex `{…}` extraction. Returns `{}` on failure.
-- `summarize(system, user, apiKey)` — calls the API and returns plain text (temperature 0.3, 1024 tokens).
+## Popup Responsibilities
 
-Each request has a 60-second timeout.
+`popup/popup.js` is now the main UI controller.
 
----
+Important actions:
 
-### `background/l2_wiki.js`
+- `runOrganize()`
+- `addCurrentConversation()`
+- `addPlatformMemory()`
+- `exportPackage()`
+- `injectPackage()`
+- settings load/save/test
+- skill export/inject/save/delete
 
-**File system layer.** Implements the same directory schema as the Python `llm_memory_transferor` so the JS extension and the `mwiki` CLI can share the same local folder.
+It also includes popup-side error reporting:
 
-The directory handle is persisted in IndexedDB (`MemAssistDB / settings / dirHandle`) so it survives Service Worker restarts.
+- global `window.error`
+- global `unhandledrejection`
+- organize-failure logging via `logPopupError(...)`
 
-Exports schema constructors (`newProfile`, `newPreferences`, `newProject`, `newWorkflow`, `newEpisode`) and async read/write helpers for each memory type. Every write bumps `version` and `updated_at`, and appends a line to `logs/change_log.jsonl`.
+When popup execution fails, errors should appear in the browser console.
 
-Also exports `rebuildIndex()`, which writes `metadata/index.json` summarising the current state of the wiki directory.
+## Backend Responsibilities
 
----
+`backend_service/app.py` is now the central app-facing orchestration layer.
 
-### `content/content.js`
+Important API groups:
 
-**Content script** (runs in the extension's isolated world on every page). Handles:
+- settings
+  - `/api/settings`
+  - `/api/settings/test-connection`
+- memory actions
+  - `/api/memory/organize`
+  - `/api/memory/items`
+- package actions
+  - export package
+  - inject package
+- import actions
+  - import current conversation
+  - import platform memory
+  - import history
+- skill actions
+  - my skills
+  - recommended skills
+  - export / inject skills
 
-- **Platform detection** — matches `location.hostname` against the `PLATFORMS` map (`chatgpt.com`, `chat.openai.com`, `gemini.google.com`, `chat.deepseek.com`, `www.doubao.com`)
-- **Conversation capture** — when 保持更新 is on, observes DOM mutations to detect new assistant replies, then sends `ROUND_CAPTURED` to the Service Worker
-- **Message injection** — on request from popup, types a prompt into the platform's input field and clicks Send; used by 导出并保存记忆 and 注入当前对话
-- **Copy-button trigger** — clicks the platform's copy button and reads the clipboard (via the interceptor) to extract the last AI reply
+Default backend LLM settings:
 
-Platform selectors (input fields, send buttons, stop buttons, response containers, user message containers) are defined per-platform at the top of the file. Update these when a platform changes its DOM.
+- `api_provider = openai_compat`
+- `api_base_url = https://api.deepseek.com/v1`
+- `api_model = deepseek-chat`
 
----
+The backend is configurable from the popup settings page.
 
-### `content/clipboard_interceptor.js`
+## Python Memory Pipeline
 
-Runs in the **MAIN world** (direct page access, no extension sandbox). Wraps `navigator.clipboard.writeText` to intercept copy events and forwards the copied text to the isolated content script via `window.postMessage`. Required because the isolated world cannot read the clipboard directly on some platforms.
+The Python pipeline lives under:
 
----
+- `llm_memory_transferor/src/llm_memory_transferor/`
 
-### `popup/popup.js`
+Important modules:
 
-**Popup controller.** All user-facing actions live here. Key responsibilities:
+- `processors/memory_builder.py`
+  Builds episodes and persistent memory objects from raw conversations.
 
-- On open: loads config (`CONFIG.loadPrompts()`), restores UI state, and triggers a file sync (flushes `chrome.storage.local` → disk via `l2_wiki.js`)
-- **同步**: sends `FLUSH_NOW` to the Service Worker, then calls `PROCESS_ALL_RAW` (up to 10 conversations at a time) and writes results to disk
-- **重建节点**: iterates all unprocessed episodes and runs persistent distillation on each
-- **整理节点**: sends all existing nodes to DeepSeek and applies the returned merge operations
-- **按标签导入**: shows the persistent node panel; 注入当前对话 uploads the memory package to the current AI tab; 导出文件 generates a `.txt` bootstrap file
+- `processors/memory_updater.py`
+  Handles incremental update logic in the Python pipeline.
 
----
+- `processors/prompts.py`
+  Loads Python-side prompt files from the repository `prompts/` directory.
 
-### `offscreen/offscreen.html` + `offscreen.js`
+- `layers/l2_wiki.py`
+  Reads and writes wiki-layer files.
 
-An offscreen document (Chrome MV3 mechanism for background DOM access). Used when a clipboard or DOM operation is needed from the Service Worker context, which has no document.
+### Python prompt files currently in use
 
----
+- `prompts/episode_system.txt`
+- `prompts/profile_system.txt`
+- `prompts/preference_system.txt`
+- `prompts/projects_system.txt`
+- `prompts/workflows_system.txt`
+- `prompts/delta_system.txt`
 
-## Prompts
+`processors/prompts.py` is now the loader layer for these files.
+
+## Active Prompt Files
+
+These `prompts/*.txt` files are part of the current runtime:
 
 | File | Used by | Purpose |
 |---|---|---|
-| `persistent_node_distill_bg.txt` | memory_engine.js → DeepSeek | Self-contained version (embeds schema); compact rules for automatic per-episode processing in the Service Worker |
-| `delta_extract.txt` | memory_engine.js → DeepSeek | Incremental delta extraction per conversation round; outputs the delta JSON schema above |
-| `cold_start.txt` | popup.js → target AI | Cold-start prompt sent when injecting a memory package into a new AI session |
-| `platform_memory_collect.txt` | popup.js → target AI | Collects saved memory / custom instructions / agent config from the current AI page |
+| `platform_memory_collect.txt` | popup | Collect current platform memory/config from the webpage AI |
+| `cold_start.txt` | popup | Bootstrap prompt for inject/export flows |
+| `episode_system.txt` | Python `MemoryBuilder` | Episode extraction during organize |
+| `profile_system.txt` | Python `MemoryBuilder` + backend | Profile rebuild |
+| `preference_system.txt` | Python `MemoryBuilder` + backend | Preference rebuild |
+| `projects_system.txt` | Python `MemoryBuilder` + backend | Project rebuild |
+| `workflows_system.txt` | Python `MemoryBuilder` + backend | Workflow rebuild |
+| `delta_system.txt` | Python `MemoryUpdater` + background memory engine | Shared incremental memory delta extraction |
+| `persistent_node_distill_bg.txt` | backend + background | Persistent node distillation / maintenance |
+| `schema.txt` | node distill flow | Schema context for persistent nodes |
 
----
+The previously unused prompt files removed from the repo are not part of the live flow anymore.
 
-## Storage layers
+## content.js Notes
 
+`content/content.js` currently handles:
+
+- supported-platform detection
+- DOM observation for new AI replies
+- conversation scraping
+- prompt injection / text injection into the current tab
+
+Supported hosts include:
+
+- `chatgpt.com`
+- `chat.openai.com`
+- `gemini.google.com`
+- `chat.deepseek.com`
+- `www.doubao.com`
+
+When a platform changes its DOM, selectors in `content.js` are usually the first thing to update.
+
+## Background Notes
+
+`background/background.js` and `background/memory_engine.js` still matter, but they are no longer the whole memory system.
+
+Their main role is:
+
+- capture-time event handling
+- incremental update
+- prompt-based background memory maintenance
+
+The full rebuild / organize flow now belongs to the backend + Python pipeline.
+
+## Storage Overview
+
+The project uses multiple storage layers:
+
+```text
+chrome.storage.local
+  -> extension-side cached state and background data
+
+IndexedDB
+  -> popup directory handle persistence
+
+backend-managed local files / wiki files
+  -> raw conversations
+  -> episodic memories
+  -> persistent memory objects
+  -> persistent nodes
 ```
-chrome.storage.local        ← Service Worker writes here (no file system access)
-    mw:profile
-    mw:preferences
-    mw:workflows
-    mw:projects:<name>
-    mw:episodes:<id>
-    mw:persistent_nodes     ← { pn_next_id, episodic_tag_paths, nodes: { pn_XXXX: ... } }
 
-IndexedDB (MemAssistDB)     ← stores the File System Access dirHandle across restarts
-    settings / dirHandle
+## Windows Compatibility Notes
 
-File System (user-chosen)   ← popup writes here on sync
-    profile.json
-    preferences.json
-    workflows.json
-    projects/{name}.json
-    episodes/{id}.json
-    raw/{platform}/{chatId}.json
-    js_persistent_nodes.json
-    metadata/index.json
-    logs/change_log.jsonl
-```
+Recent fixes added for Windows:
 
-## Data flow
+- stdout / stderr UTF-8 reconfiguration in backend startup
+- explicit UTF-8 reads and writes in key wiki-layer paths
+- safer organize-time console output to avoid `gbk` failures
+- popup-side console logging for organize failures
+- list-field normalization in `MemoryBuilder` for unstable LLM JSON output
 
-```
-User chats on supported platform
-    └─ content.js detects new reply
-    └─ sends ROUND_CAPTURED → Service Worker
-            └─ memory_engine: delta update (DeepSeek, delta_system.txt)
-            └─ saves to chrome.storage.local
-            └─ async: persistent node update (DeepSeek, persistent_distill_background.txt)
+These are especially relevant when debugging user reports from Windows environments.
 
-User opens popup
-    └─ popup.js flushes chrome.storage.local → disk (via l2_wiki.js)
+## Recommended Debug Entry Points
 
-User clicks 同步
-    └─ FLUSH_NOW → Service Worker
-    └─ PROCESS_ALL_RAW (batch mode, ≤10 at a time)
-    └─ results written to disk
-```
+When debugging a feature, start from:
+
+- popup action problems
+  - `popup/popup.js`
+
+- page scraping / prompt injection problems
+  - `content/content.js`
+
+- organize-memory failures
+  - `backend_service/app.py`
+  - `processors/memory_builder.py`
+  - `layers/l2_wiki.py`
+
+- incremental-update problems
+  - `background/memory_engine.js`
+  - `prompts/delta_system.txt`
+
+- persistent-node problems
+  - `prompts/persistent_node_distill_bg.txt`
+  - `background/memory_engine.js`
+  - `backend_service/app.py`

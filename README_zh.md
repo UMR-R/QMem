@@ -1,211 +1,183 @@
 # Memory Assistant
 
-一个 Chrome 扩展，自动捕获 AI 对话、构建分层记忆，并支持将记忆导出到任意平台。
+[English](README.md)
 
-## 支持平台
+Memory Assistant 是一个由 Chrome 插件、本地 FastAPI 后端和 Python 记忆整理流水线组成的项目，用来采集 AI 对话、整理结构化长期记忆，并把这些记忆迁移到其他平台。
 
-| 平台 | 域名 |
-|---|---|
-| ChatGPT | chatgpt.com / chat.openai.com |
-| Google Gemini | gemini.google.com |
-| DeepSeek | chat.deepseek.com |
-| 豆包 | www.doubao.com |
+当前仓库由三部分协同工作：
 
----
+- `popup/`、`content/`、`background/`：Chrome 插件界面、页面侧采集与后台同步逻辑。
+- `backend_service/`：插件调用的本地 HTTP 后端。
+- `llm_memory_transferor/`：负责构建和更新结构化记忆的 Python 记忆流水线。
 
-## 安装
+## 当前支持的能力
 
-### 1. 获取 DeepSeek API Key
+- 从 ChatGPT、Gemini、DeepSeek、豆包等已适配站点采集对话。
+- 将当前会话导入本地记忆库。
+- 让当前平台汇报它保存的 memory、custom instructions、agent config 和 skills，并将快照导入本地。
+- 从 raw conversations 重建结构化记忆。
+- 在开启“同步记忆”后，对新对话做增量更新。
+- 导出勾选的记忆内容为迁移包。
+- 将记忆包或 Skill 注入到当前会话。
+- 管理“我的 Skill”和后端推荐 Skill。
 
-前往 [platform.deepseek.com](https://platform.deepseek.com) 注册并创建 API Key，用于后台记忆提炼。
+## 当前运行流程
 
-### 2. 在 Chrome 中加载扩展
+1. 插件采集原始对话，或手动导入会话。
+2. 原始聊天记录写入本地记忆目录。
+3. 点击 `整理记忆` 后调用 `POST /api/memory/organize`。
+4. 后端使用 `MemoryBuilder` 重建：
+   - episodes
+   - profile
+   - preferences
+   - projects
+   - workflows
+5. 后端继续把长期 persistent nodes 蒸馏到 `interest_discoveries/`。
+6. 如果开启实时记忆同步，新对话还会通过 `MemoryUpdater` 和 background memory engine 做增量维护。
 
-1. 打开 Chrome，访问 `chrome://extensions/`
-2. 开启右上角的**开发者模式**
-3. 点击**加载已解压的扩展程序**
-4. 选择 `memory_assistant` 文件夹
-5. 扩展图标将出现在工具栏中
+## Popup 页面说明
 
-### 3. 首次配置
+### 首页
 
-1. 点击扩展图标，打开弹窗
-2. 点击右上角 **API Key** 按钮 → 填入 DeepSeek API Key → 点击 **保存**
-3. 点击目录区域的 **选择目录** 按钮 → 选择一个本地文件夹用于保存记忆文件
-4. 目录徽章显示文件夹名称后，中央 **同步** 按钮变为可用状态
+- `同步对话`：开启或关闭后台对话采集。
+- `迁移`：进入记忆整理、勾选、导出、注入页面。
+- `设置`：配置后端地址、API Key、本地目录和实时记忆更新。
+- `Skill`：管理个人 Skill、推荐 Skill、导出和注入。
 
----
+### 迁移页
 
-## 界面说明
+- `整理记忆`：从本地 raw conversations 重建结构化记忆。
+- `加入当前对话`：把当前标签页中的会话导入后端。
+- `加入平台记忆`：采集当前平台已保存的 memory / custom instructions / agent config / skills，再导入后端。
+- `导出`：导出勾选的记忆包。
+- `注入`：将勾选的记忆内容注入到当前 AI 会话。
 
-```
-┌─────────────────────────────────────────┐
-│  Memory Assistant              [API Key] │  ← 顶栏
-├─────────────────────────────────────────┤
-│                                         │
-│            ╭ ─ ─ ─ ─ ─ ╮               │
-│           │   ↺   同步   │              │  ← 主同步按钮
-│            ╰ ─ ─ ─ ─ ─ ╯               │    （未选目录时禁用）
-│                                         │
-│     📁  folder-name  [更换]             │  ← 目录徽章 + 选择按钮
-│                                         │
-│   ┌─────────────────────────────────┐   │
-│   │  🕐  保持更新         ◯        │   │  ← 开关卡片
-│   │  ⚡  实时更新         ◯        │   │
-│   └─────────────────────────────────┘   │
-│                                         │
-│   ┌── 导出并保存记忆 ────────────────┐  │  ← 手动导出当前对话
-│   └──────────────────────────────────┘  │
-├─────────────────────────────────────────┤
-│  导入历史 │ 重建节点 │ 整理节点 │ 按标签导入 │  ← 底栏
-└─────────────────────────────────────────┘
-```
+### 设置页
 
-**同步**（圆圈按钮）— 将浏览器存储中的记忆刷写到本地文件夹，并提取未处理对话的 episode。未选择目录时禁用。
+- 本地后端地址
+- API Key
+- 本地存储目录
+- 实时记忆更新开关
+- `json/jsonl/md/txt` 历史对话导入
+- 临时缓存清理
 
-**选择目录 / 更换** — 选择或更换本地文件夹，显示在目录徽章内。
+## 本地后端
 
-**保持更新** — 在后台持续捕获所有支持平台上的对话。
+插件当前调用的主要接口包括：
 
-**实时更新** — 每轮 AI 回复后自动调用 DeepSeek 更新记忆，需先开启「保持更新」。
+- `GET /api/health`
+- `GET/POST /api/settings`
+- `POST /api/settings/test-connection`
+- `GET /api/summary`
+- `GET /api/sync/status`
+- `POST /api/sync/toggle`
+- `POST /api/conversations/current/import`
+- `POST /api/platform-memory/import`
+- `POST /api/memory/organize`
+- `GET /api/memory/categories`
+- `GET /api/memory/items`
+- `POST /api/export/package`
+- `POST /api/inject/package`
+- `GET /api/skills/my`
+- `GET /api/skills/recommended`
+- `POST /api/skills/save`
+- `POST /api/skills/export`
+- `POST /api/skills/delete`
+- `POST /api/skills/inject`
+- `POST /api/import/history`
+- `POST /api/cache/clear`
+- `GET /api/jobs/{job_id}`
 
-**导出并保存记忆** — 向当前 AI 发送结构化提取 Prompt，由 DeepSeek 将回复内容更新到持久节点。
+在仓库根目录启动后端：
 
-**底栏按钮：**
-- **导入历史** — 导入 ChatGPT / DeepSeek 导出文件
-- **重建节点** — 将未提炼的历史 episode 逐一提炼为持久节点
-- **整理节点** — 合并语义重复的节点
-- **按标签导入** — 浏览并勾选持久节点，注入对话或导出为文件
-
----
-
-## 使用说明
-
-### 自动捕获（推荐）
-
-扩展可在后台静默捕获并处理每一次对话。
-
-1. 点击扩展图标 → 开启 **保持更新**
-2. （可选）开启 **实时更新**，每轮对话后自动调用 DeepSeek 更新记忆
-3. 正常使用 AI，对话自动捕获
-4. 随时点击 **同步** 将记忆写出到本地文件夹并提取 episode
-
-### 从历史对话构建记忆
-
-适合将已有的 ChatGPT / DeepSeek 聊天记录一次性导入并构建记忆库。
-
-1. 导出历史文件
-   - **ChatGPT**：设置 → 数据控制 → 导出数据 → 下载 ZIP → 解压取出 `conversations.json`
-   - **DeepSeek**：直接使用导出文件
-2. 点击扩展图标 → 底栏 **导入历史** → 选择文件
-3. 自动解析并开始提取 episode，进度显示在状态区域
-4. 每批最多处理 10 条对话，有剩余时状态栏提示"还有 N 条待提取"——点击 **同步** 继续
-5. （可选）点击 **重建节点** 将 episode 提炼为持久节点；点击 **整理节点** 合并重复节点
-
----
-
-### 同步到文件
-
-点击中央 **同步** 按钮，将浏览器存储中的全部记忆写出到本地文件夹，并自动去除重复对话记录。
-
-如果已配置 DeepSeek API Key，同步时还会自动从「实时更新」关闭期间捕获的对话中提取 episode。
-
-**分批处理：** 每次同步最多处理 **10 条对话**，有更多时状态栏提示"还有 N 条对话待提取，再次点击同步继续"。
-
-写出的文件结构：
-
-```
-<选择的目录>/
-├── profile.json          # 用户画像
-├── preferences.json      # 回复偏好
-├── workflows.json        # 工作流程模式
-├── projects/
-│   └── {项目名}.json     # 各项目笔记与决策记录
-├── episodes/
-│   └── {id}.json         # 每次对话的记忆快照
-├── raw/
-│   └── {平台}/
-│       └── {会话id}.json # 原始捕获的对话记录
-└── js_persistent_nodes.json  # 跨会话提炼的稳定规律
+```bash
+pip install -r backend_service/requirements.txt
+uvicorn backend_service.app:app --host 127.0.0.1 --port 8765 --reload
 ```
 
----
+推荐后端地址：
 
-### 记忆管理与导出
+```text
+http://127.0.0.1:8765
+```
 
-点击底栏 **按标签导入** 打开节点面板。
+## 默认 LLM 配置
 
-#### 注入当前对话
+后端默认值为：
 
-勾选节点 → 选择目标平台 → 点击 **注入当前对话**：扩展将选中的节点及对应 episode 证据打包上传给当前 AI，并发送冷启动指令，使 AI 获得完整历史上下文。
+- `api_provider = openai_compat`
+- `api_base_url = https://api.deepseek.com/v1`
+- `api_model = deepseek-chat`
 
-#### 导出文件（跨平台迁移）
+默认情况下，`整理记忆` 和增量更新走后端 LLM；“加入平台记忆”主要依赖当前网页上的 AI 返回结果。
 
-勾选节点 → 选择目标平台 → 点击 **导出文件**：生成包含记忆数据和冷启动指令的 `.txt` 文件，可直接粘贴到任意平台的 system prompt 或自定义指令中。
+## 当前使用中的 Prompt
 
-| 目标平台 | 格式 |
-|---|---|
-| Claude | XML 标签包裹（`<memory_package>`） |
-| ChatGPT | 指令 + 数据分隔格式 |
-| DeepSeek | 同上 |
-| 通用 | 纯文本，兼容任意支持 system prompt 的平台 |
+运行时 prompt 现在统一放在 `prompts/` 目录，由插件、后端和 Python 流水线共同使用。
 
-#### 维护节点
-
-- **重建节点**：扫描所有尚未提炼的历史 episode，逐一调用 DeepSeek 生成或更新持久节点。适合关闭实时更新期间积累大量对话后使用。
-- **整理节点**：让 DeepSeek 审视现有节点，合并语义重复或同属一个主题的子话题节点。
-
----
-
-## 自定义 Prompt
-
-所有 Prompt 存放在 `prompts/` 目录，直接编辑 `.txt` 文件即可，无需修改 JS 代码。
-
-| 文件 | 发给谁 | 触发场景 |
+| 文件 | 使用方 | 用途 |
 |---|---|---|
-| `episodic_tag.txt` | 目标 AI（当前页面） | 导出并保存记忆 |
-| `architecture.txt` | 拼接在 `episodic_tag.txt` 前 | 同上（前置背景说明） |
-| `persistent_distill.txt` | DeepSeek API（popup 侧） | 导出完成后 / 重建节点 / 整理节点 |
-| `persistent_distill_background.txt` | DeepSeek API（后台 Service Worker） | 实时更新每轮触发 / 同步 |
-| `delta_system.txt` | DeepSeek API（后台 Service Worker） | 实时更新每轮触发 / 同步 |
-| `load.txt` | 目标 AI | 注入当前对话 / 导出文件 |
+| `prompts/cold_start.txt` | popup 注入流程 | 记忆迁移时的冷启动 prompt |
+| `prompts/platform_memory_collect.txt` | popup 平台记忆采集流程 | 采集当前平台保存的记忆和 agent 配置 |
+| `prompts/episode_system.txt` | `MemoryBuilder` | 整理记忆时抽取 episode |
+| `prompts/profile_system.txt` | `MemoryBuilder` | 重建 profile |
+| `prompts/preference_system.txt` | `MemoryBuilder` | 重建 preferences |
+| `prompts/projects_system.txt` | `MemoryBuilder` | 重建 projects |
+| `prompts/workflows_system.txt` | `MemoryBuilder` | 重建 workflows |
+| `prompts/delta_system.txt` | `MemoryUpdater` 和 background engine | 增量记忆更新 |
+| `prompts/persistent_node_distill_bg.txt` | backend 和 background engine | persistent node 蒸馏 |
+| `prompts/schema.txt` | backend/background persistent-node 流程 | schema 上下文 |
 
-修改步骤：保存 `.txt` 文件 → `chrome://extensions/` 点刷新图标 → 重新打开弹窗即生效。
+## 记忆目录结构
 
-**注意：** `episodic_tag.txt` 中的 `{{EXISTING_TAGS}}` 占位符在运行时自动替换，编辑时请保留。
+当设置了 `storage_path` 时，后端会把数据写到该目录；否则默认写到 `backend_service/.state/wiki/`。
 
----
+当前记忆根目录主要包含：
 
-## 典型使用流程
+- `raw/`：原始对话
+- `platform_memory/`：平台记忆快照
+- `episodes/`：对话级 episodic 记忆
+- `profile/`：用户画像
+- `preferences/`：偏好设置
+- `projects/`：项目记忆
+- `workflows/`：工作流 / SOP
+- `skills/`：已保存的 Skill
+- `interest_discoveries/`：蒸馏出的 persistent nodes
+- `metadata/`：索引、整理状态、展示文案
 
+仓库里已提交了一份示例记忆库：`llm_mem4/`。
+
+## 仓库结构
+
+- `popup/`：插件弹窗页面
+- `content/`：页面侧采集与注入逻辑
+- `background/`：service worker 与增量记忆引擎
+- `backend_service/`：本地 FastAPI 后端与推荐 Skill 目录
+- `prompts/`：可直接编辑的运行时 prompt
+- `llm_memory_transferor/`：Python 记忆库、CLI、导出器、测试与评测脚本
+- `llm_mem4/`：系统生成的示例记忆存储目录
+
+## 快速开始
+
+1. 在 Chrome 中从仓库根目录加载插件。
+2. 启动本地后端：
+
+```bash
+uvicorn backend_service.app:app --host 127.0.0.1 --port 8765 --reload
 ```
-从历史记录构建记忆
-  └─ 底栏「导入历史」→ 选择导出文件 → 自动提取 episode
-  └─ 点击「同步」→ 写出到本地文件夹
-  └─ （可选）底栏「重建节点」→ 提炼持久节点
-  └─ （可选）底栏「整理节点」→ 合并重复节点
 
-日常使用时维护记忆
-  └─ 开启「保持更新」+「实时更新」→ 记忆自动积累
-  └─ 每次聊天后点击「同步」→ 写出到本地文件夹
+3. 打开 popup，配置：
+   - backend URL
+   - API Key
+   - storage directory
+4. 使用 `加入当前对话`、`加入平台记忆` 或 `导入对话` 加入源数据。
+5. 点击 `整理记忆` 构建结构化记忆。
+6. 勾选需要的记忆内容后执行 `导出` 或 `注入`。
+7. 在 `Skill` 页面保存、导出或注入 Skill。
 
-在新平台开始对话
-  └─ 底栏「按标签导入」→ 勾选节点 → 选择目标平台
-  └─ 「注入当前对话」：直接注入当前页面的 AI
-  └─ 「导出文件」：生成 .txt 文件，粘贴到任意平台
-```
+## 补充说明
 
----
-
-## 常见问题
-
-| 问题 | 解决方法 |
-|---|---|
-| 捕获没有触发 | 开启「保持更新」后刷新页面，扩展需要重新注入到页面中 |
-| 按钮点击无响应 | 目标平台可能更新了页面结构，尝试重新加载扩展后再试 |
-| 提示"API Key 未配置" | 点击右上角 **API Key** 按钮重新填入 |
-| 目录访问权限被拒绝 | 点击目录徽章中的 **更换** 重新授权，浏览器重启后可能撤销权限 |
-| DeepSeek 接口报错 | 检查 API Key 是否有效，以及账户余额是否充足 |
-| 文件中有重复对话记录 | 点击「同步」，同步时会自动去重 |
-| 同步后没有生成 episode | 确认 DeepSeek API Key 已配置；配置后点同步会自动提取 |
-| 手动删除 episodes 目录后重新同步内容不变 | 删文件不会清除浏览器存储。需在 Service Worker 控制台（`chrome://extensions/` → Service Worker → 检查）执行重置命令，再点同步 |
+- Popup 当前适配的 host 包括 `chatgpt.com`、`chat.openai.com`、`gemini.google.com`、`chat.deepseek.com`、`www.doubao.com`。
+- 保存设置后，popup 会用可复制文本的弹窗提示启动后端命令，而不是原生 `alert`。
+- 项目里已经补了一些面向 Windows 的 UTF-8 兼容修复。
+- 如果 popup 动作失败，可以在 `chrome://extensions/` 中打开该扩展的 popup console 查看报错。

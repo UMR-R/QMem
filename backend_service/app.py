@@ -20,6 +20,21 @@ from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 
 
+def _configure_text_io() -> None:
+    """Prefer UTF-8 process output on Windows consoles."""
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+
+
+_configure_text_io()
+
+
 ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = ROOT.parent
 STATE_DIR = ROOT / ".state"
@@ -56,12 +71,6 @@ from llm_memory_transferor.layers.l2_wiki import L2Wiki  # noqa: E402
 from llm_memory_transferor.layers.l3_schema import L3Schema  # noqa: E402
 from llm_memory_transferor.models import EpisodicMemory, ProjectMemory, WorkflowMemory  # noqa: E402
 from llm_memory_transferor.processors import MemoryBuilder, MemoryUpdater  # noqa: E402
-from llm_memory_transferor.processors.prompts import (  # noqa: E402
-    _PREFERENCE_SYSTEM,
-    _PROFILE_SYSTEM,
-    _PROJECTS_SYSTEM,
-    _WORKFLOWS_SYSTEM,
-)
 from llm_memory_transferor.utils.llm_client import LLMClient  # noqa: E402
 
 
@@ -4614,13 +4623,13 @@ def rebuild_persistent_memory(
 
     stage("正在整理用户画像...", 1)
     profile_context = builder._filter_digest(episodes, l1_text, "profile")
-    profile_data = builder.llm.extract_json(_PROFILE_SYSTEM, profile_context)
+    profile_data = builder.llm.extract_json(builder.prompts["profile_system"], profile_context)
     profile = builder._build_profile(profile_data, l1_text, earliest_ts, profile_ep_ids, ep_by_id)
     wiki.save_profile(profile)
 
     stage("正在整理偏好设置...", 2)
     prefs_context = builder._filter_digest(episodes, l1_text, "preferences")
-    prefs_data = builder.llm.extract_json(_PREFERENCE_SYSTEM, prefs_context)
+    prefs_data = builder.llm.extract_json(builder.prompts["preference_system"], prefs_context)
     prefs = builder._build_preferences(prefs_data, l1_text, earliest_ts, pref_ep_ids, ep_by_id)
     if profile.primary_task_types:
         merged_task_types = list(
@@ -4633,7 +4642,7 @@ def rebuild_persistent_memory(
 
     stage("正在整理项目记忆...", 3)
     projects_context = builder._filter_digest(episodes, l1_text, "projects")
-    projects_data = builder.llm.extract_json(_PROJECTS_SYSTEM, projects_context)
+    projects_data = builder.llm.extract_json(builder.prompts["projects_system"], projects_context)
     projects = builder._build_projects(projects_data, l1_text, earliest_ts, project_ep_map, ep_by_id)
     projects = [project for project in projects if _looks_like_stable_project(project)]
     existing_projects = {project.project_name for project in wiki.list_projects()}
@@ -4651,7 +4660,7 @@ def rebuild_persistent_memory(
 
     stage("正在整理工作流...", 4)
     workflows_context = builder._filter_digest(episodes, l1_text, "workflows")
-    workflows_data = builder.llm.extract_json(_WORKFLOWS_SYSTEM, workflows_context)
+    workflows_data = builder.llm.extract_json(builder.prompts["workflows_system"], workflows_context)
     workflows = builder._build_workflows(workflows_data, l1_text, earliest_ts, workflow_ep_map, ep_by_id)
     platform_workflows = _platform_workflows_from_records(settings)
     workflow_map: dict[str, WorkflowMemory] = {}

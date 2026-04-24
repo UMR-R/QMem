@@ -424,7 +424,7 @@ function _buildStateSummary(state) {
 }
 
 async function _getDeltaSystem() {
-  return await _loadPromptFile("delta_extract");
+  return await _loadPromptFile("delta_system");
 }
 
 async function _getPersistentDistillSystem() {

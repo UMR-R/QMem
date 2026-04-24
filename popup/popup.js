@@ -115,6 +115,27 @@ const state = {
 const DEFAULT_BACKEND_URL = "http://127.0.0.1:8765";
 const BACKEND_START_COMMAND = "uvicorn backend_service.app:app --host 127.0.0.1 --port 8765 --reload";
 
+function logPopupError(scope, error, extra = {}) {
+  console.error(`[popup] ${scope}`, {
+    error,
+    message: error?.message || String(error),
+    stack: error?.stack || null,
+    ...extra,
+  });
+}
+
+window.addEventListener("error", event => {
+  logPopupError("Unhandled error", event.error || event.message, {
+    filename: event.filename,
+    lineno: event.lineno,
+    colno: event.colno,
+  });
+});
+
+window.addEventListener("unhandledrejection", event => {
+  logPopupError("Unhandled promise rejection", event.reason);
+});
+
 function openDB() {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, 1);
@@ -327,18 +348,18 @@ function renderSync() {
   const syncBtn = document.getElementById("syncBtn");
   const dot = document.getElementById("syncDot");
 
-  let statusText = "同步已暂停";
-  let hintText = "点击开启后，持续记录你与大模型的对话";
+  let statusText = "同步对话已暂停";
+  let hintText = "点击开启后，持续记录你与大模型的对话到本地";
 
   if (state.syncEnabled) {
     if (state.apiKeyConfigured && state.realtimeUpdate && state.keepUpdated) {
-      statusText = "同步中";
+      statusText = "同步对话中";
       hintText = "正在记录对话，并自动提取记忆";
     } else if (state.apiKeyConfigured) {
-      statusText = "记录中";
+      statusText = "同步对话中";
       hintText = "正在记录原始对话，可稍后在迁移页整理记忆";
     } else {
-      statusText = "记录中";
+      statusText = "同步对话中";
       hintText = "正在记录原始对话，尚未开启记忆提取";
     }
   }
@@ -367,7 +388,6 @@ function renderSettings() {
   const apiKeyStatus = document.getElementById("apiKeyStatus");
   apiKeyInput.value = state.apiKey;
   document.getElementById("backendUrlInput").value = state.backendUrl;
-  document.getElementById("keepUpdatedToggle").checked = state.keepUpdated;
   document.getElementById("realtimeUpdateToggle").checked = state.realtimeUpdate;
   if (state.apiKey) {
     apiKeyInput.placeholder = "请输入 API Key";
@@ -1050,19 +1070,15 @@ async function toggleSync() {
   await refreshSummary();
   if (state.syncEnabled) {
     if (state.apiKeyConfigured && state.realtimeUpdate && state.keepUpdated) {
-      toast("同步已开启，将自动增量更新记忆");
+      toast("同步对话已开启，将自动增量更新记忆");
     } else if (state.apiKeyConfigured) {
       toast("记录已开启，可稍后在迁移页整理记忆");
     } else {
       toast("记录已开启，当前仅保存原始对话");
     }
   } else {
-    toast("同步已暂停");
+      toast("同步对话已暂停");
   }
-}
-
-function syncPolicyHint() {
-  toast("同步策略已更新。已打开的会话页可能需要刷新，或重新开启同步后生效。");
 }
 
 async function runOrganize() {
@@ -1111,6 +1127,9 @@ async function runOrganize() {
     await storageSet({ [STORAGE_KEYS.lastSyncAt]: state.lastSyncAt });
     await refreshSummary();
   } catch (err) {
+    logPopupError("Organize memory failed", err, {
+      backendUrl: state.backendUrl,
+    });
     toast(`整理失败：${err.message}`, true);
   } finally {
     setOrganizeStatus(false);
@@ -1622,17 +1641,6 @@ async function clearCache() {
   toast("临时缓存已清理");
 }
 
-async function ensureSyncStartsPaused() {
-  state.syncEnabled = false;
-  await storageSet({ [STORAGE_KEYS.keepUpdated]: false });
-  try {
-    await backendApi().toggleSync(state.backendUrl, { enabled: false });
-  } catch {
-    // Keep local paused state when backend is temporarily unavailable.
-  }
-  await broadcastCaptureToggle(false);
-}
-
 function bindEvents() {
   document.getElementById("menuBtn").addEventListener("click", () => setView("settings"));
   document.getElementById("gotoMigrateBtn").addEventListener("click", () => setView("migrate"));
@@ -1671,15 +1679,6 @@ function bindEvents() {
   });
   document.addEventListener("keydown", event => {
     if (event.key === "Escape") closeCommandModal();
-  });
-
-  document.getElementById("keepUpdatedToggle").addEventListener("change", async event => {
-    state.keepUpdated = event.target.checked;
-    await storageSet({ [STORAGE_KEYS.keepUpdatedStrategy]: state.keepUpdated });
-    renderSettings();
-    renderSync();
-    renderActionAvailability();
-    syncPolicyHint();
   });
 
   document.getElementById("realtimeUpdateToggle").addEventListener("change", async event => {
@@ -1805,7 +1804,7 @@ async function init() {
   state.apiModel = settings[STORAGE_KEYS.apiModel] || state.apiModel;
   state.backendUrl = settings[STORAGE_KEYS.backendUrl] || state.backendUrl;
   state.syncEnabled = !!settings[STORAGE_KEYS.keepUpdated];
-  state.keepUpdated = settings[STORAGE_KEYS.keepUpdatedStrategy] ?? true;
+  state.keepUpdated = true;
   state.realtimeUpdate = !!settings[STORAGE_KEYS.realtimeUpdate];
   state.lastSyncAt = settings[STORAGE_KEYS.lastSyncAt] || null;
   state.dirHandle = await loadSavedDir();
@@ -1826,8 +1825,6 @@ async function init() {
   } catch {
     // Keep extension-local settings when backend is offline.
   }
-
-  await ensureSyncStartsPaused();
 
   bindEvents();
   renderDirectory();
@@ -1850,6 +1847,6 @@ async function init() {
 }
 
 init().catch(err => {
-  console.error("[popup] init failed:", err);
+  logPopupError("Init failed", err);
   toast(`初始化失败：${err.message}`, true);
 });

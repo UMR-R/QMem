@@ -13,6 +13,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from rich.console import Console
+
 from ..layers.l0_raw import L0RawLayer, RawConversation
 from ..layers.l1_signals import L1SignalLayer
 from ..layers.l2_wiki import L2Wiki
@@ -25,13 +27,7 @@ from ..models import (
     WorkflowMemory,
 )
 from ..utils.llm_client import LLMClient
-from .prompts import (
-    _EPISODE_SYSTEM,
-    _PREFERENCE_SYSTEM,
-    _PROFILE_SYSTEM,
-    _PROJECTS_SYSTEM,
-    _WORKFLOWS_SYSTEM,
-)
+from .prompts import load_processor_prompts
 
 
 class MemoryBuilder:
@@ -46,6 +42,44 @@ class MemoryBuilder:
     def __init__(self, llm: LLMClient, wiki: L2Wiki) -> None:
         self.llm = llm
         self.wiki = wiki
+        self.console = Console(safe_box=True, emoji=False)
+        self.prompts = load_processor_prompts()
+
+    @staticmethod
+    def _normalize_str_list(value: Any) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            value = value.strip()
+            return [value] if value else []
+        if isinstance(value, list):
+            normalized: list[str] = []
+            for item in value:
+                if item is None:
+                    continue
+                text = str(item).strip()
+                if text:
+                    normalized.append(text)
+            return normalized
+        text = str(value).strip()
+        return [text] if text else []
+
+    @classmethod
+    def _coerce_model_field(cls, field_name: str, value: Any) -> Any:
+        list_fields = {
+            "domain_background",
+            "common_languages",
+            "primary_task_types",
+            "long_term_research_or_work_focus",
+            "style_preference",
+            "terminology_preference",
+            "formatting_constraints",
+            "forbidden_expressions",
+            "revision_preference",
+        }
+        if field_name in list_fields:
+            return cls._normalize_str_list(value)
+        return value
 
     def build(
         self,
@@ -110,9 +144,11 @@ class MemoryBuilder:
                     seen.add(t)
                     all_topics.append(t)
         results["topics_identified"] = len(all_topics)
-        print(f"\nDetected topics ({len(all_topics)} unique across {len(episodes)} episodes):")
+        self.console.print(
+            f"\nDetected topics ({len(all_topics)} unique across {len(episodes)} episodes):"
+        )
         for i, t in enumerate(all_topics[:10], 1):
-            print(f"  {i}. {t}")
+            self.console.print(f"  {i}. {t}")
 
         # ------------------------------------------------------------------ #
         # Phase 2: Derive persistent memory from episode digests              #
@@ -144,7 +180,7 @@ class MemoryBuilder:
         # --- Extract profile ---
         progress("Extracting profile from episodes...")
         profile_context = self._filter_digest(episodes, l1_text, "profile")
-        profile_data = self.llm.extract_json(_PROFILE_SYSTEM, profile_context)
+        profile_data = self.llm.extract_json(self.prompts["profile_system"], profile_context)
         profile = self._build_profile(profile_data, l1_text, earliest_ts,
                                       profile_ep_ids, ep_by_id)
         self.wiki.save_profile(profile)
@@ -153,7 +189,7 @@ class MemoryBuilder:
         # --- Extract preferences ---
         progress("Extracting preferences from episodes...")
         pref_context = self._filter_digest(episodes, l1_text, "preferences")
-        pref_data = self.llm.extract_json(_PREFERENCE_SYSTEM, pref_context)
+        pref_data = self.llm.extract_json(self.prompts["preference_system"], pref_context)
         prefs = self._build_preferences(pref_data, l1_text, earliest_ts,
                                         pref_ep_ids, ep_by_id)
         if profile.primary_task_types:
@@ -170,7 +206,7 @@ class MemoryBuilder:
         # --- Extract projects ---
         progress("Extracting projects from episodes...")
         project_context = self._filter_digest(episodes, l1_text, "projects")
-        projects_data = self.llm.extract_json(_PROJECTS_SYSTEM, project_context)
+        projects_data = self.llm.extract_json(self.prompts["projects_system"], project_context)
         projects = self._build_projects(projects_data, l1_text, earliest_ts,
                                         project_ep_map, ep_by_id)
         for proj in projects:
@@ -180,7 +216,7 @@ class MemoryBuilder:
         # --- Extract workflows ---
         progress("Extracting workflows from episodes...")
         workflow_context = self._filter_digest(episodes, l1_text, "workflows")
-        workflows_data = self.llm.extract_json(_WORKFLOWS_SYSTEM, workflow_context)
+        workflows_data = self.llm.extract_json(self.prompts["workflows_system"], workflow_context)
         workflows = self._build_workflows(workflows_data, l1_text, earliest_ts,
                                           workflow_ep_map, ep_by_id)
         self.wiki.save_workflows(workflows)
@@ -205,7 +241,7 @@ class MemoryBuilder:
             f"Message count: {len(conv.messages)}\n\n"
             f"{text}"
         )
-        data = self.llm.extract_json(_EPISODE_SYSTEM, user_prompt)
+        data = self.llm.extract_json(self.prompts["episode_system"], user_prompt)
         if not data or not isinstance(data, dict):
             return None
         ep = EpisodicMemory(
@@ -373,7 +409,7 @@ class MemoryBuilder:
         if isinstance(data, dict):
             for field in ProfileMemory.model_fields:
                 if field in data and data[field]:
-                    setattr(profile, field, data[field])
+                    setattr(profile, field, self._coerce_model_field(field, data[field]))
         if l1_text:
             profile.add_evidence("l1_signal", "platform_export", l1_text[:100])
         else:
@@ -400,7 +436,7 @@ class MemoryBuilder:
         if isinstance(data, dict):
             for field in PreferenceMemory.model_fields:
                 if field in data and data[field]:
-                    setattr(prefs, field, data[field])
+                    setattr(prefs, field, self._coerce_model_field(field, data[field]))
         if l1_text:
             prefs.add_evidence("l1_signal", "platform_export", l1_text[:100])
         else:

@@ -18,7 +18,7 @@ from ..models import (
     WorkflowMemory,
 )
 from ..utils.llm_client import LLMClient
-from .prompts import _DELTA_SYSTEM
+from .prompts import load_processor_prompts
 
 
 class MemoryUpdater:
@@ -31,6 +31,7 @@ class MemoryUpdater:
         self.llm = llm
         self.wiki = wiki
         self.schema = schema
+        self.prompts = load_processor_prompts()
 
     def update(
         self,
@@ -58,7 +59,7 @@ class MemoryUpdater:
             f"NEW CONVERSATION:\n{new_conversation_text[:4000]}"
             + (f"\n\nPLATFORM SIGNALS:\n{l1_text[:1000]}" if l1_text else "")
         )
-        delta = self.llm.extract_json(_DELTA_SYSTEM, prompt)
+        delta = self.llm.extract_json(self.prompts["delta_system"], prompt)
 
         if not isinstance(delta, dict):
             return {"status": "no_changes"}

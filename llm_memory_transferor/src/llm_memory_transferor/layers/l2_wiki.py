@@ -157,12 +157,12 @@ class L2Wiki:
         source = self._profile_json if self._profile_json.exists() else self._legacy_profile_json
         if not source.exists():
             return None
-        return ProfileMemory.model_validate_json(source.read_text())
+        return ProfileMemory.model_validate_json(source.read_text(encoding="utf-8"))
 
     def save_profile(self, profile: ProfileMemory) -> None:
         profile.touch(profile.updated_at)
-        self._profile_json.write_text(profile.model_dump_json(indent=2))
-        self._profile_md.write_text(profile.to_markdown())
+        self._profile_json.write_text(profile.model_dump_json(indent=2), encoding="utf-8")
+        self._profile_md.write_text(profile.to_markdown(), encoding="utf-8")
         self._write_profile_section_summary(profile)
         self._write_root_readme()
         self._log_change("profile", "update", profile.id)
@@ -175,12 +175,12 @@ class L2Wiki:
         source = self._preferences_json if self._preferences_json.exists() else self._legacy_preferences_json
         if not source.exists():
             return None
-        return PreferenceMemory.model_validate_json(source.read_text())
+        return PreferenceMemory.model_validate_json(source.read_text(encoding="utf-8"))
 
     def save_preferences(self, prefs: PreferenceMemory) -> None:
         prefs.touch(prefs.updated_at)
-        self._preferences_json.write_text(prefs.model_dump_json(indent=2))
-        self._preferences_md.write_text(prefs.to_markdown())
+        self._preferences_json.write_text(prefs.model_dump_json(indent=2), encoding="utf-8")
+        self._preferences_md.write_text(prefs.to_markdown(), encoding="utf-8")
         self._write_preferences_section_summary(prefs)
         self._write_root_readme()
         self._log_change("preferences", "update", prefs.id)
@@ -195,14 +195,14 @@ class L2Wiki:
         source = p / "project.json" if (p / "project.json").exists() else legacy.with_suffix(".json")
         if not source.exists():
             return None
-        return ProjectMemory.model_validate_json(source.read_text())
+        return ProjectMemory.model_validate_json(source.read_text(encoding="utf-8"))
 
     def list_projects(self) -> list[ProjectMemory]:
         projects = []
         seen_paths: set[Path] = set()
         for f in (self.wiki_dir / "projects").glob("*/project.json"):
             try:
-                projects.append(ProjectMemory.model_validate_json(f.read_text()))
+                projects.append(ProjectMemory.model_validate_json(f.read_text(encoding="utf-8")))
                 seen_paths.add(f)
             except Exception:
                 pass
@@ -210,7 +210,7 @@ class L2Wiki:
             if f in seen_paths:
                 continue
             try:
-                projects.append(ProjectMemory.model_validate_json(f.read_text()))
+                projects.append(ProjectMemory.model_validate_json(f.read_text(encoding="utf-8")))
             except Exception:
                 pass
         return projects
@@ -219,8 +219,8 @@ class L2Wiki:
         project.touch(project.updated_at)
         p = self._project_path(project.project_name)
         p.mkdir(parents=True, exist_ok=True)
-        (p / "project.json").write_text(project.model_dump_json(indent=2))
-        (p / "project.md").write_text(project.to_markdown())
+        (p / "project.json").write_text(project.model_dump_json(indent=2), encoding="utf-8")
+        (p / "project.md").write_text(project.to_markdown(), encoding="utf-8")
         self._write_projects_index()
         self._write_root_readme()
         self._log_change("project", "update", project.project_name)
@@ -241,16 +241,16 @@ class L2Wiki:
         source = self._workflows_json if self._workflows_json.exists() else self._legacy_workflows_json
         if not source.exists():
             return []
-        data = json.loads(source.read_text())
+        data = json.loads(source.read_text(encoding="utf-8"))
         return [WorkflowMemory.model_validate(w) for w in data]
 
     def save_workflows(self, workflows: list[WorkflowMemory]) -> None:
         for w in workflows:
             w.touch(w.updated_at)
         data = [w.model_dump() for w in workflows]
-        self._workflows_json.write_text(json.dumps(data, indent=2, default=str))
+        self._workflows_json.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
         md_lines = [w.to_markdown() for w in workflows]
-        self._workflows_md.write_text("\n\n---\n\n".join(md_lines))
+        self._workflows_md.write_text("\n\n---\n\n".join(md_lines), encoding="utf-8")
         self._write_root_readme()
         self._log_change("workflows", "update", "all")
 
@@ -263,15 +263,15 @@ class L2Wiki:
         if not episode.episode_id:
             episode.episode_id = str(uuid.uuid4())[:8]
         base = self.wiki_dir / "episodes" / episode.episode_id
-        base.with_suffix(".json").write_text(episode.model_dump_json(indent=2, exclude=None))
-        base.with_suffix(".md").write_text(episode.to_markdown())
+        base.with_suffix(".json").write_text(episode.model_dump_json(indent=2, exclude=None), encoding="utf-8")
+        base.with_suffix(".md").write_text(episode.to_markdown(), encoding="utf-8")
         self._log_change("episode", "create", episode.episode_id)
 
     def list_episodes(self, project: str = "") -> list[EpisodicMemory]:
         episodes = []
         for f in (self.wiki_dir / "episodes").glob("*.json"):
             try:
-                ep = EpisodicMemory.model_validate_json(f.read_text())
+                ep = EpisodicMemory.model_validate_json(f.read_text(encoding="utf-8"))
                 if not project or ep.related_project == project:
                     episodes.append(ep)
             except Exception:
@@ -296,7 +296,7 @@ class L2Wiki:
     def change_history(self, limit: int = 50) -> list[dict]:
         if not self._change_log.exists():
             return []
-        lines = self._change_log.read_text().splitlines()
+        lines = self._change_log.read_text(encoding="utf-8").splitlines()
         entries = []
         for line in lines[-limit:]:
             try:
@@ -318,7 +318,7 @@ class L2Wiki:
             "workflow_count": len(self.load_workflows()),
             "episode_count": len(list((self.wiki_dir / "episodes").glob("*.json"))),
         }
-        self._index_json.write_text(json.dumps(index, indent=2))
+        self._index_json.write_text(json.dumps(index, indent=2), encoding="utf-8")
         profile = self.load_profile()
         if profile:
             self._write_profile_section_summary(profile)
@@ -332,7 +332,7 @@ class L2Wiki:
     def get_index(self) -> dict:
         if not self._index_json.exists():
             return self.rebuild_index()
-        return json.loads(self._index_json.read_text())
+        return json.loads(self._index_json.read_text(encoding="utf-8"))
 
     # ------------------------------------------------------------------
     # Human-facing summaries

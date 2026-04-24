@@ -1,224 +1,183 @@
 # Memory Assistant
 
-[中文文档](README_zh.md)
+[中文说明](README_zh.md)
 
-A Chrome extension that automatically captures AI conversations, builds a two-layer memory system (episodic + persistent), and lets you inject or export your memory into any supported platform.
+Memory Assistant is a Chrome extension plus a local FastAPI backend for capturing AI conversations, organizing them into structured long-term memory, and moving that memory between platforms.
 
-## Supported platforms
+The current repository has three cooperating parts:
 
-| Platform | Domain |
-|---|---|
-| ChatGPT | chatgpt.com / chat.openai.com |
-| Google Gemini | gemini.google.com |
-| DeepSeek | chat.deepseek.com |
-| Doubao (豆包) | www.doubao.com |
+- `popup/`, `content/`, `background/`: the Chrome extension UI, page integration, and background sync logic.
+- `backend_service/`: the local HTTP service used by the extension.
+- `llm_memory_transferor/`: the Python memory pipeline that builds and updates structured memory.
 
----
+## What It Can Do
 
-## Memory architecture
+- Capture conversations from supported AI sites such as ChatGPT, Gemini, DeepSeek, and Doubao.
+- Import the current conversation into the local memory store.
+- Ask the current platform to report its saved memory, custom instructions, agent config, and available skills, then store that snapshot locally.
+- Rebuild structured memory from raw conversations.
+- Maintain incremental memory updates when `Sync Memory` is enabled.
+- Export selected memory sections as a package.
+- Inject exported memory or selected skills into the current session.
+- Manage both personal skills and recommended skills from the backend catalog.
 
-The extension organises memory in two layers:
+## Current Product Flow
 
-**Episodic memory** — a structured export of a single conversation: summary, user profile snapshot, active projects, preferences, and workflows observed in that session. Each record has a unique `ep_XXXX` ID and is stored per-conversation. This is the raw evidence layer.
+1. The extension captures raw conversations or imports them manually.
+2. Raw chats are stored under the local memory root.
+3. `Organize Memory` calls `POST /api/memory/organize`.
+4. The backend uses `MemoryBuilder` to rebuild:
+   - episodes
+   - profile
+   - preferences
+   - projects
+   - workflows
+5. The backend distills long-term persistent nodes into `interest_discoveries/`.
+6. If realtime memory sync is enabled, new rounds can also trigger incremental updates through `MemoryUpdater` and the background memory engine.
 
-**Persistent nodes** — cross-session patterns distilled from multiple episodic records by DeepSeek. Each node has a type (`preference`, `profile`, `workflow`, `topic`, `platform`), a confidence level (`low` → `medium` → `high` based on how many episodes support it), and back-links to the episodes that contributed to it. These are what you inject or export when moving to a new platform.
+## Popup Views
 
----
+### Home
 
-## Installation
+- `Sync Conversation`: turns background capture on or off.
+- `Migrate`: opens memory selection, organize, export, and inject actions.
+- `Settings`: configures backend URL, API key, storage path, and realtime memory sync.
+- `Skill`: manages saved skills, recommended skills, export, and injection.
 
-### 1. Get a DeepSeek API key
+### Migrate
 
-Sign up at [platform.deepseek.com](https://platform.deepseek.com) and create an API key. This is used to distill memories in the background.
+- `Organize Memory`: rebuilds structured memory from local raw conversations.
+- `Add Current Conversation`: imports the active chat page into the backend.
+- `Add Platform Memory`: captures the platform's saved memory/custom instructions/agent config/skills and imports that snapshot.
+- `Export`: exports the selected memory package.
+- `Inject`: injects the selected package into the current AI session.
 
-### 2. Load the extension in Chrome
+### Settings
 
-1. Open Chrome and go to `chrome://extensions/`
-2. Enable **Developer mode** (toggle in the top-right corner)
-3. Click **Load unpacked**
-4. Select the `memory_assistant` folder
-5. The extension icon will appear in your toolbar
+- Backend URL
+- API key
+- Local storage directory
+- Realtime memory update toggle
+- History import for `json/jsonl/md/txt`
+- Temporary cache cleanup
 
-### 3. First-time setup
+## Local Backend
 
-1. Click the extension icon to open the popup
-2. Click **API Key** (top-right pill button) → enter your DeepSeek API key → click **保存**
-3. Click **选择目录** in the directory badge → choose a local folder where memory files will be saved
-4. The badge will display the folder name and the central **同步** button becomes active
+The extension talks to a local FastAPI service. Main endpoints currently include:
 
----
+- `GET /api/health`
+- `GET/POST /api/settings`
+- `POST /api/settings/test-connection`
+- `GET /api/summary`
+- `GET /api/sync/status`
+- `POST /api/sync/toggle`
+- `POST /api/conversations/current/import`
+- `POST /api/platform-memory/import`
+- `POST /api/memory/organize`
+- `GET /api/memory/categories`
+- `GET /api/memory/items`
+- `POST /api/export/package`
+- `POST /api/inject/package`
+- `GET /api/skills/my`
+- `GET /api/skills/recommended`
+- `POST /api/skills/save`
+- `POST /api/skills/export`
+- `POST /api/skills/delete`
+- `POST /api/skills/inject`
+- `POST /api/import/history`
+- `POST /api/cache/clear`
+- `GET /api/jobs/{job_id}`
 
-## Interface
+Start the backend from the repository root:
 
-```
-┌─────────────────────────────────────────┐
-│  Memory Assistant              [API Key] │  ← header
-├─────────────────────────────────────────┤
-│                                         │
-│            ╭ ─ ─ ─ ─ ─ ╮               │
-│           │   ↺   同步   │              │  ← main sync button
-│            ╰ ─ ─ ─ ─ ─ ╯               │    (disabled until dir selected)
-│                                         │
-│     📁  folder-name  [更换]             │  ← directory badge + select button
-│                                         │
-│   ┌─────────────────────────────────┐   │
-│   │  🕐  保持更新         ◯        │   │  ← toggles card
-│   │  ⚡  实时更新         ◯        │   │
-│   └─────────────────────────────────┘   │
-│                                         │
-│   ┌── 导出并保存记忆 ────────────────┐  │  ← export current conversation
-│   └──────────────────────────────────┘  │
-├─────────────────────────────────────────┤
-│  导入历史 │ 重建节点 │ 整理节点 │ 按标签导入 │  ← footer
-└─────────────────────────────────────────┘
-```
-
-**同步** (circle) — Flush browser storage to your local folder and extract episodes from any unprocessed conversations. Disabled until a directory is selected.
-
-**选择目录 / 更换** — Pick or change the local folder. Appears inside the directory badge.
-
-**保持更新** — Capture every conversation on supported platforms in the background.
-
-**实时更新** — After each AI reply, automatically call DeepSeek to update your memory. Requires 保持更新 to be on.
-
-**导出并保存记忆** — Send a structured extraction prompt to the current AI, then have DeepSeek update your persistent nodes from the reply.
-
-**Footer links:**
-- **导入历史** — Import a ChatGPT / DeepSeek export file
-- **重建节点** — Distill all unprocessed episodes into persistent nodes
-- **整理节点** — Merge semantically overlapping nodes
-- **按标签导入** — Browse and select persistent nodes to inject or export
-
----
-
-## Usage
-
-### Auto-capture (recommended)
-
-The extension can silently capture and process every conversation in the background.
-
-1. Click the extension icon → toggle on **保持更新**
-2. (Optional) Toggle on **实时更新** for per-round memory updates via DeepSeek
-3. Chat normally — conversations are captured automatically
-4. Click **同步** at any time to flush to disk and extract episodes
-
-### Build memory from history
-
-Import an existing ChatGPT / DeepSeek conversation export in one go.
-
-1. Export your history
-   - **ChatGPT**: Settings → Data controls → Export data → download ZIP → unzip → use `conversations.json`
-   - **DeepSeek**: use the exported file directly
-2. Click the extension icon → footer **导入历史** → select the file
-3. Conversations are parsed and episode extraction starts automatically
-4. Processing runs in batches of 10. If more remain, the status bar shows "还有 N 条待提取" — click **同步** to continue
-5. (Optional) Click **重建节点** to distill episodes into persistent nodes; click **整理节点** to merge overlapping nodes
-
----
-
-### Sync to files
-
-Click the **同步** button (center circle) to flush all memory from browser storage to your local folder. Duplicate conversation rounds are removed automatically.
-
-If your DeepSeek API key is configured, clicking 同步 also extracts episodes from conversations captured while **实时更新** was off — no need to re-enable it.
-
-**Batch processing:** Each sync processes at most **10 conversations** at a time. If there are more, the status area will show "还有 N 条对话待提取，再次点击同步继续".
-
-Files written:
-
-```
-<your chosen directory>/
-├── profile.json          # who you are
-├── preferences.json      # how you like responses
-├── workflows.json        # recurring task patterns
-├── projects/
-│   └── {project}.json    # per-project notes and decisions
-├── episodes/
-│   └── {id}.json         # per-conversation memory snapshots
-├── raw/
-│   └── {platform}/
-│       └── {chatId}.json # raw captured conversation rounds
-└── js_persistent_nodes.json  # cross-session distilled patterns
+```bash
+pip install -r backend_service/requirements.txt
+uvicorn backend_service.app:app --host 127.0.0.1 --port 8765 --reload
 ```
 
----
+Recommended backend URL:
 
-### Memory management & export
+```text
+http://127.0.0.1:8765
+```
 
-Click **按标签导入** in the footer to open the node panel.
+## Default LLM Settings
 
-#### Inject into current conversation
+The backend defaults are:
 
-Select nodes → choose a target platform → click **注入当前对话**: the extension uploads a memory package (selected nodes + supporting episode evidence) to the current AI and sends a cold-start prompt.
+- `api_provider = openai_compat`
+- `api_base_url = https://api.deepseek.com/v1`
+- `api_model = deepseek-chat`
 
-#### Export to file (cross-platform migration)
+By default, organize and incremental updates use the backend LLM configuration above. Platform memory collection is handled through the current AI page.
 
-Select nodes → choose a target platform → click **导出文件**: generates a `.txt` file containing your memory data and a cold-start prompt formatted for the chosen platform. Paste it into any platform's system prompt or custom instructions field.
+## Active Prompt Files
 
-| Target | Format |
-|---|---|
-| Claude | XML-tagged (`<memory_package>`) |
-| ChatGPT | Instructions + data separator |
-| DeepSeek | Same as above |
-| Generic | Plain text, works with any system prompt field |
+Prompt files now live in `prompts/` and are used directly by the extension, backend, and Python pipeline.
 
-#### Maintain nodes
-
-- **重建节点**: Scans all episodes not yet distilled into persistent nodes and processes them one by one. Use this after accumulating many conversations with **实时更新** off.
-- **整理节点**: Asks DeepSeek to find and merge semantically overlapping nodes.
-
----
-
-## Customizing prompts
-
-All prompts live as plain-text files in the `prompts/` directory. Edit them directly — no JS changes or build step required.
-
-| File | Sent to | Triggered by |
+| File | Used by | Purpose |
 |---|---|---|
-| `prompts/persistent_node_distill_bg.txt` | DeepSeek API (Service Worker) — compact, self-contained | 实时更新 per-round / 同步 |
-| `prompts/delta_extract.txt` | DeepSeek API (Service Worker) — incremental delta per round | 实时更新 per-round / 同步 |
-| `prompts/cold_start.txt` | Target AI | 注入当前对话 / 导出文件 |
-| `prompts/platform_memory_collect.txt` | Target AI (current page) | 加入平台记忆 |
+| `prompts/cold_start.txt` | popup injection flow | bootstrap prompt for memory injection |
+| `prompts/platform_memory_collect.txt` | popup platform-memory flow | collect saved memory and agent configuration from the current platform |
+| `prompts/episode_system.txt` | `MemoryBuilder` | episode extraction during organize |
+| `prompts/profile_system.txt` | `MemoryBuilder` | profile rebuild |
+| `prompts/preference_system.txt` | `MemoryBuilder` | preference rebuild |
+| `prompts/projects_system.txt` | `MemoryBuilder` | project rebuild |
+| `prompts/workflows_system.txt` | `MemoryBuilder` | workflow rebuild |
+| `prompts/delta_system.txt` | `MemoryUpdater` and background engine | incremental memory update |
+| `prompts/persistent_node_distill_bg.txt` | backend and background engine | persistent-node distillation |
+| `prompts/schema.txt` | backend/background persistent-node flow | schema context |
 
-To apply edits: save the file → go to `chrome://extensions/` → click the reload icon → reopen the popup.
+## Memory Store Layout
 
-**Notes:**
-- `persistent_node_distill_bg.txt` is the active persistent-node maintenance prompt used by the Service Worker / local backend.
-- `delta_extract.txt` is the active incremental update prompt used for per-round memory deltas.
-- `platform_memory_collect.txt` is the prompt used when collecting saved memory / agent config / skills from the current AI page.
+When `storage_path` is configured, the backend writes there. Otherwise it uses `backend_service/.state/wiki/`.
 
----
+The active memory root currently contains directories such as:
 
-## Typical workflow
+- `raw/`: imported raw conversations
+- `platform_memory/`: snapshots of saved memory or custom instructions from external platforms
+- `episodes/`: conversation-level episodic memories
+- `profile/`: profile memory
+- `preferences/`: preference memory
+- `projects/`: project memory
+- `workflows/`: workflow memory
+- `skills/`: saved skills
+- `interest_discoveries/`: distilled persistent nodes
+- `metadata/`: indexes, organize state, display texts
 
+The checked-in sample memory root in this repo is `llm_mem4/`.
+
+## Repository Structure
+
+- `popup/`: popup HTML/CSS/JS
+- `content/`: page-side collection and injection logic
+- `background/`: service worker and incremental memory engine
+- `backend_service/`: local FastAPI backend and recommended-skill catalog
+- `prompts/`: editable runtime prompts
+- `llm_memory_transferor/`: Python library, CLI, exporters, tests, and evaluation scripts
+- `llm_mem4/`: example memory store generated by the system
+
+## Quick Start
+
+1. Load the extension in Chrome from the repository root.
+2. Start the backend:
+
+```bash
+uvicorn backend_service.app:app --host 127.0.0.1 --port 8765 --reload
 ```
-Build from history
-  └─ Footer → 导入历史 → select export file → episodes extracted automatically
-  └─ Click 同步 (circle) → files written to your directory
-  └─ (Optional) Footer → 重建节点 → distill episodes into persistent nodes
-  └─ (Optional) Footer → 整理节点 → clean up overlapping nodes
 
-Live maintenance
-  └─ 保持更新 + 实时更新 ON → memory builds automatically
-  └─ After each session, click 同步 → files updated
+3. Open the popup and configure:
+   - backend URL
+   - API key
+   - storage directory
+4. Use `Add Current Conversation`, `Add Platform Memory`, or `Import History` to add source data.
+5. Click `Organize Memory` to build structured memory.
+6. Select memory sections and use `Export` or `Inject`.
+7. Use the `Skill` page to save, export, or inject skills.
 
-Starting a new chat on any platform
-  └─ Footer → 按标签导入 → select nodes → choose target platform
-  └─ 注入当前对话: inject directly into the current AI session
-  └─ 导出文件: generate a .txt file to paste into any platform
-```
+## Notes
 
----
-
-## Troubleshooting
-
-| Problem | Fix |
-|---|---|
-| Capture doesn't trigger | Reload the page after enabling 保持更新; the extension needs to inject into the page |
-| Buttons don't respond | The AI platform may have updated its UI; reload the extension and try again |
-| "API Key 未配置" error | Click **API Key** (top-right) and re-enter your DeepSeek API key |
-| Directory permission denied | Click **更换** in the directory badge; Chrome may have revoked the grant after a browser restart |
-| DeepSeek API error | Check that your key is valid and has sufficient balance at platform.deepseek.com |
-| Duplicate rounds in raw files | Click **同步** — it automatically deduplicates rounds |
-| No episodes generated after sync | Make sure your DeepSeek API key is configured; episode extraction runs automatically on sync |
-| Episodes folder looks stale after manual deletion | Deleting files does not clear browser storage. Open the Service Worker console (`chrome://extensions/` → Service Worker → 检查) and run reset commands, then click 同步 again |
+- Supported host matching in the popup currently includes `chatgpt.com`, `chat.openai.com`, `gemini.google.com`, `chat.deepseek.com`, and `www.doubao.com`.
+- The popup shows a selectable command modal for starting the backend instead of a native alert.
+- The project contains several Windows-oriented UTF-8 fixes in the popup, backend, and wiki I/O paths.
+- If a popup action fails, inspect the popup console from `chrome://extensions/`.
