@@ -34,11 +34,17 @@ Field guidance:
 - project_goal: what the project is trying to achieve.
 - current_stage: current phase or status.
 - key_terms: project-specific vocabulary.
-- finished_decisions: already-made project decisions.
+- finished_decisions: project decisions explicitly made, accepted, or confirmed by the user.
 - unresolved_questions: open issues that still require work.
 - relevant_entities: important papers, systems, tools, collaborators, datasets, or targets that matter to the project.
-- important_constraints: real constraints, not generic comments.
+- important_constraints: real constraints stated or confirmed by the user, not generic comments.
 - next_actions: concrete next steps.
+
+Evidence boundary rules:
+- Assistant-only recommendations are not user decisions.
+- If the assistant proposes a direction, positioning, constraint, architecture, benchmark, metric, or roadmap and the user has not accepted it, do NOT put it in `finished_decisions` or `important_constraints`.
+- Such assistant suggestions may be summarized as `next_actions` or `unresolved_questions`, for example "确认是否采纳某建议".
+- `project_goal` should be grounded in the user's stated intent. Assistant-suggested refinements can only be included in the goal after user acceptance.
 
 Exclusion rules:
 - Do NOT create separate projects for every paper, algorithm, benchmark, dataset, or tool.

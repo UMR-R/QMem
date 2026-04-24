@@ -38,7 +38,8 @@ Rules:
 - title: 5-10 words.
 - topics_covered: distinct topics in the referenced turn.
 - summary: 1-3 sentences describing the turn's main task, what was discussed, and the outcome.
-- key_decisions: concrete decisions or conclusions reached in the referenced turn.
+- key_decisions: concrete decisions or conclusions explicitly made, accepted, or confirmed by the user in the referenced turn.
+- Do NOT put assistant-only recommendations, proposed directions, or speculative suggestions into key_decisions unless the user explicitly accepts them in that turn. Mention assistant suggestions in summary instead.
 - open_issues: questions, blockers, or follow-up tasks that remain unresolved.
 - relates_to_profile: true only if the turn reveals stable background facts about the user.
 - relates_to_preferences: true if the turn reveals stable response/interaction preferences OR durable personal interests, tastes, selection criteria, or recurring personal-choice signals.
