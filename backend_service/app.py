@@ -69,7 +69,8 @@ from llm_memory_transferor.layers.l0_raw import L0RawLayer, RawConversation, Raw
 from llm_memory_transferor.layers.l1_signals import L1SignalLayer  # noqa: E402
 from llm_memory_transferor.layers.l2_wiki import L2Wiki  # noqa: E402
 from llm_memory_transferor.layers.l3_schema import L3Schema  # noqa: E402
-from llm_memory_transferor.models import EpisodicMemory, ProjectMemory, WorkflowMemory  # noqa: E402
+from llm_memory_transferor.models import EpisodicMemory, PreferenceMemory, ProfileMemory, ProjectMemory, WorkflowMemory  # noqa: E402
+from llm_memory_transferor.models.base import MemoryBase  # noqa: E402
 from llm_memory_transferor.processors import MemoryBuilder, MemoryUpdater  # noqa: E402
 from llm_memory_transferor.utils.llm_client import LLMClient  # noqa: E402
 
@@ -84,8 +85,9 @@ DEFAULT_SETTINGS = {
     "storage_path": "",
     "keep_updated": False,
     "realtime_update": False,
+    "detailed_injection": False,
     "last_sync_at": None,
-    "backend_url": "http://127.0.0.1:8765",
+    "backend_url": "",
     "saved_skill_ids": [],
     "dismissed_skill_ids": [],
 }
@@ -309,6 +311,7 @@ class SettingsResponse(BaseModel):
     storage_path: str
     keep_updated: bool
     realtime_update: bool
+    detailed_injection: bool
     last_sync_at: str | None
     backend_url: str
 
@@ -321,7 +324,8 @@ class SettingsUpdate(BaseModel):
     storage_path: str = ""
     keep_updated: bool = False
     realtime_update: bool = False
-    backend_url: str = "http://127.0.0.1:8765"
+    detailed_injection: bool = False
+    backend_url: str = ""
 
 
 class ConnectionTestRequest(BaseModel):
@@ -395,6 +399,7 @@ class ExportPackageRequest(SelectedIdsRequest):
 
 class InjectPackageRequest(SelectedIdsRequest):
     target_platform: str = "chatgpt"
+    detailed_injection: bool = False
 
 
 class SaveSkillsRequest(BaseModel):
@@ -1873,6 +1878,7 @@ def build_platform_memory_record(payload: PlatformMemoryImportRequest) -> dict[s
     summary = next((str(item).strip() for item in summary_candidates if str(item or "").strip()), "")
 
     return {
+        "record_id": "",
         "platform": payload.platform,
         "url": payload.url,
         "title": payload.title,
@@ -2003,6 +2009,7 @@ def _platform_memory_match_score(existing: dict[str, Any], current: dict[str, An
 
 def _merge_platform_memory_records(primary: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
     merged = dict(primary)
+    merged["record_id"] = primary.get("record_id") or incoming.get("record_id") or ""
     merged["platform"] = primary.get("platform") or incoming.get("platform", "")
     merged["url"] = primary.get("url") or incoming.get("url", "")
     merged["title"] = primary.get("title") or incoming.get("title", "")
@@ -2097,6 +2104,7 @@ def consolidate_platform_memory(settings: dict[str, Any]) -> dict[str, int]:
         current = read_json_file(path)
         if not isinstance(current, dict):
             continue
+        current.setdefault("record_id", path.stem)
         current.setdefault("platform", "")
         current.setdefault("memory", [])
         current["signature"] = platform_memory_signature(current)
@@ -2118,6 +2126,7 @@ def consolidate_platform_memory(settings: dict[str, Any]) -> dict[str, int]:
         existing = read_json_file(matched_path)
         if not isinstance(existing, dict):
             continue
+        existing.setdefault("record_id", matched_path.stem)
         merged = _merge_platform_memory_records(existing, current)
         matched_path.write_text(json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
         if path != matched_path and path.exists():
@@ -2400,6 +2409,30 @@ def _looks_like_reference_analysis_project(project: ProjectMemory) -> bool:
     return False
 
 
+def _looks_like_user_owned_build_project(project: ProjectMemory) -> bool:
+    text_parts = [
+        project.project_name,
+        project.project_goal,
+        project.current_stage,
+        *(entry.text for entry in project.next_actions[:4]),
+        *(entry.text for entry in project.unresolved_questions[:4]),
+        *(entry.text for entry in project.finished_decisions[:4]),
+    ]
+    haystack = " ".join(str(part or "").lower() for part in text_parts)
+    owner_intent_tokens = {
+        "build", "building", "create", "creating", "develop", "developing", "launch", "ship",
+        "submit", "submission", "mvp", "prototype", "plan", "roadmap",
+        "想做", "希望做", "要做", "准备做", "构建", "搭建", "开发", "实现", "推进", "投稿", "平台", "系统",
+    }
+    project_shape_tokens = {
+        "platform", "framework", "system", "project", "evaluation", "benchmark",
+        "平台", "框架", "系统", "项目", "评测", "统一评测",
+    }
+    has_owner_intent = any(token in haystack for token in owner_intent_tokens)
+    has_project_shape = any(token in haystack for token in project_shape_tokens)
+    return has_owner_intent and has_project_shape
+
+
 def _looks_like_stable_project(project: ProjectMemory) -> bool:
     episode_count = len(set(project.source_episode_ids))
     signal_count = _project_signal_count(project)
@@ -2433,7 +2466,7 @@ def _looks_like_stable_project(project: ProjectMemory) -> bool:
     if episode_count < 2 and token_hits >= 2 and signal_count < 3:
         return False
 
-    if _looks_like_reference_analysis_project(project) and signal_count < 4:
+    if _looks_like_reference_analysis_project(project) and not _looks_like_user_owned_build_project(project) and signal_count < 4:
         return False
 
     return True
@@ -2527,8 +2560,446 @@ def load_platform_memory_records(settings: dict[str, Any]) -> list[dict[str, Any
             continue
         data = read_json_file(path)
         if isinstance(data, dict):
+            data.setdefault("record_id", path.stem)
             records.append(data)
     return records
+
+
+def _load_platform_memory_record_map(settings: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    record_map: dict[str, dict[str, Any]] = {}
+    for record in load_platform_memory_records(settings):
+        record_id = str(record.get("record_id") or record.get("signature") or "").strip()
+        if not record_id:
+            continue
+        record_map[record_id] = record
+    return record_map
+
+
+def _normalize_merge_text(value: Any) -> str:
+    return " ".join(str(value or "").strip().split())
+
+
+def _extend_unique(target: list[str], values: list[str]) -> list[str]:
+    seen = {item.strip().lower() for item in target if item.strip()}
+    for value in values:
+        clean = _normalize_merge_text(value)
+        if not clean:
+            continue
+        lowered = clean.lower()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        target.append(clean)
+    return target
+
+
+_L1_LANGUAGE_VARIANTS = {
+    "中文": "中文",
+    "汉语": "中文",
+    "chinese": "中文",
+    "mandarin": "中文",
+    "英文": "英文",
+    "英语": "英文",
+    "english": "英文",
+    "日文": "日文",
+    "日语": "日文",
+    "japanese": "日文",
+}
+
+_L1_ROLE_PATTERNS = [
+    (r"\b(student|phd student|graduate student|undergraduate|postdoc|researcher|professor|teacher|engineer|developer|product manager|designer)\b", {
+        "student": "学生",
+        "phd student": "博士生",
+        "graduate student": "研究生",
+        "undergraduate": "本科生",
+        "postdoc": "博士后",
+        "researcher": "研究者",
+        "professor": "教授",
+        "teacher": "老师",
+        "engineer": "工程师",
+        "developer": "开发者",
+        "product manager": "产品经理",
+        "designer": "设计师",
+    }),
+    (r"(学生|研究生|博士生|老师|教授|研究员|工程师|开发者|产品经理|设计师)", None),
+]
+
+
+def _extract_languages_from_text(text: str) -> list[str]:
+    lowered = str(text or "").lower()
+    languages: list[str] = []
+    for needle, label in _L1_LANGUAGE_VARIANTS.items():
+        if needle in lowered or needle in text:
+            languages.append(label)
+    return _unique_string_list(languages, max_items=6)
+
+
+def _extract_language_preference(text: str) -> str:
+    lowered = str(text or "").lower()
+    preference_markers = [
+        "请用", "使用", "回答用", "reply in", "respond in", "answer in", "write in", "prefer responses in",
+    ]
+    if any(marker in text for marker in ["请用中文", "使用中文", "回答用中文"]) or (
+        any(marker in lowered for marker in ["reply in chinese", "respond in chinese", "answer in chinese", "write in chinese"])
+    ):
+        return "中文"
+    if any(marker in text for marker in ["请用英文", "使用英文", "回答用英文"]) or (
+        any(marker in lowered for marker in ["reply in english", "respond in english", "answer in english", "write in english"])
+    ):
+        return "英文"
+    if any(marker in lowered for marker in preference_markers):
+        langs = _extract_languages_from_text(text)
+        return langs[0] if langs else ""
+    return ""
+
+
+def _extract_role_identity(text: str) -> str:
+    raw_text = str(text or "")
+    lowered = raw_text.lower()
+    for pattern, mapping in _L1_ROLE_PATTERNS:
+        match = re.search(pattern, lowered if mapping else raw_text, re.IGNORECASE)
+        if not match:
+            continue
+        role = match.group(1).strip()
+        if mapping:
+            return mapping.get(role.lower(), role)
+        return role
+    return ""
+
+
+def _extract_domain_background(text: str) -> list[str]:
+    raw_text = _normalize_merge_text(text)
+    lowered = raw_text.lower()
+    patterns = [
+        r"(?:background in|research in|research on|work on|focus on|domain[:：]|领域[:：]|研究方向[:：]|专业方向[:：])\s*([A-Za-z0-9 \-/+,&]+)",
+        r"(?:做|研究|方向是|领域是)([A-Za-z\u4e00-\u9fff0-9 \-/+,&]{2,40})",
+    ]
+    values: list[str] = []
+    for pattern in patterns:
+        for match in re.findall(pattern, raw_text, flags=re.IGNORECASE):
+            candidate = _normalize_merge_text(match)
+            if not candidate:
+                continue
+            candidate = re.split(r"[。；;,.，]", candidate)[0].strip()
+            if 2 <= len(candidate) <= 40:
+                values.append(candidate)
+    return _unique_string_list(values, max_items=6)
+
+
+def _extract_response_style_claims(text: str) -> dict[str, list[str] | str]:
+    raw_text = _normalize_merge_text(text)
+    lowered = raw_text.lower()
+    claims: dict[str, list[str] | str] = {
+        "style_preference": [],
+        "formatting_constraints": [],
+        "revision_preference": [],
+        "response_granularity": "",
+    }
+    if not raw_text or not _looks_like_response_style_text(raw_text):
+        return claims
+
+    style_terms = {
+        "简洁": "简洁",
+        "concise": "简洁",
+        "详细": "详细",
+        "detailed": "详细",
+        "严谨": "严谨",
+        "formal": "正式",
+        "professional": "专业",
+        "活泼": "活泼",
+        "casual": "自然",
+    }
+    formatting_terms = {
+        "分点": "分点表达",
+        "bullet": "分点表达",
+        "bullets": "分点表达",
+        "列表": "列表形式",
+        "numbered": "编号列表",
+        "表格": "表格形式",
+        "table": "表格形式",
+        "结论先行": "结论先行",
+        "步骤化": "步骤化说明",
+        "step-by-step": "步骤化说明",
+    }
+    revision_terms = {
+        "不要太长": "避免冗长",
+        "shorter": "避免冗长",
+        "精炼": "精炼表达",
+        "polish": "适度润色",
+    }
+    for keyword, mapped in style_terms.items():
+        if keyword in lowered or keyword in raw_text:
+            claims["style_preference"] = _extend_unique(list(claims["style_preference"]), [mapped])
+    for keyword, mapped in formatting_terms.items():
+        if keyword in lowered or keyword in raw_text:
+            claims["formatting_constraints"] = _extend_unique(list(claims["formatting_constraints"]), [mapped])
+    for keyword, mapped in revision_terms.items():
+        if keyword in lowered or keyword in raw_text:
+            claims["revision_preference"] = _extend_unique(list(claims["revision_preference"]), [mapped])
+
+    if any(keyword in lowered or keyword in raw_text for keyword in ["详细", "detailed", "step-by-step"]):
+        claims["response_granularity"] = "detailed"
+    elif any(keyword in lowered or keyword in raw_text for keyword in ["简洁", "concise", "short"]):
+        claims["response_granularity"] = "concise"
+    return claims
+
+
+def _record_excerpt(record: dict[str, Any], fallback: str = "") -> str:
+    for value in [
+        record.get("summary", ""),
+        next(iter(record.get("saved_memory") or []), ""),
+        next((item.get("content", "") for item in (record.get("custom_instructions") or []) if isinstance(item, dict)), ""),
+        fallback,
+    ]:
+        text = _normalize_merge_text(value)
+        if text:
+            return text[:160]
+    return ""
+
+
+def _merge_scalar_field_from_l1(
+    obj: MemoryBase,
+    field: str,
+    value: str,
+    record_id: str,
+    excerpt: str,
+) -> None:
+    clean = _normalize_merge_text(value)
+    if not clean:
+        return
+    existing = _normalize_merge_text(getattr(obj, field, ""))
+    if not existing:
+        setattr(obj, field, clean)
+        obj.add_evidence("l1_signal", record_id, excerpt or clean[:100])
+        return
+    if existing.lower() == clean.lower():
+        obj.add_evidence("l1_signal", record_id, excerpt or clean[:100])
+        return
+    obj.record_conflict(field, existing, clean, f"l1_signal:{record_id}")
+
+
+def _merge_list_field_from_l1(
+    obj: MemoryBase,
+    field: str,
+    values: list[str],
+    record_id: str,
+    excerpt: str,
+) -> None:
+    current = list(getattr(obj, field, []) or [])
+    merged = _extend_unique(current[:], values)
+    if merged != current:
+        setattr(obj, field, merged)
+    if values:
+        obj.add_evidence("l1_signal", record_id, excerpt or "；".join(values)[:100])
+
+
+def _merge_l1_claims_into_profile_preferences(
+    settings: dict[str, Any],
+    profile: ProfileMemory,
+    preferences: PreferenceMemory,
+) -> tuple[ProfileMemory, PreferenceMemory]:
+    for record in load_platform_memory_records(settings):
+        record_id = str(record.get("record_id") or record.get("signature") or "").strip()
+        if not record_id:
+            continue
+        textual_units: list[str] = []
+        textual_units.extend(str(item).strip() for item in (record.get("saved_memory") or []) if str(item).strip())
+        textual_units.extend(
+            str(item.get("content") or "").strip()
+            for item in (record.get("custom_instructions") or [])
+            if isinstance(item, dict) and str(item.get("content") or "").strip()
+        )
+        agent = record.get("agent_config") or {}
+        if isinstance(agent, dict):
+            for key in ["description", "instructions"]:
+                value = str(agent.get(key) or "").strip()
+                if value:
+                    textual_units.append(value)
+
+        for unit in textual_units:
+            excerpt = _record_excerpt(record, unit)
+            language_pref = _extract_language_preference(unit)
+            if language_pref:
+                _merge_scalar_field_from_l1(preferences, "language_preference", language_pref, record_id, excerpt)
+
+            languages = _extract_languages_from_text(unit)
+            if languages:
+                _merge_list_field_from_l1(profile, "common_languages", languages, record_id, excerpt)
+
+            role_identity = _extract_role_identity(unit)
+            if role_identity:
+                _merge_scalar_field_from_l1(profile, "role_identity", role_identity, record_id, excerpt)
+
+            domains = _extract_domain_background(unit)
+            if domains:
+                _merge_list_field_from_l1(profile, "domain_background", domains, record_id, excerpt)
+
+            if re.search(r"(?:organization|affiliation|institution|学校|单位|实验室|学院)[:：]?\s*", unit, re.IGNORECASE):
+                organization = re.split(r"[:：]", unit, maxsplit=1)[-1].strip() if ":" in unit or "：" in unit else unit.strip()
+                if organization:
+                    _merge_scalar_field_from_l1(profile, "organization_or_affiliation", organization[:80], record_id, excerpt)
+
+            style_claims = _extract_response_style_claims(unit)
+            if style_claims.get("style_preference"):
+                _merge_list_field_from_l1(
+                    preferences,
+                    "style_preference",
+                    list(style_claims["style_preference"]),
+                    record_id,
+                    excerpt,
+                )
+            if style_claims.get("formatting_constraints"):
+                _merge_list_field_from_l1(
+                    preferences,
+                    "formatting_constraints",
+                    list(style_claims["formatting_constraints"]),
+                    record_id,
+                    excerpt,
+                )
+            if style_claims.get("revision_preference"):
+                _merge_list_field_from_l1(
+                    preferences,
+                    "revision_preference",
+                    list(style_claims["revision_preference"]),
+                    record_id,
+                    excerpt,
+                )
+            if style_claims.get("response_granularity"):
+                _merge_scalar_field_from_l1(
+                    preferences,
+                    "response_granularity",
+                    str(style_claims["response_granularity"]),
+                    record_id,
+                    excerpt,
+                )
+    return profile, preferences
+
+
+def _normalize_primary_task_type(value: str) -> str:
+    text = _canonical_memory_text(value)
+    if not text:
+        return ""
+    synonym_map = [
+        ({"recommend", "recommendation", "suggestion", "推荐", "推荐建议"}, "推荐"),
+        ({"researchplanning", "research planning", "research", "科研规划", "研究规划"}, "科研规划"),
+        ({"projectplanning", "project planning", "planning", "项目规划"}, "项目规划"),
+        ({"comparison", "compare", "analysis", "对比分析", "比较分析"}, "对比分析"),
+        ({"papersummary", "paper summary", "literature", "文献总结", "论文总结"}, "文献总结"),
+    ]
+    compact = text.replace(" ", "")
+    for aliases, label in synonym_map:
+        alias_compact = {alias.replace(" ", "") for alias in aliases}
+        if text in aliases or compact in alias_compact:
+            return label
+    return value.strip()
+
+
+def _infer_primary_task_types(
+    episodes: list[EpisodicMemory],
+    projects: list[ProjectMemory],
+    workflows: list[WorkflowMemory],
+    existing: list[str] | None = None,
+) -> list[str]:
+    scores: Counter[str] = Counter()
+
+    def score_text(text: str, weight: int = 1) -> None:
+        normalized = _canonical_memory_text(text)
+        if not normalized:
+            return
+        research_tokens = {"research", "benchmark", "evaluation", "paper", "experiment", "评测", "研究", "论文", "实验", "基准"}
+        planning_tokens = {"plan", "planning", "roadmap", "mvp", "design", "build", "develop", "项目", "规划", "方案", "设计", "构建", "搭建", "开发"}
+        recommendation_tokens = {"recommend", "recommended", "best", "choose", "fit", "推荐", "适合", "最好", "建议"}
+        comparison_tokens = {"compare", "comparison", "baseline", "survey", "related work", "对比", "比较", "现有工作", "调研"}
+        summary_tokens = {"summary", "summarize", "review", "literature", "总结", "综述", "文献"}
+
+        has_research = any(token in normalized for token in research_tokens)
+        has_planning = any(token in normalized for token in planning_tokens)
+        has_recommendation = any(token in normalized for token in recommendation_tokens)
+        has_comparison = any(token in normalized for token in comparison_tokens)
+        has_summary = any(token in normalized for token in summary_tokens)
+
+        if has_research and has_planning:
+            scores["科研规划"] += 2 * weight
+        elif has_research:
+            scores["科研规划"] += 1 * weight
+
+        if has_planning:
+            scores["项目规划"] += 1 * weight
+
+        if has_recommendation:
+            scores["推荐"] += 1 * weight
+
+        if has_comparison:
+            scores["对比分析"] += 1 * weight
+
+        if has_summary and (has_research or has_comparison):
+            scores["文献总结"] += 1 * weight
+
+    for value in existing or []:
+        normalized = _normalize_primary_task_type(str(value))
+        if normalized:
+            scores[normalized] += 1
+
+    for episode in episodes:
+        score_text(
+            " ".join(
+                [
+                    episode.topic,
+                    episode.summary,
+                    " ".join(episode.topics_covered),
+                    " ".join(episode.key_decisions),
+                    " ".join(episode.open_issues),
+                    " ".join(episode.relates_to_projects),
+                ]
+            ),
+            weight=1,
+        )
+
+    for project in projects:
+        score_text(
+            " ".join(
+                [
+                    project.project_name,
+                    project.project_goal,
+                    project.current_stage,
+                    " ".join(entry.text for entry in project.finished_decisions[:3]),
+                    " ".join(entry.text for entry in project.unresolved_questions[:3]),
+                    " ".join(entry.text for entry in project.next_actions[:3]),
+                ]
+            ),
+            weight=2,
+        )
+
+    for workflow in workflows:
+        score_text(
+            " ".join(
+                [
+                    workflow.workflow_name,
+                    workflow.trigger_condition,
+                    workflow.preferred_artifact_format,
+                    workflow.review_style,
+                    " ".join(workflow.typical_steps[:4]),
+                ]
+            ),
+            weight=1,
+        )
+
+    preferred_order = {
+        "科研规划": 0,
+        "项目规划": 1,
+        "对比分析": 2,
+        "文献总结": 3,
+        "推荐": 4,
+    }
+    ranked = [
+        label
+        for label, score in sorted(
+            scores.items(),
+            key=lambda item: (-item[1], preferred_order.get(item[0], 99), item[0]),
+        )
+        if score >= 2
+    ]
+    return ranked[:5]
 
 
 def _extract_ordered_steps_from_text(text: str) -> list[str]:
@@ -2552,6 +3023,7 @@ def _extract_ordered_steps_from_text(text: str) -> list[str]:
 def _platform_workflows_from_records(settings: dict[str, Any]) -> list[WorkflowMemory]:
     workflows: list[WorkflowMemory] = []
     for record in load_platform_memory_records(settings):
+        record_id = str(record.get("record_id") or record.get("signature") or "platform_memory").strip()
         agent = record.get("agent_config")
         if not isinstance(agent, dict):
             continue
@@ -2574,7 +3046,7 @@ def _platform_workflows_from_records(settings: dict[str, Any]) -> list[WorkflowM
         )
         if not _looks_like_stable_workflow(workflow):
             continue
-        workflow.add_evidence("l1_signal", "platform_memory", str(record.get("summary") or name)[:120])
+        workflow.add_evidence("l1_signal", record_id, str(record.get("summary") or name)[:120])
         workflows.append(workflow)
     return workflows
 
@@ -2892,6 +3364,7 @@ def load_l1_signals(settings: dict[str, Any]) -> tuple[L1SignalLayer, str]:
                     )
                     indexed_files.append(
                         {
+                            "record_id": (target_path if target_path.exists() else path).stem,
                             "file": path.name,
                             "platform": meaningful[0].platform if meaningful else "",
                             "signal_count": len(meaningful),
@@ -3621,6 +4094,14 @@ def raw_conversation_payload(conv: RawConversation) -> dict[str, Any]:
             }
             for msg in conv.messages
         ],
+        "turns": [
+            {
+                "turn_id": turn.turn_id,
+                "conversation_id": turn.conversation_id,
+                "message_ids": list(turn.message_ids or []),
+            }
+            for turn in (conv.turns or [])
+        ],
     }
 
 
@@ -3637,6 +4118,7 @@ def build_fallback_episode(conv: RawConversation, episode_id: str) -> EpisodicMe
         summary=excerpt or "该对话已记录，但自动提取摘要失败。",
         key_decisions=[],
         open_issues=[],
+        turn_refs=[turn.turn_id for turn in (conv.turns or []) if getattr(turn, "turn_id", "")],
         relates_to_profile=False,
         relates_to_preferences=False,
         relates_to_projects=[],
@@ -3843,12 +4325,48 @@ def _extract_snippet_hint_segments(excerpt: str) -> list[str]:
     return [normalized] if len(normalized) >= 12 else []
 
 
+def truncate_text(value: str, max_length: int = 120) -> str:
+    normalized = _normalize_snippet_text(value)
+    if len(normalized) <= max_length:
+        return normalized
+    return f"{normalized[: max(0, max_length - 1)].rstrip()}…"
+
+
+def _turn_payloads_from_message_dicts(conversation_id: str, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    turns: list[dict[str, Any]] = []
+    current_message_ids: list[str] = []
+    for index, msg in enumerate(messages):
+        role = str(msg.get("role") or "").strip().lower()
+        message_id = str(msg.get("id") or f"{conversation_id}_{index}")
+        if role == "user" and current_message_ids:
+            turns.append(
+                {
+                    "turn_id": f"{conversation_id}:turn:{len(turns)}",
+                    "conversation_id": conversation_id,
+                    "message_ids": current_message_ids[:],
+                }
+            )
+            current_message_ids = [message_id]
+        else:
+            current_message_ids.append(message_id)
+    if current_message_ids:
+        turns.append(
+            {
+                "turn_id": f"{conversation_id}:turn:{len(turns)}",
+                "conversation_id": conversation_id,
+                "message_ids": current_message_ids[:],
+            }
+        )
+    return turns
+
+
 def _collect_raw_support_from_episode_ids(
     episodes_dir: Path,
     episode_ids: list[str] | set[str],
-) -> tuple[set[str], dict[str, list[str]]]:
+) -> tuple[set[str], dict[str, list[str]], dict[str, set[str]]]:
     raw_ids: set[str] = set()
     excerpt_hints: dict[str, list[str]] = {}
+    turn_refs: dict[str, set[str]] = {}
     for episode_id in episode_ids:
         ep_id = str(episode_id or "").strip()
         if not ep_id:
@@ -3859,6 +4377,15 @@ def _collect_raw_support_from_episode_ids(
         conv_id = str(episode.get("conv_id") or "").strip()
         if conv_id:
             raw_ids.add(conv_id)
+        for turn_id in episode.get("turn_refs", []) or []:
+            turn_text = str(turn_id or "").strip()
+            if not turn_text:
+                continue
+            turn_conv_id = conv_id or turn_text.split(":turn:", 1)[0]
+            if not turn_conv_id:
+                continue
+            raw_ids.add(turn_conv_id)
+            turn_refs.setdefault(turn_conv_id, set()).add(turn_text)
         for link in episode.get("evidence_links", []) or []:
             if not isinstance(link, dict):
                 continue
@@ -3873,17 +4400,18 @@ def _collect_raw_support_from_episode_ids(
                 excerpt = str(link.get("excerpt") or "").strip()
                 if excerpt:
                     excerpt_hints.setdefault(conv_id, []).append(excerpt)
-    return raw_ids, excerpt_hints
+    return raw_ids, excerpt_hints, turn_refs
 
 
 def _collect_raw_support_from_memory_object(
     memory_obj: Any,
     episodes_dir: Path,
-) -> tuple[set[str], dict[str, list[str]]]:
+) -> tuple[set[str], dict[str, list[str]], dict[str, set[str]]]:
     raw_ids: set[str] = set()
     excerpt_hints: dict[str, list[str]] = {}
+    episode_turn_refs: dict[str, set[str]] = {}
     if memory_obj is None:
-        return raw_ids, excerpt_hints
+        return raw_ids, excerpt_hints, episode_turn_refs
     evidence_links = getattr(memory_obj, "evidence_links", []) or []
     for link in evidence_links:
         source_type = str(getattr(link, "source_type", "") or "").strip().lower()
@@ -3894,11 +4422,26 @@ def _collect_raw_support_from_memory_object(
             if excerpt:
                 excerpt_hints.setdefault(source_id, []).append(excerpt)
     source_episode_ids = getattr(memory_obj, "source_episode_ids", []) or []
-    episode_raw_ids, episode_hints = _collect_raw_support_from_episode_ids(episodes_dir, source_episode_ids)
+    episode_raw_ids, episode_hints, turn_refs = _collect_raw_support_from_episode_ids(episodes_dir, source_episode_ids)
     raw_ids.update(episode_raw_ids)
     for conv_id, hints in episode_hints.items():
         excerpt_hints.setdefault(conv_id, []).extend(hints)
-    return raw_ids, excerpt_hints
+    for conv_id, refs in turn_refs.items():
+        episode_turn_refs.setdefault(conv_id, set()).update(refs)
+    return raw_ids, excerpt_hints, episode_turn_refs
+
+
+def _collect_platform_support_from_memory_object(memory_obj: Any) -> set[str]:
+    record_ids: set[str] = set()
+    if memory_obj is None:
+        return record_ids
+    evidence_links = getattr(memory_obj, "evidence_links", []) or []
+    for link in evidence_links:
+        source_type = str(getattr(link, "source_type", "") or "").strip().lower()
+        source_id = str(getattr(link, "source_id", "") or "").strip()
+        if source_type == "l1_signal" and source_id and source_id != "platform_export":
+            record_ids.add(source_id)
+    return record_ids
 
 
 def _merge_raw_hint_maps(target: dict[str, list[str]], source: dict[str, list[str]]) -> None:
@@ -3914,6 +4457,7 @@ def _build_relevant_raw_snippets(
     conversations: dict[str, RawConversation],
     hint_map: dict[str, list[str]],
     *,
+    turn_ref_map: dict[str, set[str]] | None = None,
     window: int = 1,
 ) -> list[dict[str, Any]]:
     snippets: list[dict[str, Any]] = []
@@ -3923,6 +4467,7 @@ def _build_relevant_raw_snippets(
             continue
         hints = [hint for hint in hint_map.get(conv_id, []) if str(hint).strip()]
         matched_indexes: set[int] = set()
+        exact_turn_refs = set(turn_ref_map.get(conv_id, set())) if turn_ref_map else set()
         for hint in hints:
             for segment in _extract_snippet_hint_segments(hint):
                 segment_norm = _normalize_snippet_text(segment).lower()
@@ -3935,7 +4480,7 @@ def _build_relevant_raw_snippets(
                         continue
                     if segment_norm in msg_norm or (segment_head and segment_head in msg_norm):
                         matched_indexes.add(idx)
-        if not matched_indexes:
+        if not matched_indexes and not exact_turn_refs:
             continue
         snippet_indexes: set[int] = set()
         for idx in matched_indexes:
@@ -3966,22 +4511,170 @@ def _build_relevant_raw_snippets(
     return snippets
 
 
+def _message_payload(msg: RawMessage) -> dict[str, Any]:
+    return {
+        "id": msg.msg_id,
+        "role": msg.role,
+        "content": msg.content,
+        "timestamp": msg.timestamp,
+    }
+
+
+def _conversation_turns(conv: RawConversation) -> list[dict[str, Any]]:
+    if getattr(conv, "turns", None):
+        id_to_index = {str(msg.msg_id or ""): idx for idx, msg in enumerate(conv.messages)}
+        persisted_turns: list[dict[str, Any]] = []
+        for turn_index, turn in enumerate(conv.turns):
+            message_indexes = [
+                id_to_index[msg_id]
+                for msg_id in (turn.message_ids or [])
+                if str(msg_id or "") in id_to_index
+            ]
+            if not message_indexes:
+                continue
+            persisted_turns.append(
+                {
+                    "turn_index": turn_index,
+                    "turn_id": turn.turn_id,
+                    "message_indexes": message_indexes,
+                }
+            )
+        if persisted_turns:
+            return persisted_turns
+
+    turns: list[dict[str, Any]] = []
+    current_indexes: list[int] = []
+
+    for idx, msg in enumerate(conv.messages):
+        role = str(msg.role or "").strip().lower()
+        if role == "user" and current_indexes:
+            turns.append(
+                {
+                    "turn_index": len(turns),
+                    "turn_id": f"{conv.conv_id}:turn:{len(turns)}",
+                    "message_indexes": current_indexes[:],
+                }
+            )
+            current_indexes = [idx]
+        else:
+            current_indexes.append(idx)
+
+    if current_indexes:
+        turns.append(
+            {
+                "turn_index": len(turns),
+                "turn_id": f"{conv.conv_id}:turn:{len(turns)}",
+                "message_indexes": current_indexes[:],
+            }
+        )
+
+    return turns
+
+
+def _summarize_turn_messages(messages: list[RawMessage]) -> str:
+    user_parts = [str(msg.content or "").strip() for msg in messages if str(msg.role or "").strip().lower() == "user"]
+    assistant_parts = [str(msg.content or "").strip() for msg in messages if str(msg.role or "").strip().lower() == "assistant"]
+    user_text = truncate_text(" ".join(user_parts), 80)
+    assistant_text = truncate_text(" ".join(assistant_parts), 120)
+    if user_text and assistant_text:
+        return f"用户询问：{user_text}；助手回应：{assistant_text}"
+    if user_text:
+        return f"用户询问：{user_text}"
+    if assistant_text:
+        return f"助手回应：{assistant_text}"
+    return truncate_text(" ".join(str(msg.content or "").strip() for msg in messages), 140)
+
+
+def _build_related_qa_turns(
+    conversations: dict[str, RawConversation],
+    hint_map: dict[str, list[str]],
+    *,
+    turn_ref_map: dict[str, set[str]] | None = None,
+    detailed: bool,
+) -> list[dict[str, Any]]:
+    related_turns: list[dict[str, Any]] = []
+    for conv_id in sorted(hint_map):
+        conv = conversations.get(conv_id)
+        if conv is None:
+            continue
+        hints = [hint for hint in hint_map.get(conv_id, []) if str(hint).strip()]
+        matched_indexes: set[int] = set()
+        exact_turn_refs = set(turn_ref_map.get(conv_id, set())) if turn_ref_map else set()
+        for hint in hints:
+            for segment in _extract_snippet_hint_segments(hint):
+                segment_norm = _normalize_snippet_text(segment).lower()
+                if not segment_norm:
+                    continue
+                segment_head = segment_norm[:48]
+                for idx, msg in enumerate(conv.messages):
+                    msg_norm = _normalize_snippet_text(msg.content).lower()
+                    if not msg_norm:
+                        continue
+                    if segment_norm in msg_norm or (segment_head and segment_head in msg_norm):
+                        matched_indexes.add(idx)
+        if not matched_indexes:
+            continue
+
+        turns = _conversation_turns(conv)
+        if not turns:
+            continue
+
+        matched_turn_indexes: set[int] = set()
+        for turn in turns:
+            if str(turn.get("turn_id") or "") in exact_turn_refs:
+                matched_turn_indexes.add(int(turn["turn_index"]))
+            indexes = set(turn.get("message_indexes", []))
+            if indexes & matched_indexes:
+                matched_turn_indexes.add(int(turn["turn_index"]))
+
+        if not matched_turn_indexes and exact_turn_refs:
+            for turn in turns:
+                if str(turn.get("turn_id") or "") in exact_turn_refs:
+                    matched_turn_indexes.add(int(turn["turn_index"]))
+
+        for turn in turns:
+            if int(turn["turn_index"]) not in matched_turn_indexes:
+                continue
+            turn_messages = [conv.messages[idx] for idx in turn["message_indexes"] if 0 <= idx < len(conv.messages)]
+            if not turn_messages:
+                continue
+            turn_payload = {
+                "conversation_id": conv.conv_id,
+                "platform": conv.platform,
+                "title": conv.title,
+                "turn_id": turn["turn_id"],
+                "message_ids": [msg.msg_id for msg in turn_messages],
+                "matched_reasons": hints[:3],
+                "summary": _summarize_turn_messages(turn_messages),
+            }
+            if detailed:
+                turn_payload["messages"] = [_message_payload(msg) for msg in turn_messages]
+            related_turns.append(turn_payload)
+
+    return related_turns
+
+
 def build_selected_memory_payload(
     settings: dict[str, Any],
     selected_ids: list[str],
     *,
     include_episodic_evidence: bool,
+    detailed_injection: bool,
 ) -> dict[str, Any]:
     selected = parse_selected_ids(selected_ids)
     wiki = get_wiki(settings)
     payload: dict[str, Any] = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "memory": {},
+        "evidence": {},
     }
     episodes_dir = get_storage_root(settings) / "episodes"
     raw_conversation_map: dict[str, RawConversation] | None = None
     raw_conversation_ids: set[str] = set()
     raw_excerpt_hints: dict[str, list[str]] = {}
+    raw_turn_refs: dict[str, set[str]] = {}
+    selected_episode_ids: set[str] = set()
+    selected_platform_record_ids: set[str] = set()
 
     if selected["profile_fields"]:
         profile = wiki.load_profile()
@@ -3991,9 +4684,13 @@ def build_selected_memory_payload(
                 selected["profile_fields"],
                 selected["profile_values"],
             )
-            profile_raw_ids, profile_hints = _collect_raw_support_from_memory_object(profile, episodes_dir)
+            profile_raw_ids, profile_hints, profile_turn_refs = _collect_raw_support_from_memory_object(profile, episodes_dir)
             raw_conversation_ids.update(profile_raw_ids)
             _merge_raw_hint_maps(raw_excerpt_hints, profile_hints)
+            for conv_id, refs in profile_turn_refs.items():
+                raw_turn_refs.setdefault(conv_id, set()).update(refs)
+            selected_episode_ids.update(getattr(profile, "source_episode_ids", []) or [])
+            selected_platform_record_ids.update(_collect_platform_support_from_memory_object(profile))
 
     if selected["preferences_fields"]:
         preferences = wiki.load_preferences()
@@ -4004,9 +4701,14 @@ def build_selected_memory_payload(
                 selected["preferences_fields"],
                 selected["preferences_values"],
             )
-            pref_raw_ids, pref_hints = _collect_raw_support_from_memory_object(preferences, episodes_dir)
+            pref_raw_ids, pref_hints, pref_turn_refs = _collect_raw_support_from_memory_object(preferences, episodes_dir)
             raw_conversation_ids.update(pref_raw_ids)
             _merge_raw_hint_maps(raw_excerpt_hints, pref_hints)
+            for conv_id, refs in pref_turn_refs.items():
+                raw_turn_refs.setdefault(conv_id, set()).update(refs)
+            if preferences is not None:
+                selected_episode_ids.update(getattr(preferences, "source_episode_ids", []) or [])
+                selected_platform_record_ids.update(_collect_platform_support_from_memory_object(preferences))
 
     if selected["projects"]:
         projects = _valid_projects(wiki)
@@ -4014,9 +4716,13 @@ def build_selected_memory_payload(
             projects = [project for project in projects if project.project_name in selected["projects"]]
         payload["memory"]["projects"] = [project.model_dump(mode="json") for project in projects]
         for project in projects:
-            project_raw_ids, project_hints = _collect_raw_support_from_memory_object(project, episodes_dir)
+            project_raw_ids, project_hints, project_turn_refs = _collect_raw_support_from_memory_object(project, episodes_dir)
             raw_conversation_ids.update(project_raw_ids)
             _merge_raw_hint_maps(raw_excerpt_hints, project_hints)
+            for conv_id, refs in project_turn_refs.items():
+                raw_turn_refs.setdefault(conv_id, set()).update(refs)
+            selected_episode_ids.update(getattr(project, "source_episode_ids", []) or [])
+            selected_platform_record_ids.update(_collect_platform_support_from_memory_object(project))
 
     if selected["workflows"]:
         workflows = _valid_workflows(wiki)
@@ -4024,9 +4730,13 @@ def build_selected_memory_payload(
             workflows = [workflow for workflow in workflows if workflow.workflow_name in selected["workflows"]]
         payload["memory"]["workflows"] = [workflow.model_dump(mode="json") for workflow in workflows]
         for workflow in workflows:
-            workflow_raw_ids, workflow_hints = _collect_raw_support_from_memory_object(workflow, episodes_dir)
+            workflow_raw_ids, workflow_hints, workflow_turn_refs = _collect_raw_support_from_memory_object(workflow, episodes_dir)
             raw_conversation_ids.update(workflow_raw_ids)
             _merge_raw_hint_maps(raw_excerpt_hints, workflow_hints)
+            for conv_id, refs in workflow_turn_refs.items():
+                raw_turn_refs.setdefault(conv_id, set()).update(refs)
+            selected_episode_ids.update(getattr(workflow, "source_episode_ids", []) or [])
+            selected_platform_record_ids.update(_collect_platform_support_from_memory_object(workflow))
 
     if selected["persistent"]:
         persistent = load_persistent_nodes(settings)
@@ -4036,7 +4746,6 @@ def build_selected_memory_payload(
         else:
             selected_node_ids = set(selected["persistent"])
         selected_nodes: list[dict[str, Any]] = []
-        selected_episode_ids: set[str] = set()
         for node_id in sorted(selected_node_ids):
             node = nodes.get(node_id)
             if not isinstance(node, dict):
@@ -4045,30 +4754,60 @@ def build_selected_memory_payload(
             selected_episode_ids.update(node.get("episode_refs", []))
         if selected_nodes:
             payload["memory"]["persistent_nodes"] = selected_nodes
-        if include_episodic_evidence and selected_episode_ids:
-            evidence = []
-            for ep_id in sorted(selected_episode_ids):
-                episode = read_json_file(episodes_dir / f"{ep_id}.json")
-                if episode:
-                    evidence.append(episode)
-            episode_raw_ids, episode_hints = _collect_raw_support_from_episode_ids(episodes_dir, selected_episode_ids)
-            raw_conversation_ids.update(episode_raw_ids)
-            _merge_raw_hint_maps(raw_excerpt_hints, episode_hints)
-            if evidence:
-                payload["memory"]["episodic_evidence"] = evidence
+
+    if include_episodic_evidence and selected_episode_ids:
+        evidence = []
+        for ep_id in sorted(selected_episode_ids):
+            episode = read_json_file(episodes_dir / f"{ep_id}.json")
+            if episode:
+                evidence.append(episode)
+        episode_raw_ids, episode_hints, episode_turn_refs = _collect_raw_support_from_episode_ids(episodes_dir, selected_episode_ids)
+        raw_conversation_ids.update(episode_raw_ids)
+        _merge_raw_hint_maps(raw_excerpt_hints, episode_hints)
+        for conv_id, refs in episode_turn_refs.items():
+            raw_turn_refs.setdefault(conv_id, set()).update(refs)
+        if evidence:
+            payload["evidence"]["episodes"] = evidence
+
+    if selected_platform_record_ids:
+        platform_record_map = _load_platform_memory_record_map(settings)
+        platform_records = [
+            platform_record_map[record_id]
+            for record_id in sorted(selected_platform_record_ids)
+            if record_id in platform_record_map
+        ]
+        if platform_records:
+            payload["evidence"]["platform_memory_records"] = platform_records
 
     if raw_conversation_ids:
         if raw_conversation_map is None:
             raw_conversation_map = _load_raw_conversation_object_map(settings)
         for conv_id in raw_conversation_ids:
             raw_excerpt_hints.setdefault(conv_id, [])
-        raw_snippets = _build_relevant_raw_snippets(raw_conversation_map, raw_excerpt_hints)
-        if raw_snippets:
-            payload["memory"]["relevant_raw_snippets"] = raw_snippets
+        related_turns = _build_related_qa_turns(
+            raw_conversation_map,
+            raw_excerpt_hints,
+            turn_ref_map=raw_turn_refs,
+            detailed=detailed_injection,
+        )
+        if related_turns:
+            payload["evidence"]["related_qa_turns"] = related_turns
+        elif detailed_injection:
+            raw_snippets = _build_relevant_raw_snippets(
+                raw_conversation_map,
+                raw_excerpt_hints,
+                turn_ref_map=raw_turn_refs,
+            )
+            if raw_snippets:
+                payload["evidence"]["relevant_raw_snippets"] = raw_snippets
 
     if not payload["memory"]:
         raise HTTPException(status_code=400, detail="请至少选择一项记忆内容")
 
+    if not payload["evidence"]:
+        payload.pop("evidence", None)
+
+    payload["injection_mode"] = "detailed" if detailed_injection else "compact"
     return payload
 
 
@@ -4217,6 +4956,7 @@ def export_memory_package(settings: dict[str, Any], payload: ExportPackageReques
         settings,
         payload.selected_ids,
         include_episodic_evidence=payload.include_episodic_evidence,
+        detailed_injection=bool(settings.get("detailed_injection")),
     )
     content = (
         "请将以下结构化记忆作为冷启动记忆包导入目标平台，并在后续对话中以其为参考。\n\n"
@@ -4360,6 +5100,94 @@ def _load_persistent_distill_prompt() -> str:
     return (PROJECT_ROOT / "prompts" / "persistent_node_distill_bg.txt").read_text(encoding="utf-8")
 
 
+def _canonical_memory_text(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    canonical_patterns = [
+        (r"\btext[\s\-_]*to[\s\-_]*image\b", "text2image"),
+        (r"\bt2i\b", "text2image"),
+        (r"\btext[\s\-_]*to[\s\-_]*video\b", "text2video"),
+        (r"\bt2v\b", "text2video"),
+    ]
+    for pattern, replacement in canonical_patterns:
+        text = re.sub(pattern, replacement, text)
+    text = re.sub(r"([a-z0-9])([\u4e00-\u9fff])", r"\1 \2", text)
+    text = re.sub(r"([\u4e00-\u9fff])([a-z0-9])", r"\1 \2", text)
+    text = re.sub(r"[\-_/]+", " ", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def _normalize_overlap_text(value: Any) -> str:
+    return _canonical_memory_text(value)
+
+
+def _persistent_topic_is_project_like(node: dict[str, Any]) -> bool:
+    text = _normalize_overlap_text(" ".join([
+        str(node.get("key") or ""),
+        str(node.get("description") or ""),
+    ]))
+    project_like_tokens = {
+        "project", "platform", "system", "framework", "mvp", "prototype", "build", "develop",
+        "项目", "平台", "系统", "框架", "构建", "搭建", "开发", "推进", "统一评测",
+    }
+    return any(token in text for token in project_like_tokens)
+
+
+def _persistent_topic_overlaps_project(node: dict[str, Any], project: ProjectMemory) -> bool:
+    if str(node.get("type") or "").strip().lower() != "topic":
+        return False
+    if not _persistent_topic_is_project_like(node):
+        return False
+
+    node_refs = set(node.get("episode_refs") or [])
+    project_refs = set(getattr(project, "source_episode_ids", []) or [])
+    has_episode_overlap = bool(node_refs & project_refs)
+
+    node_text = _normalize_overlap_text(" ".join([
+        str(node.get("key") or ""),
+        str(node.get("description") or ""),
+    ]))
+    project_text = _normalize_overlap_text(" ".join([
+        project.project_name,
+        project.project_goal,
+        project.current_stage,
+    ]))
+    lexical_overlap = False
+    if node_text and project_text:
+        lexical_overlap = (
+            node_text in project_text
+            or project_text in node_text
+            or sum(
+                1 for token in re.split(r"[^a-zA-Z0-9\u4e00-\u9fff]+", project_text)
+                if token and len(token) >= 2 and token in node_text
+            ) >= 2
+        )
+
+    return has_episode_overlap and lexical_overlap
+
+
+def _prune_persistent_nodes_against_projects(settings: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    nodes = payload.get("nodes")
+    if not isinstance(nodes, dict) or not nodes:
+        return payload
+
+    wiki = get_wiki(settings)
+    projects = _valid_projects(wiki)
+    if not projects:
+        return payload
+
+    pruned_nodes: dict[str, Any] = {}
+    for node_id, node in nodes.items():
+        if not isinstance(node, dict):
+            continue
+        if any(_persistent_topic_overlaps_project(node, project) for project in projects):
+            continue
+        pruned_nodes[node_id] = node
+
+    payload["nodes"] = pruned_nodes
+    return payload
+
+
 def save_persistent_nodes(settings: dict[str, Any], data: dict[str, Any]) -> None:
     root = get_storage_root(settings, create=True)
     payload = _default_persistent_payload()
@@ -4370,6 +5198,7 @@ def save_persistent_nodes(settings: dict[str, Any], data: dict[str, Any]) -> Non
             "episodic_tag_paths": data.get("episodic_tag_paths", payload["episodic_tag_paths"]),
             "nodes": data.get("nodes", payload["nodes"]),
         })
+    payload = _prune_persistent_nodes_against_projects(settings, payload)
 
     persistent_root = _persistent_root(root)
     persistent_root.mkdir(parents=True, exist_ok=True)
@@ -4489,6 +5318,43 @@ def apply_persistent_result(
         target["updated_at"] = now
 
 
+def _derive_persistent_seed_from_episode(episode: Any) -> list[dict[str, Any]]:
+    topic = str(getattr(episode, "topic", "") or "").strip()
+    summary = str(getattr(episode, "summary", "") or "").strip()
+    key_decisions = [str(item or "").strip() for item in (getattr(episode, "key_decisions", []) or []) if str(item or "").strip()]
+
+    haystack = _canonical_memory_text(" ".join([topic, summary, " ".join(key_decisions)]))
+    if not haystack:
+        return []
+
+    styling_tokens = {
+        "风衣", "长裙", "裙", "鞋", "鞋子", "配色", "搭配", "穿搭", "审美", "颜色",
+        "coat", "dress", "skirt", "shoe", "shoes", "outfit", "styling", "style", "color",
+    }
+    decision_tokens = {
+        "推荐", "更适合", "优于", "最推荐", "搭配建议",
+        "recommend", "better", "best", "pairing",
+    }
+    if not any(token in haystack for token in styling_tokens):
+        return []
+    if not any(token in haystack for token in decision_tokens):
+        return []
+
+    if "用户" in summary:
+        description = "用户会参考个人穿搭与配色建议，尤其关注外套、长裙和鞋子的搭配选择。"
+    else:
+        description = "用户关注个人穿搭与配色建议，尤其是单品之间的整体搭配效果。"
+
+    return [
+        {
+            "type": "topic",
+            "key": "personal_styling_and_color_matching",
+            "description": description,
+            "export_priority": "low",
+        }
+    ]
+
+
 def update_persistent_nodes_for_episode(
     settings: dict[str, Any],
     llm: LLMClient,
@@ -4522,6 +5388,10 @@ def update_persistent_nodes_for_episode(
     )
     result = llm.extract_json(_load_persistent_distill_prompt(), user_prompt)
     if isinstance(result, dict) and result:
+        if not result.get("new_nodes"):
+            seeded_nodes = _derive_persistent_seed_from_episode(episode)
+            if seeded_nodes:
+                result["new_nodes"] = seeded_nodes
         apply_persistent_result(pn_data, result, episode.episode_id, episode.platform)
         save_persistent_nodes(settings, pn_data)
 
@@ -4596,11 +5466,12 @@ def rebuild_persistent_memory(
 ) -> dict[str, Any]:
     wiki = get_wiki(settings)
     episodes = wiki.list_episodes()
-    if not episodes:
+    l1_text = l1_layer.combined_text()
+    platform_records = load_platform_memory_records(settings)
+    if not episodes and not l1_text and not platform_records:
         wiki.rebuild_index()
         return {"profile": False, "preferences": False, "projects": 0, "workflows": 0, "index": wiki.get_index()}
 
-    l1_text = l1_layer.combined_text()
     ep_by_id = {ep.episode_id: ep for ep in episodes}
     earliest_ts = min((ep.time_range_start for ep in episodes if ep.time_range_start), default=None)
 
@@ -4631,6 +5502,7 @@ def rebuild_persistent_memory(
     prefs_context = builder._filter_digest(episodes, l1_text, "preferences")
     prefs_data = builder.llm.extract_json(builder.prompts["preference_system"], prefs_context)
     prefs = builder._build_preferences(prefs_data, l1_text, earliest_ts, pref_ep_ids, ep_by_id)
+    profile, prefs = _merge_l1_claims_into_profile_preferences(settings, profile, prefs)
     if profile.primary_task_types:
         merged_task_types = list(
             dict.fromkeys((prefs.primary_task_types or []) + list(profile.primary_task_types))
@@ -4638,7 +5510,6 @@ def rebuild_persistent_memory(
         prefs.primary_task_types = merged_task_types
         profile.primary_task_types = []
     wiki.save_preferences(prefs)
-    save_display_texts(settings, build_display_texts(builder.llm, profile, prefs))
 
     stage("正在整理项目记忆...", 3)
     projects_context = builder._filter_digest(episodes, l1_text, "projects")
@@ -4684,6 +5555,20 @@ def rebuild_persistent_memory(
     wiki.save_workflows(workflows)
     save_workflow_asset_library(settings, workflows)
 
+    inferred_task_types = _infer_primary_task_types(
+        episodes,
+        projects,
+        workflows,
+        existing=list(prefs.primary_task_types or []),
+    )
+    if inferred_task_types:
+        prefs.primary_task_types = list(
+            dict.fromkeys(list(prefs.primary_task_types or []) + inferred_task_types)
+        )
+        wiki.save_preferences(prefs)
+
+    save_display_texts(settings, build_display_texts(builder.llm, profile, prefs))
+
     stage("正在重建索引...", 5)
     index = wiki.rebuild_index()
     derive_my_skills(settings)
@@ -4712,7 +5597,8 @@ def _run_organize_job(job_id: str, settings: dict[str, Any]) -> None:
             },
         )
         conversations = load_all_raw_conversations(settings)
-        if not conversations:
+        l1_layer, l1_signature = load_l1_signals(settings)
+        if not conversations and not l1_signature:
             update_job(
                 job_id,
                 status="failed",
@@ -4724,7 +5610,6 @@ def _run_organize_job(job_id: str, settings: dict[str, Any]) -> None:
         llm = get_llm(settings)
         wiki = get_wiki(settings)
         builder = MemoryBuilder(llm=llm, wiki=wiki)
-        l1_layer, l1_signature = load_l1_signals(settings)
         organize_state = load_organize_state(settings)
         raw_index = organize_state.get("raw_index", {})
         changed_episodes: list[EpisodicMemory] = []
@@ -4865,9 +5750,20 @@ def update_from_new_round(settings: dict[str, Any], payload: ConversationAppendR
     wiki = get_wiki(settings)
     updater = MemoryUpdater(llm=llm, wiki=wiki, schema=L3Schema())
     conversation_text = f"[USER]: {payload.user_text}\n\n[ASSISTANT]: {payload.assistant_text}"
+    conv_path = get_raw_root(settings, create=True) / _safe_slug(payload.platform or "unknown") / f"{_safe_slug(payload.chat_id, fallback='conversation')}.json"
+    conv_data = read_json_file(conv_path) if conv_path.exists() else None
+    latest_turn_refs: list[str] = []
+    if isinstance(conv_data, dict):
+        turns = conv_data.get("turns") or []
+        if isinstance(turns, list) and turns:
+            last_turn = turns[-1]
+            if isinstance(last_turn, dict) and str(last_turn.get("turn_id") or "").strip():
+                latest_turn_refs = [str(last_turn.get("turn_id")).strip()]
     return updater.update(
         conversation_text,
         platform=payload.platform,
+        conv_id=payload.chat_id,
+        turn_refs=latest_turn_refs,
         on_progress=None,
         conversation_end_time=datetime.now(timezone.utc),
     )
@@ -4923,6 +5819,7 @@ def append_raw_round(settings: dict[str, Any], payload: ConversationAppendReques
         if duplicate is None:
             messages.append(new_message)
 
+    data["turns"] = _turn_payloads_from_message_dicts(payload.chat_id, messages)
     data["update_time"] = payload.timestamp
     file_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     return file_path
@@ -4969,13 +5866,16 @@ def save_platform_memory_snapshot(settings: dict[str, Any], payload: PlatformMem
     data["first_captured_at"] = data["captured_at"]
     data["last_updated_at"] = datetime.now(timezone.utc).isoformat()
     data["capture_count"] = 1
+    data["record_id"] = file_path.stem
     data["signature"] = platform_memory_signature(data)
 
     matched_path = _find_best_platform_memory_match(platform_root, data)
     target_path = matched_path or file_path
     existing = read_json_file(target_path)
     if isinstance(existing, dict):
+        existing.setdefault("record_id", target_path.stem)
         data = _merge_platform_memory_records(existing, data)
+    data["record_id"] = target_path.stem
 
     target_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     consolidate_platform_memory(settings)
@@ -5008,6 +5908,7 @@ def get_settings() -> SettingsResponse:
         storage_path=str(get_storage_root(settings)),
         keep_updated=bool(settings["keep_updated"]),
         realtime_update=bool(settings["realtime_update"]),
+        detailed_injection=bool(settings.get("detailed_injection")),
         last_sync_at=settings["last_sync_at"],
         backend_url=settings["backend_url"],
     )
@@ -5025,6 +5926,7 @@ def update_settings(payload: SettingsUpdate) -> SettingsResponse:
         storage_path=str(get_storage_root(settings)),
         keep_updated=bool(settings["keep_updated"]),
         realtime_update=bool(settings["realtime_update"]),
+        detailed_injection=bool(settings.get("detailed_injection")),
         last_sync_at=settings["last_sync_at"],
         backend_url=settings["backend_url"],
     )
@@ -5217,9 +6119,10 @@ def inject_package(payload: InjectPackageRequest) -> dict[str, Any]:
         settings,
         payload.selected_ids,
         include_episodic_evidence=True,
+        detailed_injection=bool(payload.detailed_injection),
     )
     text = (
-        f"请在当前 {payload.target_platform or 'generic'} 会话中加载以下结构化记忆，并将其作为后续理解和回答的上下文基础：\n\n"
+        f"请在当前 {payload.target_platform or 'generic'} 会话中加载以下结构化记忆、证据和相关原始对话片段，并将其作为后续理解和回答的上下文基础：\n\n"
         + json.dumps(payload_data, ensure_ascii=False, indent=2)
     )
     return {"ok": True, "text": text}

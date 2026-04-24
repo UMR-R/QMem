@@ -1,0 +1,31 @@
+{
+  "id": "rec:anthropic_skills:MCP_服务开发",
+  "icon": "M",
+  "tags": [
+    "general"
+  ],
+  "keywords": [
+    "mcp",
+    "create",
+    "model",
+    "context",
+    "protocol",
+    "servers",
+    "enable",
+    "llms",
+    "interact",
+    "external",
+    "services",
+    "through"
+  ],
+  "persona_signals": [
+    "mcp",
+    "create",
+    "model",
+    "context",
+    "protocol",
+    "servers"
+  ],
+  "usage_score": 0.96,
+  "source": "anthropic_skills:mcp-builder"
+}

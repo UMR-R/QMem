@@ -32,6 +32,8 @@ Rules:
 Project / workflow boundary rules:
 - Do NOT list every paper, algorithm, benchmark, dataset, or tool as a project.
 - If the conversation belongs to a larger ongoing project, return only the parent project.
+- If the user explicitly says they want to build, create, launch, submit, or develop a project/platform/system/framework, treat that parent effort as a project even if the discussion is still early-stage.
+- For research planning conversations, related-work analysis and benchmark comparisons should attach to the parent user project when the user is clearly planning to build or run that project.
 - Do NOT treat a topic as a workflow unless it has a reusable trigger and step pattern.
 
 Time rules:

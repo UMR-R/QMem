@@ -1,0 +1,31 @@
+{
+  "id": "rec:anthropic_skills:Web_组件构建",
+  "icon": "W",
+  "tags": [
+    "general"
+  ],
+  "keywords": [
+    "web",
+    "build",
+    "powerful",
+    "frontend",
+    "claude",
+    "artifacts",
+    "follow",
+    "these",
+    "steps",
+    "initialize",
+    "repo",
+    "scripts"
+  ],
+  "persona_signals": [
+    "web",
+    "build",
+    "powerful",
+    "frontend",
+    "claude",
+    "artifacts"
+  ],
+  "usage_score": 0.96,
+  "source": "anthropic_skills:web-artifacts-builder"
+}

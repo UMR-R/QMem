@@ -453,6 +453,10 @@ button {
   font-weight: var(--font-caption-weight);
 }
 
+.helper-text-centered {
+  text-align: center;
+}
+
 .mid-primary-btn {
   width: 100%;
   min-width: 0;
@@ -900,10 +904,10 @@ button {
 .field-label {
   display: block;
   margin: 6px 0 5px;
-  font-size: var(--font-caption-size);
-  font-weight: var(--font-caption-weight);
-  line-height: var(--font-caption-line);
-  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--text);
 }
 
 .field-row {
@@ -1008,8 +1012,7 @@ button {
 
 .settings-action-row small,
 #apiKeyStatus,
-.toggle-row em,
-.field-label {
+.toggle-row em {
   color: var(--muted);
   font-size: var(--font-caption-size);
   font-weight: var(--font-caption-weight);

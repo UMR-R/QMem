@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class RawMessage(BaseModel):
@@ -18,6 +18,12 @@ class RawMessage(BaseModel):
     timestamp: str = ""
     conversation_id: str = ""
     platform: str = "unknown"
+
+
+class RawTurn(BaseModel):
+    turn_id: str
+    conversation_id: str
+    message_ids: list[str] = Field(default_factory=list)
 
 
 def _parse_timestamp(value: object) -> Optional[datetime]:
@@ -41,8 +47,13 @@ class RawConversation(BaseModel):
     platform: str
     title: str = ""
     messages: list[RawMessage]
+    turns: list[RawTurn] = Field(default_factory=list)
     start_time: Optional[datetime] = None  # when the conversation began
     end_time: Optional[datetime] = None    # when the conversation last updated
+
+    def model_post_init(self, __context: object) -> None:
+        if not self.turns:
+            self.turns = _build_turns(self.conv_id, self.messages)
 
     def user_messages(self) -> list[RawMessage]:
         return [m for m in self.messages if m.role == "user"]
@@ -57,6 +68,36 @@ class RawConversation(BaseModel):
 
     def word_count(self) -> int:
         return len(self.full_text().split())
+
+
+def _build_turns(conv_id: str, messages: list[RawMessage]) -> list[RawTurn]:
+    turns: list[RawTurn] = []
+    current_message_ids: list[str] = []
+
+    for idx, msg in enumerate(messages):
+        role = str(msg.role or "").strip().lower()
+        if role == "user" and current_message_ids:
+            turns.append(
+                RawTurn(
+                    turn_id=f"{conv_id}:turn:{len(turns)}",
+                    conversation_id=conv_id,
+                    message_ids=current_message_ids[:],
+                )
+            )
+            current_message_ids = [msg.msg_id or f"{conv_id}_{idx}"]
+        else:
+            current_message_ids.append(msg.msg_id or f"{conv_id}_{idx}")
+
+    if current_message_ids:
+        turns.append(
+            RawTurn(
+                turn_id=f"{conv_id}:turn:{len(turns)}",
+                conversation_id=conv_id,
+                message_ids=current_message_ids[:],
+            )
+        )
+
+    return turns
 
 
 class L0RawLayer:
@@ -157,11 +198,25 @@ class L0RawLayer:
         if end_time is None and messages:
             end_time = _parse_timestamp(messages[-1].timestamp)
 
+        raw_turns = data.get("turns") or []
+        turns: list[RawTurn] = []
+        if isinstance(raw_turns, list):
+            for item in raw_turns:
+                if not isinstance(item, dict):
+                    continue
+                try:
+                    turns.append(RawTurn.model_validate(item))
+                except Exception:
+                    continue
+        if not turns:
+            turns = _build_turns(conv_id, messages)
+
         return RawConversation(
             conv_id=conv_id,
             platform=platform,
             title=title,
             messages=messages,
+            turns=turns,
             start_time=start_time,
             end_time=end_time,
         )
@@ -214,6 +269,7 @@ class L0RawLayer:
                 platform="text_import",
                 title=path.stem,
                 messages=messages,
+                turns=_build_turns(path.stem, messages),
             )
         ]
 

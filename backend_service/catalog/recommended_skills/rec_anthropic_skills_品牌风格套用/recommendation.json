@@ -1,0 +1,27 @@
+{
+  "id": "rec:anthropic_skills:品牌风格套用",
+  "icon": "品",
+  "tags": [
+    "general"
+  ],
+  "keywords": [
+    "access",
+    "anthropic",
+    "official",
+    "brand",
+    "identity",
+    "style",
+    "resources",
+    "use"
+  ],
+  "persona_signals": [
+    "access",
+    "anthropic",
+    "official",
+    "brand",
+    "identity",
+    "style"
+  ],
+  "usage_score": 0.96,
+  "source": "anthropic_skills:brand-guidelines"
+}

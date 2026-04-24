@@ -1,0 +1,31 @@
+{
+  "id": "rec:anthropic_skills:前端界面设计",
+  "icon": "前",
+  "tags": [
+    "product"
+  ],
+  "keywords": [
+    "guides",
+    "creation",
+    "distinctive",
+    "production-grade",
+    "frontend",
+    "interfaces",
+    "avoid",
+    "generic",
+    "slop",
+    "aesthetics",
+    "implement",
+    "real"
+  ],
+  "persona_signals": [
+    "guides",
+    "creation",
+    "distinctive",
+    "production-grade",
+    "frontend",
+    "interfaces"
+  ],
+  "usage_score": 0.96,
+  "source": "anthropic_skills:frontend-design"
+}

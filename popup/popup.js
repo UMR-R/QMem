@@ -11,42 +11,10 @@ const STORAGE_KEYS = {
   keepUpdated: "keepUpdated",
   keepUpdatedStrategy: "keepUpdatedStrategy",
   realtimeUpdate: "realtimeUpdate",
+  detailedInjection: "detailedInjection",
   lastSyncAt: "last_sync_at",
   savedSkills: "saved_skill_ids",
 };
-
-const recommendedSkills = [
-  {
-    id: "rec:pdf_reader",
-    icon: "PDF",
-    title: "从 PDF 提取结构化要点",
-    description: "触发：需要快速读懂 PDF 或论文时 · 目标：提取结构、结论与证据 · 步骤：识别结构 / 提取重点 / 输出摘要",
-    trigger: "需要快速读懂 PDF 或论文时",
-    goal: "提取结构、结论与关键证据",
-    steps: ["识别文档结构", "提取关键结论与数据点", "输出结构化摘要"],
-    output_format: "摘要 / 要点清单",
-  },
-  {
-    id: "rec:paper_summary",
-    icon: "研",
-    title: "按问题-方法-结果总结论文",
-    description: "触发：需要沉淀论文内容时 · 目标：按问题、方法、结果、局限整理 · 步骤：定位问题 / 提取方法 / 总结结果与局限",
-    trigger: "需要沉淀论文内容时",
-    goal: "按问题、方法、结果、局限整理论文",
-    steps: ["定位研究问题", "提取方法与实验设计", "总结结果、贡献与局限"],
-    output_format: "结构化文献摘要",
-  },
-  {
-    id: "rec:project_plan",
-    icon: "计",
-    title: "把目标拆成项目计划",
-    description: "触发：需要把模糊目标变成计划时 · 目标：拆解任务和优先级 · 步骤：澄清目标 / 排序任务 / 输出行动计划",
-    trigger: "需要把模糊目标变成项目计划时",
-    goal: "拆解任务、确定优先级并输出行动计划",
-    steps: ["澄清目标和边界", "拆解任务并排序优先级", "输出阶段计划与下一步"],
-    output_format: "行动计划 / Roadmap",
-  },
-];
 
 const SUPPORTED_HOSTS = new Set([
   "chatgpt.com",
@@ -86,12 +54,14 @@ const state = {
   apiProvider: "openai_compat",
   apiBaseUrl: "https://api.deepseek.com/v1",
   apiModel: "deepseek-chat",
-  backendUrl: "http://127.0.0.1:8765",
+  backendUrl: "",
   keepUpdated: true,
   syncEnabled: false,
   realtimeUpdate: false,
+  detailedInjection: false,
   lastSyncAt: null,
   apiConnectionStatus: "",
+  pendingBackendCheckOnModalClose: false,
   currentView: "home",
   currentSkillTab: "my",
   selectedSkillIds: new Set(),
@@ -99,6 +69,7 @@ const state = {
   selectedMemoryIds: new Set(),
   expandedCategories: new Set(),
   memoryItemsByCategory: {},
+  recommendedSkillItems: [],
   storagePath: "",
   categories: {
     profile: 0,
@@ -113,15 +84,66 @@ const state = {
 };
 
 const DEFAULT_BACKEND_URL = "http://127.0.0.1:8765";
-const BACKEND_START_COMMAND = "uvicorn backend_service.app:app --host 127.0.0.1 --port 8765 --reload";
 
 function logPopupError(scope, error, extra = {}) {
+  const normalized = normalizeError(error, scope);
   console.error(`[popup] ${scope}`, {
-    error,
-    message: error?.message || String(error),
-    stack: error?.stack || null,
+    error: normalized,
+    message: normalized.message,
+    stack: normalized.stack || null,
+    rawError: error,
     ...extra,
   });
+}
+
+function normalizeError(error, fallback = "操作失败") {
+  if (error instanceof Error) return error;
+  if (typeof error === "string" && error.trim()) return new Error(error.trim());
+  if (Array.isArray(error)) {
+    const parts = error
+      .map(item => normalizeError(item, "").message)
+      .filter(Boolean);
+    return new Error(parts.length ? parts.join("；") : fallback);
+  }
+  if (error && typeof error === "object") {
+    if (typeof error.message === "string" && error.message.trim()) {
+      return new Error(error.message.trim());
+    }
+    if (typeof error.detail === "string" && error.detail.trim()) {
+      return new Error(error.detail.trim());
+    }
+    if (error.detail !== undefined) {
+      return normalizeError(error.detail, fallback);
+    }
+    if (Array.isArray(error.loc) && typeof error.msg === "string") {
+      const location = error.loc.map(part => String(part)).filter(Boolean).join(".");
+      return new Error(location ? `${location}: ${error.msg}` : error.msg);
+    }
+    try {
+      return new Error(JSON.stringify(error));
+    } catch {
+      return new Error(fallback);
+    }
+  }
+  return new Error(fallback);
+}
+
+function errorMessage(error, fallback = "操作失败") {
+  return normalizeError(error, fallback).message;
+}
+
+function isExpectedSettingsFailure(error) {
+  const message = errorMessage(error, "").trim();
+  if (!message) return false;
+  return (
+    message.includes("无法连接到本地后端") ||
+    message.includes("Failed to fetch") ||
+    message.includes("HTTP 4") ||
+    message.includes("HTTP 5") ||
+    message.includes("body.") ||
+    message.includes("api_key") ||
+    message.includes("backend_url")
+  );
 }
 
 window.addEventListener("error", event => {
@@ -324,16 +346,54 @@ function toast(message, isError = false) {
   toastEl._timer = setTimeout(() => toastEl.classList.add("hidden"), 3200);
 }
 
-function showCommandModal(command = BACKEND_START_COMMAND) {
+function buildBackendStartCommand(rawBackendUrl = "") {
+  let host = "127.0.0.1";
+  let port = "8765";
+  const value = String(rawBackendUrl || "").trim();
+  if (value) {
+    try {
+      const normalized = value.includes("://") ? value : `http://${value}`;
+      const url = new URL(normalized);
+      host = url.hostname || host;
+      if (url.port) {
+        port = url.port;
+      } else if (url.protocol === "https:") {
+        port = "443";
+      } else if (url.protocol === "http:") {
+        port = "80";
+      }
+    } catch {
+      // Keep fallback host/port when user input is not a parseable URL.
+    }
+  }
+  return [
+    "pip install -r backend_service/requirements.txt",
+    `uvicorn backend_service.app:app --host ${host} --port ${port} --reload`,
+  ].join("\n");
+}
+
+function showCommandModal(command = buildBackendStartCommand(state.backendUrl), options = {}) {
   const modal = document.getElementById("commandModal");
   const commandEl = document.getElementById("commandModalText");
   commandEl.textContent = command;
+  state.pendingBackendCheckOnModalClose = !!options.checkBackendOnClose;
   modal.classList.remove("hidden");
   commandEl.focus();
 }
 
-function closeCommandModal() {
+async function closeCommandModal() {
   document.getElementById("commandModal").classList.add("hidden");
+  if (!state.pendingBackendCheckOnModalClose) return;
+  state.pendingBackendCheckOnModalClose = false;
+  try {
+    await backendApi().getHealth(state.backendUrl);
+    toast("本地后端已在线");
+  } catch (err) {
+    toast("无法连接到本地后端", true);
+    logPopupError("Backend still offline after command modal close", err, {
+      backendUrl: state.backendUrl || DEFAULT_BACKEND_URL,
+    });
+  }
 }
 
 function setView(viewName) {
@@ -389,6 +449,7 @@ function renderSettings() {
   apiKeyInput.value = state.apiKey;
   document.getElementById("backendUrlInput").value = state.backendUrl;
   document.getElementById("realtimeUpdateToggle").checked = state.realtimeUpdate;
+  document.getElementById("detailedInjectionToggle").checked = state.detailedInjection;
   if (state.apiKey) {
     apiKeyInput.placeholder = "请输入 API Key";
   } else if (state.apiKeyConfigured) {
@@ -397,11 +458,11 @@ function renderSettings() {
     apiKeyInput.placeholder = "请输入 API Key";
   }
   if (!state.apiKey && !state.apiKeyConfigured) {
-    apiKeyStatus.textContent = "API 可调用：待配置";
+    apiKeyStatus.textContent = "API 调用：待配置";
   } else if (state.apiConnectionStatus) {
     apiKeyStatus.textContent = state.apiConnectionStatus;
   } else {
-    apiKeyStatus.textContent = "API 可调用：待验证";
+    apiKeyStatus.textContent = "API 调用：待验证";
   }
 }
 
@@ -896,6 +957,7 @@ function syncSkillSelection(skillId, checked) {
 }
 
 function renderRecommendedSkillItems(items, meta = null) {
+  state.recommendedSkillItems = Array.isArray(items) ? [...items] : [];
   renderRecommendedSkillMeta(meta);
   renderSkillList((items || []).slice(0, 3), state.selectedRecommendedIds, { showDelete: false });
   renderSkillActions();
@@ -976,41 +1038,48 @@ async function refreshSummary() {
 }
 
 async function saveSettings(showToast = true) {
-  const backendUrlInput = document.getElementById("backendUrlInput");
-  const rawBackendUrl = backendUrlInput.value.trim();
-  state.apiKey = document.getElementById("apiKeyInput").value.trim();
-  state.backendUrl = rawBackendUrl || DEFAULT_BACKEND_URL;
-  state.storagePath = document.getElementById("storageDirInput").value.trim();
-  await storageSet({
-    [STORAGE_KEYS.apiProvider]: state.apiProvider,
-    [STORAGE_KEYS.apiKey]: state.apiKey,
-    [STORAGE_KEYS.apiBaseUrl]: state.apiBaseUrl,
-    [STORAGE_KEYS.apiModel]: state.apiModel,
-    [STORAGE_KEYS.backendUrl]: state.backendUrl,
-  });
-  const backendSettings = await backendApi().saveSettings(state.backendUrl, {
-    api_provider: state.apiProvider,
-    api_key: state.apiKey,
-    api_base_url: state.apiBaseUrl,
-    api_model: state.apiModel,
-    storage_path: state.storagePath,
-    keep_updated: state.syncEnabled,
-    realtime_update: state.realtimeUpdate,
-    backend_url: state.backendUrl,
-  });
-  state.apiKeyConfigured = backendSettings.api_key_configured;
-  state.apiProvider = backendSettings.api_provider || state.apiProvider;
-  state.apiBaseUrl = backendSettings.api_base_url || state.apiBaseUrl;
-  state.apiModel = backendSettings.api_model || state.apiModel;
-  state.storagePath = backendSettings.storage_path || state.storagePath;
-  renderSettings();
-  renderSync();
-  renderActionAvailability();
-  if (showToast) {
-    toast("设置已保存到本地后端");
-  }
-  if (showToast) {
-    showCommandModal(BACKEND_START_COMMAND);
+  try {
+    const backendUrlInput = document.getElementById("backendUrlInput");
+    const rawBackendUrl = backendUrlInput.value.trim();
+    state.apiKey = document.getElementById("apiKeyInput").value.trim();
+    state.backendUrl = rawBackendUrl;
+    state.storagePath = document.getElementById("storageDirInput").value.trim();
+    await storageSet({
+      [STORAGE_KEYS.apiProvider]: state.apiProvider,
+      [STORAGE_KEYS.apiKey]: state.apiKey,
+      [STORAGE_KEYS.apiBaseUrl]: state.apiBaseUrl,
+      [STORAGE_KEYS.apiModel]: state.apiModel,
+      [STORAGE_KEYS.backendUrl]: state.backendUrl,
+      [STORAGE_KEYS.detailedInjection]: state.detailedInjection,
+    });
+    const backendSettings = await backendApi().saveSettings(state.backendUrl, {
+      api_provider: state.apiProvider,
+      api_key: state.apiKey,
+      api_base_url: state.apiBaseUrl,
+      api_model: state.apiModel,
+      storage_path: state.storagePath,
+      keep_updated: state.syncEnabled,
+      realtime_update: state.realtimeUpdate,
+      detailed_injection: state.detailedInjection,
+      backend_url: state.backendUrl,
+    });
+    state.apiKeyConfigured = backendSettings.api_key_configured;
+    state.apiProvider = backendSettings.api_provider || state.apiProvider;
+    state.apiBaseUrl = backendSettings.api_base_url || state.apiBaseUrl;
+    state.apiModel = backendSettings.api_model || state.apiModel;
+    state.storagePath = backendSettings.storage_path || state.storagePath;
+    state.detailedInjection = !!backendSettings.detailed_injection;
+    renderSettings();
+    renderSync();
+    renderActionAvailability();
+    if (showToast) {
+      toast("设置已保存到本地后端");
+    }
+    if (showToast) {
+      showCommandModal(buildBackendStartCommand(state.backendUrl));
+    }
+  } catch (error) {
+    throw normalizeError(error, "保存设置失败");
   }
 }
 
@@ -1030,14 +1099,14 @@ async function testConnection() {
     if (!result.ok) {
       throw new Error(result.message || "当前默认配置不匹配这把 key");
     }
-    state.apiConnectionStatus = "API 可调用";
+    state.apiConnectionStatus = "API 调用：可用";
     await saveSettings(false);
     renderSettings();
-    toast("API 可调用，设置已保存");
+    toast("API 调用可用，设置已保存");
   } catch (err) {
     try {
       await backendApi().getHealth(state.backendUrl);
-      state.apiConnectionStatus = `API 不可调用：${err.message}`;
+      state.apiConnectionStatus = `API 调用：不可用（${err.message}）`;
       renderSettings();
       toast(`本地后端在线，但 ${err.message}`, true);
     } catch {
@@ -1436,6 +1505,7 @@ async function injectPackage() {
     const result = await backendApi().injectPackage(state.backendUrl, {
       selected_ids: selectedIds,
       target_platform: "chatgpt",
+      detailed_injection: state.detailedInjection,
     });
     const injection = await injectTextIntoTab(result.text || "");
     if (injection?.fallback === "clipboard") {
@@ -1562,7 +1632,7 @@ async function exportSkills() {
       mySkills.forEach(skill => {
         if (state.selectedSkillIds.has(skill.id)) selected.push(skill);
       });
-      recommendedSkills.forEach(skill => {
+      state.recommendedSkillItems.forEach(skill => {
         if (state.selectedRecommendedIds.has(skill.id)) selected.push(skill);
       });
       if (selected.length === 0) throw new Error("请至少选择一个 Skill");
@@ -1614,7 +1684,7 @@ async function injectSkills() {
       mySkills.forEach(skill => {
         if (state.selectedSkillIds.has(skill.id)) selected.push(skill);
       });
-      recommendedSkills.forEach(skill => {
+      state.recommendedSkillItems.forEach(skill => {
         if (state.selectedRecommendedIds.has(skill.id)) selected.push(skill);
       });
 
@@ -1671,14 +1741,30 @@ function bindEvents() {
     }
   });
 
-  document.getElementById("saveSettingsBtn").addEventListener("click", saveSettings);
+  document.getElementById("saveSettingsBtn").addEventListener("click", () => {
+    saveSettings().catch(err => {
+      if (!isExpectedSettingsFailure(err)) {
+        logPopupError("Save settings failed", err, { backendUrl: state.backendUrl || DEFAULT_BACKEND_URL });
+      }
+      toast(`保存失败：${errorMessage(err, "无法连接本地后端")}`, true);
+      showCommandModal(buildBackendStartCommand(
+        document.getElementById("backendUrlInput")?.value.trim() || state.backendUrl,
+      ), { checkBackendOnClose: true });
+    });
+  });
   document.getElementById("testConnectionBtn").addEventListener("click", testConnection);
-  document.getElementById("closeCommandModalBtn").addEventListener("click", closeCommandModal);
+  document.getElementById("closeCommandModalBtn").addEventListener("click", () => {
+    closeCommandModal().catch(err => logPopupError("Close command modal failed", err));
+  });
   document.getElementById("commandModal").addEventListener("click", event => {
-    if (event.target.id === "commandModal") closeCommandModal();
+    if (event.target.id === "commandModal") {
+      closeCommandModal().catch(err => logPopupError("Close command modal failed", err));
+    }
   });
   document.addEventListener("keydown", event => {
-    if (event.key === "Escape") closeCommandModal();
+    if (event.key === "Escape") {
+      closeCommandModal().catch(err => logPopupError("Close command modal failed", err));
+    }
   });
 
   document.getElementById("realtimeUpdateToggle").addEventListener("change", async event => {
@@ -1693,11 +1779,13 @@ function bindEvents() {
         storage_path: state.storagePath,
         keep_updated: state.syncEnabled,
         realtime_update: state.realtimeUpdate,
+        detailed_injection: state.detailedInjection,
         backend_url: state.backendUrl,
       });
       state.apiKeyConfigured = backendSettings.api_key_configured;
       state.syncEnabled = backendSettings.keep_updated;
       state.realtimeUpdate = backendSettings.realtime_update;
+      state.detailedInjection = !!backendSettings.detailed_injection;
     } catch {
       // Keep local change when backend is offline.
     }
@@ -1711,6 +1799,32 @@ function bindEvents() {
     } else {
       toast("同步记忆已关闭。新对话可稍后手动整理。");
     }
+  });
+
+  document.getElementById("detailedInjectionToggle").addEventListener("change", async event => {
+    state.detailedInjection = event.target.checked;
+    await storageSet({ [STORAGE_KEYS.detailedInjection]: state.detailedInjection });
+    try {
+      const backendSettings = await backendApi().saveSettings(state.backendUrl, {
+        api_provider: state.apiProvider,
+        api_key: state.apiKey,
+        api_base_url: state.apiBaseUrl,
+        api_model: state.apiModel,
+        storage_path: state.storagePath,
+        keep_updated: state.syncEnabled,
+        realtime_update: state.realtimeUpdate,
+        detailed_injection: state.detailedInjection,
+        backend_url: state.backendUrl,
+      });
+      state.apiKeyConfigured = backendSettings.api_key_configured;
+      state.syncEnabled = backendSettings.keep_updated;
+      state.realtimeUpdate = backendSettings.realtime_update;
+      state.detailedInjection = !!backendSettings.detailed_injection;
+    } catch {
+      // Keep local change when backend is offline.
+    }
+    renderSettings();
+    toast(state.detailedInjection ? "详细注入已开启" : "详细注入已关闭");
   });
 
   document.getElementById("organizeBtn").addEventListener("click", runOrganize);
@@ -1744,8 +1858,10 @@ function bindEvents() {
       .then(result => {
         renderRecommendedSkillItems(result.items || [], result.meta || null);
       })
-      .catch(() => {
-        renderRecommendedSkillItems(recommendedSkills, null);
+      .catch(err => {
+        logPopupError("Load recommended skills failed", err, { backendUrl: state.backendUrl || DEFAULT_BACKEND_URL });
+        renderRecommendedSkillItems([], null);
+        toast(`加载推荐 Skill 失败：${errorMessage(err, "请检查本地后端")}`, true);
       });
   });
 
@@ -1793,6 +1909,7 @@ async function init() {
     STORAGE_KEYS.keepUpdated,
     STORAGE_KEYS.keepUpdatedStrategy,
     STORAGE_KEYS.realtimeUpdate,
+    STORAGE_KEYS.detailedInjection,
     STORAGE_KEYS.lastSyncAt,
     STORAGE_KEYS.savedSkills,
   ]);
@@ -1803,9 +1920,11 @@ async function init() {
   state.apiBaseUrl = settings[STORAGE_KEYS.apiBaseUrl] || state.apiBaseUrl;
   state.apiModel = settings[STORAGE_KEYS.apiModel] || state.apiModel;
   state.backendUrl = settings[STORAGE_KEYS.backendUrl] || state.backendUrl;
-  state.syncEnabled = !!settings[STORAGE_KEYS.keepUpdated];
+  const hasStoredSyncPreference = typeof settings[STORAGE_KEYS.keepUpdated] === "boolean";
+  state.syncEnabled = hasStoredSyncPreference ? !!settings[STORAGE_KEYS.keepUpdated] : false;
   state.keepUpdated = true;
   state.realtimeUpdate = !!settings[STORAGE_KEYS.realtimeUpdate];
+  state.detailedInjection = !!settings[STORAGE_KEYS.detailedInjection];
   state.lastSyncAt = settings[STORAGE_KEYS.lastSyncAt] || null;
   state.dirHandle = await loadSavedDir();
   const savedSkillIds = settings[STORAGE_KEYS.savedSkills] || [];
@@ -1814,7 +1933,6 @@ async function init() {
 
   try {
     const backendSettings = await backendApi().getSettings(state.backendUrl);
-    state.syncEnabled = backendSettings.keep_updated;
     state.realtimeUpdate = backendSettings.realtime_update;
     state.lastSyncAt = backendSettings.last_sync_at || state.lastSyncAt;
     state.storagePath = backendSettings.storage_path || state.storagePath;
@@ -1822,8 +1940,24 @@ async function init() {
     state.apiProvider = backendSettings.api_provider || state.apiProvider;
     state.apiBaseUrl = backendSettings.api_base_url || state.apiBaseUrl;
     state.apiModel = backendSettings.api_model || state.apiModel;
+    state.detailedInjection = !!backendSettings.detailed_injection;
   } catch {
     // Keep extension-local settings when backend is offline.
+  }
+
+  if (!hasStoredSyncPreference) {
+    state.syncEnabled = false;
+    await storageSet({ [STORAGE_KEYS.keepUpdated]: false });
+    try {
+      await backendApi().toggleSync(state.backendUrl, { enabled: false });
+    } catch {
+      // Ignore backend toggle failures during first-run initialization.
+    }
+    try {
+      await broadcastCaptureToggle(false);
+    } catch {
+      // Ignore content-script toggle failures during first-run initialization.
+    }
   }
 
   bindEvents();

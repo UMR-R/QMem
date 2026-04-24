@@ -205,7 +205,7 @@
           <h3>API 配置</h3>
           <label class="field-label" for="backendUrlInput">本地后端地址</label>
           <div class="field-row">
-            <input id="backendUrlInput" class="text-input" type="text" placeholder="http://127.0.0.1:8765">
+            <input id="backendUrlInput" class="text-input" type="text" placeholder="请输入本地后端地址">
             <button id="saveSettingsBtn" class="outline-mini-btn" type="button">保存</button>
           </div>
           <p class="helper-text">可选地址：http://127.0.0.1:8765</p>
@@ -214,7 +214,7 @@
             <input id="apiKeyInput" class="text-input" type="password" placeholder="请输入 API Key" autocomplete="off">
             <button id="testConnectionBtn" class="outline-mini-btn" type="button">测试连接</button>
           </div>
-          <p id="apiKeyStatus" class="helper-text">API 可调用：待配置</p>
+          <p id="apiKeyStatus" class="helper-text">API 调用：待配置</p>
         </div>
 
         <div class="settings-card">
@@ -226,13 +226,24 @@
         </div>
 
         <div class="settings-card">
-          <h3>记忆策略</h3>
+          <h3>同步策略</h3>
           <label class="toggle-row">
             <span>
               <strong>同步记忆</strong>
               <em>新对话到来后自动提取记忆</em>
             </span>
             <input id="realtimeUpdateToggle" class="toggle-input" type="checkbox">
+          </label>
+        </div>
+
+        <div class="settings-card">
+          <h3>注入策略</h3>
+          <label class="toggle-row">
+            <span>
+              <strong>详细注入</strong>
+              <em>对细节保留更高</em>
+            </span>
+            <input id="detailedInjectionToggle" class="toggle-input" type="checkbox">
           </label>
         </div>
 

@@ -1,0 +1,19 @@
+{
+  "id": "rec:anthropic_skills:Slack_GIF_生成",
+  "title": "Slack GIF 生成",
+  "description": "触发：需要处理与Slack GIF 生成相关的任务时 | 目标：A toolkit providing utilities and knowledge for creating ani | 步骤：from core.gif_builder import GIFBuilder；from PIL import Image, ImageDraw | 产出：结构化结果",
+  "kind": "skill",
+  "trigger": "需要处理与Slack GIF 生成相关的任务时",
+  "goal": "A toolkit providing utilities and knowledge for creating ani",
+  "steps": [
+    "from core.gif_builder import GIFBuilder",
+    "from PIL import Image, ImageDraw"
+  ],
+  "output_format": "结构化结果",
+  "guardrails": [],
+  "source_types": [
+    "recommended_catalog"
+  ],
+  "confidence": "medium",
+  "selected": false
+}

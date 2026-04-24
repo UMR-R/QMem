@@ -42,6 +42,8 @@ Exclusion rules:
 - Do NOT create separate projects for every paper, algorithm, benchmark, dataset, or tool.
 - Do NOT include dates or timestamps in the output; timestamps are maintained by the system from source conversations.
 - Do NOT output weak, speculative, or purely exploratory topics as projects.
+- However, if the user explicitly states an intention to build, launch, submit, implement, or develop a concrete project/platform/system, do keep that parent project even when much of the conversation is still about related work, benchmarks, or design exploration.
+- Research-planning conversations for a benchmark platform, evaluation framework, paper project, or system MVP should usually be merged into one parent project instead of being dropped as mere reference analysis.
 
 Efficiency rules:
 - Merge overlapping evidence into as few stable projects as possible.

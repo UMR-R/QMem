@@ -95,6 +95,8 @@ pip install -r backend_service/requirements.txt
 uvicorn backend_service.app:app --host 127.0.0.1 --port 8765 --reload
 ```
 
+`backend_service/requirements.txt` 就是本地后端首次安装时应使用的入口，并且已经包含 `backend_service.app` 间接导入的 `llm_memory_transferor` 运行时依赖。
+
 推荐后端地址：
 
 ```text

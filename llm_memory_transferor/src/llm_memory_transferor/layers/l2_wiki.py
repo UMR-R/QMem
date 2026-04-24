@@ -39,10 +39,8 @@ class L2Wiki:
             "projects",
             "workflows",
             "episodes",
-            "mappings",
             "metadata",
             "logs",
-            "evidence",
         ):
             (self.wiki_dir / sub).mkdir(parents=True, exist_ok=True)
 
@@ -55,6 +53,8 @@ class L2Wiki:
         self._move_if_needed(self._legacy_workflows_md, self._workflows_md)
 
         for legacy_json in (self.wiki_dir / "projects").glob("*.json"):
+            if legacy_json.name == "index.json":
+                continue
             stem = legacy_json.stem
             project_dir = (self.wiki_dir / "projects" / stem)
             project_dir.mkdir(parents=True, exist_ok=True)
@@ -441,7 +441,5 @@ class L2Wiki:
 - `platform_memory/`: 平台记忆快照
 - `metadata/`: 索引、display 文案和整理状态
 - `logs/`: 变更日志
-- `evidence/`: 证据层
-- `mappings/`: 映射与中间层
 """
         self._root_readme.write_text(content, encoding="utf-8")

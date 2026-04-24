@@ -81,6 +81,194 @@ class MemoryBuilder:
             return cls._normalize_str_list(value)
         return value
 
+    @staticmethod
+    def _canonical_memory_text(value: Any) -> str:
+        text = str(value or "").strip().lower()
+        text = re.sub(r"([a-z0-9])([\u4e00-\u9fff])", r"\1 \2", text)
+        text = re.sub(r"([\u4e00-\u9fff])([a-z0-9])", r"\1 \2", text)
+        text = re.sub(r"[\-_/]+", " ", text)
+        text = re.sub(r"\s+", " ", text)
+        return text.strip()
+
+    @staticmethod
+    def _normalize_match_text(value: Any) -> str:
+        return MemoryBuilder._canonical_memory_text(value)
+
+    @classmethod
+    def _memory_aliases(cls, value: Any) -> set[str]:
+        base = cls._canonical_memory_text(value)
+        if not base:
+            return set()
+
+        variants = {base}
+        expanded = re.sub(r"(?<=[a-z])2(?=[a-z])", " to ", base)
+        expanded = re.sub(r"\s+", " ", expanded).strip()
+        if expanded:
+            variants.add(expanded)
+
+        aliases: set[str] = set()
+        stopword_digits = {"to": "2", "for": "4"}
+        for variant in variants:
+            tokens = [token for token in re.split(r"[^a-z0-9\u4e00-\u9fff]+", variant) if token]
+            if not tokens:
+                continue
+            aliases.add(" ".join(tokens))
+            aliases.add("".join(tokens))
+            if len(tokens) >= 2:
+                acronym = "".join(stopword_digits.get(token, token[0]) for token in tokens if token)
+                if acronym:
+                    aliases.add(acronym)
+        return {alias for alias in aliases if cls._is_meaningful_alias(alias)}
+
+    @staticmethod
+    def _is_meaningful_alias(alias: str) -> bool:
+        normalized = re.sub(r"[^a-z0-9\u4e00-\u9fff]+", "", str(alias or "").lower())
+        if not normalized:
+            return False
+        if len(normalized) >= 4:
+            return True
+        if any(ch.isdigit() for ch in normalized) and len(normalized) >= 3:
+            return True
+        if re.search(r"[\u4e00-\u9fff]", normalized) and len(normalized) >= 2:
+            return True
+        return False
+
+    @classmethod
+    def _memory_concept_terms(cls, value: Any) -> set[str]:
+        generic_terms = {
+            "project", "platform", "system", "framework", "prototype", "mvp", "repo", "repository",
+            "项目", "平台", "系统", "框架", "原型", "代码库",
+        }
+        generic_suffixes = (
+            "project", "platform", "system", "framework", "prototype",
+            "项目", "平台", "系统", "框架", "原型",
+        )
+
+        terms: set[str] = set()
+        for alias in cls._memory_aliases(value):
+            pieces = [piece for piece in re.split(r"[^a-z0-9\u4e00-\u9fff]+", alias) if piece]
+            for piece in pieces:
+                normalized = piece.strip().lower()
+                if not normalized or normalized in generic_terms:
+                    continue
+                terms.add(normalized)
+                stripped = normalized
+                changed = True
+                while changed:
+                    changed = False
+                    for suffix in generic_suffixes:
+                        if stripped.endswith(suffix) and len(stripped) > len(suffix) + 1:
+                            stripped = stripped[:-len(suffix)]
+                            stripped = stripped.strip()
+                            changed = True
+                if stripped and stripped not in generic_terms and stripped != normalized:
+                    terms.add(stripped)
+        return {
+            term for term in terms
+            if cls._is_meaningful_alias(term)
+        }
+
+    @classmethod
+    def _infer_project_episode_ids(
+        cls,
+        item: dict[str, Any],
+        episode_map: dict[str, list[str]],
+        ep_by_id: dict[str, EpisodicMemory],
+    ) -> list[str]:
+        project_name = str(item.get("project_name") or "").strip()
+        if not project_name:
+            return []
+
+        exact = list(dict.fromkeys(episode_map.get(project_name, [])))
+        if exact:
+            return exact
+
+        project_goal = str(item.get("project_goal") or "").strip()
+        current_stage = str(item.get("current_stage") or "").strip()
+        relevant_entities = item.get("relevant_entities") or []
+        next_actions = item.get("next_actions") or []
+        unresolved = item.get("unresolved_questions") or []
+        combined_text = " ".join(
+            [
+                project_name,
+                project_goal,
+                current_stage,
+                *[str(entry) for entry in relevant_entities[:4]],
+                *[str(entry) for entry in next_actions[:4]],
+                *[str(entry) for entry in unresolved[:4]],
+            ]
+        )
+        normalized_name = cls._normalize_match_text(project_name)
+        normalized_text = cls._normalize_match_text(combined_text)
+        name_aliases = cls._memory_aliases(project_name)
+        text_aliases = cls._memory_aliases(combined_text)
+        project_concepts = cls._memory_concept_terms(combined_text)
+        match_tokens = [
+            token for token in re.split(r"[^a-zA-Z0-9\u4e00-\u9fff]+", " ".join(sorted(name_aliases)))
+            if token and len(token) >= 2
+        ]
+        if not match_tokens:
+            match_tokens = [
+                token for token in re.split(r"[^a-zA-Z0-9\u4e00-\u9fff]+", " ".join(sorted(text_aliases)))
+                if token and len(token) >= 2
+            ][:4]
+
+        inferred: list[str] = []
+        for episode_id, episode in ep_by_id.items():
+            summary_haystack = cls._normalize_match_text(
+                " ".join(
+                    [
+                        episode.summary,
+                        " ".join(episode.key_decisions),
+                        " ".join(episode.open_issues),
+                        " ".join(episode.relates_to_projects),
+                    ]
+                )
+            )
+            topic_haystack = cls._normalize_match_text(
+                " ".join(
+                    [
+                        episode.topic,
+                        " ".join(episode.topics_covered),
+                    ]
+                )
+            )
+            haystack = " ".join(part for part in [summary_haystack, topic_haystack] if part).strip()
+            haystack_aliases = cls._memory_aliases(haystack)
+            summary_aliases = cls._memory_aliases(summary_haystack)
+            summary_concepts = cls._memory_concept_terms(summary_haystack)
+            if not haystack:
+                continue
+            if normalized_name and normalized_name in summary_haystack:
+                inferred.append(episode_id)
+                continue
+            if any(
+                alias in summary_haystack or alias in summary_aliases
+                for alias in name_aliases
+            ):
+                inferred.append(episode_id)
+                continue
+            summary_overlap = sum(1 for token in match_tokens if token in summary_haystack)
+            if summary_overlap >= max(2, min(3, len(match_tokens))):
+                inferred.append(episode_id)
+                continue
+            concept_overlap = len(project_concepts & summary_concepts)
+            if concept_overlap >= 2:
+                inferred.append(episode_id)
+                continue
+            overlap = sum(1 for token in match_tokens if token in haystack)
+            if overlap >= max(3, min(4, len(match_tokens))) and (summary_overlap >= 1 or concept_overlap >= 1):
+                inferred.append(episode_id)
+                continue
+            explicit_project_intent = (
+                ("项目" in summary_haystack or "platform" in summary_haystack or "平台" in summary_haystack or "system" in summary_haystack)
+                and any(token in summary_haystack for token in ["想做", "希望做", "build", "develop", "构建", "搭建", "开发", "mvp"])
+            )
+            if explicit_project_intent and (overlap >= 1 or concept_overlap >= 1):
+                inferred.append(episode_id)
+
+        return list(dict.fromkeys(inferred))
+
     def build(
         self,
         conversations: list[RawConversation],
@@ -253,6 +441,7 @@ class MemoryBuilder:
             summary=data.get("summary") or "",
             key_decisions=data.get("key_decisions") or [],
             open_issues=data.get("open_issues") or [],
+            turn_refs=[turn.turn_id for turn in (conv.turns or []) if getattr(turn, "turn_id", "")],
             relates_to_profile=bool(data.get("relates_to_profile")),
             relates_to_preferences=bool(data.get("relates_to_preferences")),
             relates_to_projects=data.get("relates_to_projects") or [],
@@ -473,7 +662,7 @@ class MemoryBuilder:
                 continue
             existing = self.wiki.load_project(item["project_name"])
             proj = existing or ProjectMemory(project_name=item["project_name"])
-            ep_ids = episode_map.get(item["project_name"], [])
+            ep_ids = self._infer_project_episode_ids(item, episode_map, ep_by_id)
             created, updated = self._ep_timestamps(ep_ids, ep_by_id, global_earliest)
             for field in ProjectMemory.model_fields:
                 if field == "project_name":

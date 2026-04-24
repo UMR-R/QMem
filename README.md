@@ -95,6 +95,8 @@ pip install -r backend_service/requirements.txt
 uvicorn backend_service.app:app --host 127.0.0.1 --port 8765 --reload
 ```
 
+`backend_service/requirements.txt` is the intended first-run install entrypoint for the local backend and includes the runtime dependencies needed by the in-repo `llm_memory_transferor` modules imported by `backend_service.app`.
+
 Recommended backend URL:
 
 ```text

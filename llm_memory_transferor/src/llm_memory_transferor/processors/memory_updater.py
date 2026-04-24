@@ -38,6 +38,8 @@ class MemoryUpdater:
         new_conversation_text: str,
         l1_layer: L1SignalLayer | None = None,
         platform: str = "unknown",
+        conv_id: str = "",
+        turn_refs: list[str] | None = None,
         on_progress: Any = None,
         conversation_end_time: datetime | None = None,
     ) -> dict:
@@ -196,12 +198,14 @@ class MemoryUpdater:
             progress("Creating episode record...")
             ep = EpisodicMemory(
                 episode_id=str(uuid.uuid4())[:8],
+                conv_id=conv_id,
                 platform=platform,
                 topic=ep_data.get("topic") or "",
                 topics_covered=ep_data.get("topics_covered") or [],
                 summary=ep_data.get("summary") or "",
                 key_decisions=ep_data.get("key_decisions") or [],
                 open_issues=ep_data.get("open_issues") or [],
+                turn_refs=[str(turn_ref).strip() for turn_ref in (turn_refs or []) if str(turn_ref).strip()],
                 relates_to_profile=bool(ep_data.get("relates_to_profile")),
                 relates_to_preferences=bool(ep_data.get("relates_to_preferences")),
                 relates_to_projects=ep_data.get("relates_to_projects") or [],

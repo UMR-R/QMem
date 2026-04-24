@@ -1,0 +1,31 @@
+{
+  "id": "rec:anthropic_skills:画布与视觉设计",
+  "icon": "画",
+  "tags": [
+    "general"
+  ],
+  "keywords": [
+    "these",
+    "are",
+    "instructions",
+    "creating",
+    "design",
+    "philosophies",
+    "aesthetic",
+    "movements",
+    "then",
+    "expressed",
+    "visually",
+    "output"
+  ],
+  "persona_signals": [
+    "these",
+    "are",
+    "instructions",
+    "creating",
+    "design",
+    "philosophies"
+  ],
+  "usage_score": 0.96,
+  "source": "anthropic_skills:canvas-design"
+}

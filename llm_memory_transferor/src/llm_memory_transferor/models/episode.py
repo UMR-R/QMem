@@ -26,6 +26,7 @@ class EpisodicMemory(MemoryBase):
     summary: str = ""
     key_decisions: list[str] = Field(default_factory=list)
     open_issues: list[str] = Field(default_factory=list)
+    turn_refs: list[str] = Field(default_factory=list)
     # Relation flags — which persistent memory categories this episode touches
     relates_to_profile: bool = False
     relates_to_preferences: bool = False
@@ -48,6 +49,8 @@ class EpisodicMemory(MemoryBase):
                 lines.append(f"**Period:** {start_str}")
         if self.topics_covered:
             lines.append(f"**Topics:** {', '.join(self.topics_covered)}")
+        if self.turn_refs:
+            lines.append(f"**Turn Refs:** {', '.join(self.turn_refs[:6])}")
         # Relation flags
         relations = []
         if self.relates_to_profile:
