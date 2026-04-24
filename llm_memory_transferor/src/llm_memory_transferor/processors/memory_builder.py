@@ -269,6 +269,57 @@ class MemoryBuilder:
 
         return list(dict.fromkeys(inferred))
 
+    @classmethod
+    def _episode_has_project_intent(cls, ep: EpisodicMemory) -> bool:
+        text = cls._normalize_match_text(
+            " ".join(
+                [
+                    ep.topic,
+                    ep.summary,
+                    " ".join(ep.key_decisions),
+                    " ".join(ep.open_issues),
+                    " ".join(ep.topics_covered),
+                ]
+            )
+        )
+        if not text:
+            return False
+        object_markers = {
+            "project", "platform", "system", "framework", "prototype", "mvp",
+            "项目", "平台", "系统", "框架", "原型",
+        }
+        action_markers = {
+            "build", "develop", "implement", "launch", "submit", "design", "plan",
+            "构建", "搭建", "开发", "实现", "设计", "规划", "推进", "投稿",
+        }
+        return any(marker in text for marker in object_markers) and any(
+            marker in text for marker in action_markers
+        )
+
+    @classmethod
+    def _episode_has_persistent_topic_signal(cls, ep: EpisodicMemory) -> bool:
+        text = cls._normalize_match_text(
+            " ".join(
+                [
+                    ep.topic,
+                    ep.summary,
+                    " ".join(ep.key_decisions),
+                    " ".join(ep.open_issues),
+                    " ".join(ep.topics_covered),
+                ]
+            )
+        )
+        if not text:
+            return False
+        user_markers = {"用户", "user"}
+        durable_markers = {
+            "prefers", "preference", "likes", "tends", "chooses", "choice", "criterion",
+            "偏好", "喜欢", "倾向", "关注", "选择", "标准", "首选", "更适合",
+        }
+        return any(marker in text for marker in user_markers) and any(
+            marker in text for marker in durable_markers
+        )
+
     def build(
         self,
         conversations: list[RawConversation],
@@ -314,7 +365,8 @@ class MemoryBuilder:
             if ep is None:
                 skipped_noise += 1  # LLM parse failure
             elif not ep.relates_to_profile and not ep.relates_to_preferences \
-                    and not ep.relates_to_projects and not ep.relates_to_workflows:
+                    and not ep.relates_to_projects and not ep.relates_to_workflows \
+                    and not self._episode_has_persistent_topic_signal(ep):
                 skipped_noise += 1  # no memory-relevant content
             else:
                 self.wiki.save_episode(ep)
@@ -436,7 +488,7 @@ class MemoryBuilder:
             episode_id=str(uuid.uuid4())[:8],
             conv_id=conv.conv_id,
             platform=conv.platform,
-            topic=data.get("topic") or conv.title or conv.conv_id,
+            topic=data.get("topic") or data.get("title") or conv.title or conv.conv_id,
             topics_covered=data.get("topics_covered") or [],
             summary=data.get("summary") or "",
             key_decisions=data.get("key_decisions") or [],
@@ -503,16 +555,18 @@ class MemoryBuilder:
             return self._build_episode_digest(relevant[:40], l1_text)[:6000]
         elif filter_type == "projects":
             # Prefer episodes that already point to a project. Only add a small
-            # amount of unflagged context as fallback, otherwise literature surveys
-            # and comparison tables can inflate every referenced paper/algorithm
-            # into a fake project.
+            # amount of project-intent context as fallback, otherwise unrelated
+            # advice episodes can leak their decisions into active projects.
             flagged = [ep for ep in episodes if ep.relates_to_projects]
             if flagged:
-                backfill = max(0, min(8, 12 - len(flagged)))
-                unflagged = [ep for ep in episodes if not ep.relates_to_projects][:backfill]
+                backfill = max(0, min(6, 12 - len(flagged)))
+                unflagged = [
+                    ep for ep in episodes
+                    if not ep.relates_to_projects and self._episode_has_project_intent(ep)
+                ][:backfill]
                 relevant = (flagged + unflagged)[:40]
             else:
-                relevant = episodes[:15]
+                relevant = [ep for ep in episodes if self._episode_has_project_intent(ep)][:15]
             return self._build_episode_digest(relevant, l1_text, verbose=True)[:7000]
         elif filter_type == "workflows":
             relevant = [ep for ep in episodes if ep.relates_to_workflows] or episodes

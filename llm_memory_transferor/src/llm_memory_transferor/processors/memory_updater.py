@@ -200,7 +200,7 @@ class MemoryUpdater:
                 episode_id=str(uuid.uuid4())[:8],
                 conv_id=conv_id,
                 platform=platform,
-                topic=ep_data.get("topic") or "",
+                topic=ep_data.get("topic") or ep_data.get("title") or "",
                 topics_covered=ep_data.get("topics_covered") or [],
                 summary=ep_data.get("summary") or "",
                 key_decisions=ep_data.get("key_decisions") or [],
@@ -233,6 +233,20 @@ class MemoryUpdater:
                 if proj and new_episode_id not in proj.source_episode_ids:
                     proj.source_episode_ids.append(new_episode_id)
                     self.wiki.save_project(proj)
+            if workflow_updates:
+                workflows = self.wiki.load_workflows()
+                changed = False
+                touched_names = {
+                    str(item.get("workflow_name") or "").strip()
+                    for item in workflow_updates
+                    if isinstance(item, dict) and str(item.get("workflow_name") or "").strip()
+                }
+                for workflow in workflows:
+                    if workflow.workflow_name in touched_names and new_episode_id not in workflow.source_episode_ids:
+                        workflow.source_episode_ids.append(new_episode_id)
+                        changed = True
+                if changed:
+                    self.wiki.save_workflows(workflows)
 
         # --- Health check: detect L1 vs L2 divergence ---
         if l1_layer:

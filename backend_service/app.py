@@ -1701,6 +1701,19 @@ def _persistent_node_assets_missing(settings: dict[str, Any]) -> bool:
     return not _persistent_root(root).exists() or not _persistent_index_path(root).exists()
 
 
+def _clear_project_assets_for_rebuild(settings: dict[str, Any]) -> None:
+    projects_root = get_storage_root(settings, create=True) / "projects"
+    if not projects_root.exists():
+        return
+    for child in projects_root.iterdir():
+        if child.name == "index.json":
+            continue
+        if child.is_dir():
+            shutil.rmtree(child)
+        elif child.suffix in {".json", ".md"}:
+            child.unlink()
+
+
 def get_platform_memory_index_path(settings: dict[str, Any], *, create: bool = False) -> Path:
     return get_l1_root(settings, create=create) / "index.json"
 
@@ -4597,6 +4610,12 @@ def _build_relevant_raw_snippets(
             start = max(0, idx - window)
             end = min(len(conv.messages), idx + window + 1)
             snippet_indexes.update(range(start, end))
+        if exact_turn_refs:
+            for turn in _conversation_turns(conv):
+                if str(turn.get("turn_id") or "") in exact_turn_refs:
+                    snippet_indexes.update(
+                        idx for idx in turn.get("message_indexes", []) if isinstance(idx, int)
+                    )
         ordered_indexes = sorted(snippet_indexes)
         snippet_messages = [
             {
@@ -4722,7 +4741,7 @@ def _build_related_qa_turns(
                         continue
                     if segment_norm in msg_norm or (segment_head and segment_head in msg_norm):
                         matched_indexes.add(idx)
-        if not matched_indexes:
+        if not matched_indexes and not exact_turn_refs:
             continue
 
         turns = _conversation_turns(conv)
@@ -5565,8 +5584,10 @@ def rebuild_persistent_memory(
     prefs = builder._build_preferences(prefs_data, l1_text, earliest_ts, pref_ep_ids, ep_by_id)
     profile, prefs = _merge_l1_claims_into_profile_preferences(settings, profile, prefs)
     if profile.primary_task_types:
-        merged_task_types = list(
-            dict.fromkeys((prefs.primary_task_types or []) + list(profile.primary_task_types))
+        merged_task_types = _dedupe_primary_task_types(
+            (prefs.primary_task_types or []) + list(profile.primary_task_types),
+            [],
+            max_items=3,
         )
         prefs.primary_task_types = merged_task_types
         profile.primary_task_types = []
@@ -5575,6 +5596,7 @@ def rebuild_persistent_memory(
     stage("正在整理项目记忆...", 3)
     projects_context = builder._filter_digest(episodes, l1_text, "projects")
     projects_data = builder.llm.extract_json(builder.prompts["projects_system"], projects_context)
+    _clear_project_assets_for_rebuild(settings)
     projects = builder._build_projects(projects_data, l1_text, earliest_ts, project_ep_map, ep_by_id)
     projects = [project for project in projects if _looks_like_stable_project(project)]
     existing_projects = {project.project_name for project in wiki.list_projects()}
@@ -5624,8 +5646,10 @@ def rebuild_persistent_memory(
         existing=list(prefs.primary_task_types or []),
     )
     if inferred_task_types:
-        prefs.primary_task_types = list(
-            dict.fromkeys(list(prefs.primary_task_types or []) + inferred_task_types)
+        prefs.primary_task_types = _dedupe_primary_task_types(
+            list(prefs.primary_task_types or []) + inferred_task_types,
+            projects,
+            max_items=3,
         )
         wiki.save_preferences(prefs)
 
