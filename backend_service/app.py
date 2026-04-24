@@ -952,7 +952,22 @@ def _humanize_remote_skill_title(title: str, folder_name: str, description: str)
         return "Web 组件构建"
     if len(normalized) <= 4 and normalized.isupper():
         return f"{normalized} 能力"
-    return normalized
+    generic_title_mappings = [
+        (("test", "testing", "qa", "debug"), "应用测试"),
+        (("build", "builder", "scaffold", "prototype"), "应用构建"),
+        (("write", "writer", "rewriter", "rewrite", "copy"), "写作改写"),
+        (("document", "doc", "docx"), "文档处理"),
+        (("design", "ui", "ux", "frontend", "canvas"), "界面设计"),
+        (("brand", "style", "theme"), "风格设计"),
+        (("api", "integration", "sdk"), "API 集成"),
+        (("mcp", "server"), "MCP 服务开发"),
+        (("skill", "workflow"), "技能设计"),
+        (("requirements", "output"), "输出要求整理"),
+    ]
+    for keywords, mapped in generic_title_mappings:
+        if any(keyword in lowered for keyword in keywords) or any(keyword in description_l for keyword in keywords):
+            return mapped
+    return "通用任务辅助"
 
 
 def _extract_natural_paragraph(text: str) -> str:
@@ -1666,6 +1681,24 @@ def get_display_texts_path(settings: dict[str, Any], *, create: bool = False) ->
     if create:
         metadata_dir.mkdir(parents=True, exist_ok=True)
     return metadata_dir / "display_texts.json"
+
+
+def _persistent_memory_assets_missing(settings: dict[str, Any]) -> bool:
+    root = get_storage_root(settings)
+    required_paths = [
+        root / "profile" / "profile.json",
+        root / "preferences" / "preferences.json",
+        root / "metadata" / "index.json",
+        get_display_texts_path(settings, create=False),
+        root / "projects" / "index.json",
+        root / "workflows" / "index.json",
+    ]
+    return any(not path.exists() for path in required_paths)
+
+
+def _persistent_node_assets_missing(settings: dict[str, Any]) -> bool:
+    root = get_storage_root(settings)
+    return not _persistent_root(root).exists() or not _persistent_index_path(root).exists()
 
 
 def get_platform_memory_index_path(settings: dict[str, Any], *, create: bool = False) -> Path:
@@ -2552,6 +2585,32 @@ def _is_concrete_skill_record(
     return True
 
 
+def _project_can_derive_skill(project: ProjectMemory) -> bool:
+    text = _canonical_memory_text(
+        " ".join(
+            [
+                project.project_name,
+                project.project_goal,
+                project.current_stage,
+                " ".join(entry.text for entry in project.next_actions[:4]),
+            ]
+        )
+    )
+    if not text:
+        return False
+    project_tokens = {
+        "project", "platform", "system", "benchmark", "evaluation",
+        "项目", "平台", "系统", "评测", "基准",
+    }
+    reusable_tokens = {
+        "workflow", "sop", "pipeline", "automation", "template", "playbook", "methodology",
+        "流程", "自动化", "模板", "工作流", "方法论",
+    }
+    if any(token in text for token in project_tokens) and not any(token in text for token in reusable_tokens):
+        return False
+    return any(token in text for token in reusable_tokens)
+
+
 def load_platform_memory_records(settings: dict[str, Any]) -> list[dict[str, Any]]:
     root = get_l1_root(settings, create=True)
     records: list[dict[str, Any]] = []
@@ -2876,130 +2935,151 @@ def _merge_l1_claims_into_profile_preferences(
 
 
 def _normalize_primary_task_type(value: str) -> str:
-    text = _canonical_memory_text(value)
-    if not text:
+    label = re.sub(r"\s+", "", str(value or "").strip())
+    label = re.sub(r"^[：:、，,\-\s]+|[：:、，,\-\s]+$", "", label)
+    if not label:
         return ""
-    synonym_map = [
-        ({"recommend", "recommendation", "suggestion", "推荐", "推荐建议"}, "推荐"),
-        ({"researchplanning", "research planning", "research", "科研规划", "研究规划"}, "科研规划"),
-        ({"projectplanning", "project planning", "planning", "项目规划"}, "项目规划"),
-        ({"comparison", "compare", "analysis", "对比分析", "比较分析"}, "对比分析"),
-        ({"papersummary", "paper summary", "literature", "文献总结", "论文总结"}, "文献总结"),
-    ]
-    compact = text.replace(" ", "")
-    for aliases, label in synonym_map:
-        alias_compact = {alias.replace(" ", "") for alias in aliases}
-        if text in aliases or compact in alias_compact:
-            return label
-    return value.strip()
+    label = re.sub(r"^(用户常见|常见|长期|主要|高频)", "", label)
+    label = re.sub(r"(任务|需求|场景)$", "", label)
+    if not label or len(label) > 12:
+        return ""
+    return label
 
 
-def _infer_primary_task_types(
+def _task_type_similarity_key(value: str) -> str:
+    text = _canonical_memory_text(value).replace(" ", "")
+    for suffix in ("任务", "需求", "场景", "工作", "处理"):
+        if text.endswith(suffix):
+            text = text[: -len(suffix)]
+    return text
+
+
+def _dedupe_primary_task_types(
+    values: list[str],
+    projects: list[ProjectMemory] | None = None,
+    max_items: int = 3,
+) -> list[str]:
+    project_keys = {
+        _canonical_memory_text(project.project_name).replace(" ", "")
+        for project in projects or []
+        if str(project.project_name or "").strip()
+    }
+    labels: list[str] = []
+    keys: list[str] = []
+    for value in values:
+        label = _normalize_primary_task_type(value)
+        if not label:
+            continue
+        key = _task_type_similarity_key(label)
+        if not key:
+            continue
+        if any(project_key and (key in project_key or project_key in key) for project_key in project_keys):
+            continue
+        duplicate_index = next(
+            (
+                index
+                for index, existing_key in enumerate(keys)
+                if key == existing_key or key in existing_key or existing_key in key
+            ),
+            None,
+        )
+        if duplicate_index is not None:
+            if len(label) < len(labels[duplicate_index]):
+                labels[duplicate_index] = label
+                keys[duplicate_index] = key
+            continue
+        labels.append(label)
+        keys.append(key)
+        if len(labels) >= max_items:
+            break
+    return labels
+
+
+def _infer_primary_task_types_fallback(
     episodes: list[EpisodicMemory],
     projects: list[ProjectMemory],
     workflows: list[WorkflowMemory],
     existing: list[str] | None = None,
 ) -> list[str]:
-    scores: Counter[str] = Counter()
+    return _dedupe_primary_task_types([str(value) for value in existing or []], projects, max_items=3)
 
-    def score_text(text: str, weight: int = 1) -> None:
-        normalized = _canonical_memory_text(text)
-        if not normalized:
-            return
-        research_tokens = {"research", "benchmark", "evaluation", "paper", "experiment", "评测", "研究", "论文", "实验", "基准"}
-        planning_tokens = {"plan", "planning", "roadmap", "mvp", "design", "build", "develop", "项目", "规划", "方案", "设计", "构建", "搭建", "开发"}
-        recommendation_tokens = {"recommend", "recommended", "best", "choose", "fit", "推荐", "适合", "最好", "建议"}
-        comparison_tokens = {"compare", "comparison", "baseline", "survey", "related work", "对比", "比较", "现有工作", "调研"}
-        summary_tokens = {"summary", "summarize", "review", "literature", "总结", "综述", "文献"}
 
-        has_research = any(token in normalized for token in research_tokens)
-        has_planning = any(token in normalized for token in planning_tokens)
-        has_recommendation = any(token in normalized for token in recommendation_tokens)
-        has_comparison = any(token in normalized for token in comparison_tokens)
-        has_summary = any(token in normalized for token in summary_tokens)
-
-        if has_research and has_planning:
-            scores["科研规划"] += 2 * weight
-        elif has_research:
-            scores["科研规划"] += 1 * weight
-
-        if has_planning:
-            scores["项目规划"] += 1 * weight
-
-        if has_recommendation:
-            scores["推荐"] += 1 * weight
-
-        if has_comparison:
-            scores["对比分析"] += 1 * weight
-
-        if has_summary and (has_research or has_comparison):
-            scores["文献总结"] += 1 * weight
-
-    for value in existing or []:
-        normalized = _normalize_primary_task_type(str(value))
-        if normalized:
-            scores[normalized] += 1
-
-    for episode in episodes:
-        score_text(
-            " ".join(
-                [
-                    episode.topic,
-                    episode.summary,
-                    " ".join(episode.topics_covered),
-                    " ".join(episode.key_decisions),
-                    " ".join(episode.open_issues),
-                    " ".join(episode.relates_to_projects),
-                ]
-            ),
-            weight=1,
+def _infer_primary_task_types(
+    llm: LLMClient,
+    episodes: list[EpisodicMemory],
+    projects: list[ProjectMemory],
+    workflows: list[WorkflowMemory],
+    existing: list[str] | None = None,
+) -> list[str]:
+    episode_evidence = []
+    for episode in episodes[-12:]:
+        episode_evidence.append(
+            {
+                "topic": episode.topic,
+                "summary": episode.summary,
+                "key_decisions": episode.key_decisions[:3],
+                "open_issues": episode.open_issues[:2],
+                "relates_to_projects": episode.relates_to_projects[:3],
+            }
         )
 
-    for project in projects:
-        score_text(
-            " ".join(
-                [
-                    project.project_name,
-                    project.project_goal,
-                    project.current_stage,
-                    " ".join(entry.text for entry in project.finished_decisions[:3]),
-                    " ".join(entry.text for entry in project.unresolved_questions[:3]),
-                    " ".join(entry.text for entry in project.next_actions[:3]),
-                ]
-            ),
-            weight=2,
+    project_evidence = []
+    for project in projects[:8]:
+        project_evidence.append(
+            {
+                "name": project.project_name,
+                "goal": project.project_goal,
+                "stage": project.current_stage,
+                "next_actions": [entry.text for entry in project.next_actions[:3]],
+            }
         )
 
-    for workflow in workflows:
-        score_text(
-            " ".join(
-                [
-                    workflow.workflow_name,
-                    workflow.trigger_condition,
-                    workflow.preferred_artifact_format,
-                    workflow.review_style,
-                    " ".join(workflow.typical_steps[:4]),
-                ]
-            ),
-            weight=1,
+    workflow_evidence = []
+    for workflow in workflows[:8]:
+        workflow_evidence.append(
+            {
+                "name": workflow.workflow_name,
+                "trigger": workflow.trigger_condition,
+                "steps": workflow.typical_steps[:3],
+            }
         )
 
-    preferred_order = {
-        "科研规划": 0,
-        "项目规划": 1,
-        "对比分析": 2,
-        "文献总结": 3,
-        "推荐": 4,
-    }
-    ranked = [
-        label
-        for label, score in sorted(
-            scores.items(),
-            key=lambda item: (-item[1], preferred_order.get(item[0], 99), item[0]),
-        )
-        if score >= 2
-    ]
-    return ranked[:5]
+    system_prompt = (
+        "你是一个用户任务习惯归纳器。"
+        "请根据 episodic、project、workflow 证据，归纳用户最常见、最稳定的任务类型。"
+        "任务类型必须是宽泛、可复用的类别，而不是项目名、研究主题或一次性问题。"
+        "必须主动合并近义项，不要把同一类习惯拆成多个相近标签。"
+        "标签必须来自证据中体现的长期使用习惯，不要根据单个关键词强行命名。"
+        "输出数量控制在 1 到 3 个。"
+        "使用自然、简洁的中文短标签。"
+        "示例风格：研究规划、文档写作、资料分析、生活建议；这些只是粒度参考，不是固定备选项。"
+        "只返回严格 JSON：{\"task_types\": [\"...\", \"...\"]}"
+    )
+    user_prompt = json.dumps(
+        {
+            "existing": existing or [],
+            "episodes": episode_evidence,
+            "projects": project_evidence,
+            "workflows": workflow_evidence,
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+
+    try:
+        result = llm.extract_json(system_prompt, user_prompt)
+    except Exception:
+        result = {}
+
+    normalized: list[str] = []
+    if isinstance(result, dict):
+        for value in result.get("task_types", []) or []:
+            normalized.append(str(value))
+
+    deduped = _dedupe_primary_task_types(normalized, projects, max_items=3)
+    if deduped:
+        return deduped
+    return _infer_primary_task_types_fallback(episodes, projects, workflows, existing)
 
 
 def _extract_ordered_steps_from_text(text: str) -> list[str]:
@@ -3173,6 +3253,11 @@ def _build_recommended_display_text(item: dict[str, Any]) -> tuple[str, str, str
         (("skill", "creator"), "技能设计", "把能力整理成可复用的技能结构与说明", "技能草案 / 结构说明"),
         (("theme", "factory"), "主题风格生成", "生成一套统一的主题风格和配色说明", "主题方案 / 配色说明"),
         (("slack", "gif"), "Slack GIF 生成", "根据场景生成适合团队沟通的 GIF 创意与制作说明", "GIF 方案 / 制作步骤"),
+        (("code", "review"), "代码审查", "检查实现风险、行为问题与改进点", "审查意见 / 修改建议"),
+        (("bug", "debug", "troubleshoot"), "问题排查", "定位问题原因并整理修复步骤", "排查结论 / 修复建议"),
+        (("plan", "planning", "roadmap"), "任务规划", "把目标拆成可执行的计划与优先级", "行动计划 / 拆解清单"),
+        (("research", "paper", "literature"), "文献分析", "梳理论文重点、方法差异与结论", "文献总结 / 对比结论"),
+        (("email", "communication", "comms"), "沟通写作", "整理适合发送的沟通文本与说明", "邮件草稿 / 沟通稿"),
     ]
     for keywords, mapped_title, short_desc, output in mappings:
         if any(keyword in title_l for keyword in keywords) or all(keyword in text for keyword in keywords):
@@ -3233,9 +3318,32 @@ def _build_recommended_display_text(item: dict[str, Any]) -> tuple[str, str, str
             title = "内部沟通写作"
             short_desc = "撰写适合团队内部同步和传播的文案"
             output_format = "内部公告 / 沟通稿"
-    short_desc = (short_desc or "可复用的工作能力")[:36]
+    if not short_desc:
+        lowered = text.lower()
+        if any(keyword in lowered for keyword in ("test", "testing", "debug", "bug")):
+            short_desc = "测试应用并整理问题与修复建议"
+            output_format = output_format or "测试结果 / 修复建议"
+        elif any(keyword in lowered for keyword in ("build", "builder", "prototype", "scaffold")):
+            short_desc = "搭建原型或工作流，并整理实现步骤"
+            output_format = output_format or "实现步骤 / 原型说明"
+        elif any(keyword in lowered for keyword in ("write", "rewriter", "rewrite", "document", "doc")):
+            short_desc = "整理、改写并输出可直接使用的文本内容"
+            output_format = output_format or "文本草稿 / 修订稿"
+        elif any(keyword in lowered for keyword in ("design", "ui", "ux", "theme", "brand")):
+            short_desc = "整理设计方向、风格规范与实现说明"
+            output_format = output_format or "设计说明 / 风格方案"
+        elif any(keyword in lowered for keyword in ("api", "sdk", "integration", "mcp")):
+            short_desc = "整理接入方式、配置步骤与调用说明"
+            output_format = output_format or "接入说明 / 配置步骤"
+        elif any(keyword in lowered for keyword in ("research", "paper", "literature")):
+            short_desc = "梳理论文重点、方法差异与结论"
+            output_format = output_format or "文献总结 / 对比结论"
+        else:
+            short_desc = "协助完成一类可复用任务"
+            output_format = output_format or "结构化结果"
+    short_desc = short_desc[:36]
     if not re.search(r"[\u4e00-\u9fff]", title):
-        title = re.sub(r"\s+", " ", title).strip()
+        title = _humanize_remote_skill_title(title, str(item.get("folder_name") or ""), short_desc)
     return title, short_desc, output_format
 
 
@@ -3968,6 +4076,8 @@ def derive_my_skills(settings: dict[str, Any]) -> list[dict[str, Any]]:
     if len(items) < 5:
         active_projects = [project for project in _valid_projects(wiki) if project.is_active]
         for project in active_projects[: 5 - len(items)]:
+            if not _project_can_derive_skill(project):
+                continue
             skill_id = f"project:{project.project_name}"
             steps = [entry.text for entry in project.next_actions[:3]]
             if not steps:
@@ -5102,14 +5212,6 @@ def _load_persistent_distill_prompt() -> str:
 
 def _canonical_memory_text(value: Any) -> str:
     text = str(value or "").strip().lower()
-    canonical_patterns = [
-        (r"\btext[\s\-_]*to[\s\-_]*image\b", "text2image"),
-        (r"\bt2i\b", "text2image"),
-        (r"\btext[\s\-_]*to[\s\-_]*video\b", "text2video"),
-        (r"\bt2v\b", "text2video"),
-    ]
-    for pattern, replacement in canonical_patterns:
-        text = re.sub(pattern, replacement, text)
     text = re.sub(r"([a-z0-9])([\u4e00-\u9fff])", r"\1 \2", text)
     text = re.sub(r"([\u4e00-\u9fff])([a-z0-9])", r"\1 \2", text)
     text = re.sub(r"[\-_/]+", " ", text)
@@ -5318,43 +5420,6 @@ def apply_persistent_result(
         target["updated_at"] = now
 
 
-def _derive_persistent_seed_from_episode(episode: Any) -> list[dict[str, Any]]:
-    topic = str(getattr(episode, "topic", "") or "").strip()
-    summary = str(getattr(episode, "summary", "") or "").strip()
-    key_decisions = [str(item or "").strip() for item in (getattr(episode, "key_decisions", []) or []) if str(item or "").strip()]
-
-    haystack = _canonical_memory_text(" ".join([topic, summary, " ".join(key_decisions)]))
-    if not haystack:
-        return []
-
-    styling_tokens = {
-        "风衣", "长裙", "裙", "鞋", "鞋子", "配色", "搭配", "穿搭", "审美", "颜色",
-        "coat", "dress", "skirt", "shoe", "shoes", "outfit", "styling", "style", "color",
-    }
-    decision_tokens = {
-        "推荐", "更适合", "优于", "最推荐", "搭配建议",
-        "recommend", "better", "best", "pairing",
-    }
-    if not any(token in haystack for token in styling_tokens):
-        return []
-    if not any(token in haystack for token in decision_tokens):
-        return []
-
-    if "用户" in summary:
-        description = "用户会参考个人穿搭与配色建议，尤其关注外套、长裙和鞋子的搭配选择。"
-    else:
-        description = "用户关注个人穿搭与配色建议，尤其是单品之间的整体搭配效果。"
-
-    return [
-        {
-            "type": "topic",
-            "key": "personal_styling_and_color_matching",
-            "description": description,
-            "export_priority": "low",
-        }
-    ]
-
-
 def update_persistent_nodes_for_episode(
     settings: dict[str, Any],
     llm: LLMClient,
@@ -5388,10 +5453,6 @@ def update_persistent_nodes_for_episode(
     )
     result = llm.extract_json(_load_persistent_distill_prompt(), user_prompt)
     if isinstance(result, dict) and result:
-        if not result.get("new_nodes"):
-            seeded_nodes = _derive_persistent_seed_from_episode(episode)
-            if seeded_nodes:
-                result["new_nodes"] = seeded_nodes
         apply_persistent_result(pn_data, result, episode.episode_id, episode.platform)
         save_persistent_nodes(settings, pn_data)
 
@@ -5556,6 +5617,7 @@ def rebuild_persistent_memory(
     save_workflow_asset_library(settings, workflows)
 
     inferred_task_types = _infer_primary_task_types(
+        builder.llm,
         episodes,
         projects,
         workflows,
@@ -5670,7 +5732,12 @@ def _run_organize_job(job_id: str, settings: dict[str, Any]) -> None:
             "persistent_nodes": len(load_persistent_nodes(settings).get("nodes", {})),
             "nodes_maintained": False,
         }
-        should_rebuild_persistent = bool(changed_episodes) or l1_signature != previous_l1_signature or episode_signature != previous_episode_signature
+        should_rebuild_persistent = (
+            bool(changed_episodes)
+            or l1_signature != previous_l1_signature
+            or episode_signature != previous_episode_signature
+            or _persistent_memory_assets_missing(settings)
+        )
         if should_rebuild_persistent:
             persistent_result = rebuild_persistent_memory(
                 settings,
@@ -5700,6 +5767,7 @@ def _run_organize_job(job_id: str, settings: dict[str, Any]) -> None:
             bool(changed_episodes)
             or persistent_signature != previous_persistent_signature
             or node_maintenance_signature != previous_node_signature
+            or _persistent_node_assets_missing(settings)
         )
         if should_maintain_nodes:
             node_result = rebuild_persistent_nodes(settings, llm, wiki.list_episodes(), job_id, total_steps)

@@ -14,6 +14,7 @@ const STORAGE_KEYS = {
   detailedInjection: "detailedInjection",
   lastSyncAt: "last_sync_at",
   savedSkills: "saved_skill_ids",
+  organizeJobState: "organize_job_state",
 };
 
 const SUPPORTED_HOSTS = new Set([
@@ -62,6 +63,8 @@ const state = {
   lastSyncAt: null,
   apiConnectionStatus: "",
   pendingBackendCheckOnModalClose: false,
+  organizeJobState: null,
+  organizePollTimer: null,
   currentView: "home",
   currentSkillTab: "my",
   selectedSkillIds: new Set(),
@@ -726,7 +729,7 @@ function deriveMySkills(allData, pnData) {
       id: `persistent:${id}`,
       icon: "忆",
       title: node.description || node.key || id,
-      description: `${node.type || "memory"} · 由长期对话稳定提炼出的习惯与能力。`,
+      description: "由长期对话稳定提炼出的习惯与能力。",
     });
   });
 
@@ -735,7 +738,7 @@ function deriveMySkills(allData, pnData) {
       id: "skill:empty",
       icon: "空",
       title: "还没有提取出 Skill",
-      description: "我的 Skill 会从已整理的 memory 中自动提取。先开启同步或整理记忆，系统会逐步生成可复用的 Skill。",
+      description: "我的 Skill 会从已整理的记忆中自动提取。先开启同步或整理记忆，系统会逐步生成可复用的 Skill。",
       selectable: false,
     });
   }
@@ -756,7 +759,7 @@ function buildEmptySkillCard() {
     id: "skill:empty",
     icon: "空",
     title: "还没有提取出 Skill",
-    description: "我的 Skill 会从已整理的 memory 中自动提取。先开启同步或整理记忆，系统会逐步生成可复用的 Skill。",
+    description: "我的 Skill 会从已整理的记忆中自动提取。先开启同步或整理记忆，系统会逐步生成可复用的 Skill。",
     selectable: false,
   };
 }
@@ -1162,49 +1165,142 @@ async function runOrganize() {
   setOrganizeStatus(true, "正在整理记忆...", "准备开始");
 
   try {
-    toast("正在整理记忆...");
+    if (state.organizeJobState?.status === "running") {
+      toast("整理任务已在后台进行中");
+      startOrganizeStatePolling();
+      return;
+    }
+    toast("已开始整理记忆，后台会继续运行");
     const response = await backendApi().organizeMemory(state.backendUrl);
-    const jobId = response.job_id;
-    if (jobId) {
-      let job;
-      while (true) {
-        job = await backendApi().getJob(state.backendUrl, jobId);
-        const progress = job.progress || {};
-        setOrganizeStatus(
-          true,
-          progress.message || "正在整理记忆...",
-          typeof progress.current === "number" && typeof progress.total === "number"
-            ? `${progress.current} / ${progress.total}`
-            : "处理中"
-        );
-        if (job.status === "completed") break;
-        if (job.status === "failed") throw new Error(job.error || "整理失败");
-        await sleep(900);
-      }
-      const built = job.result?.episodes ?? 0;
-      const updatedEpisodes = job.result?.updated_episodes ?? 0;
-      const projects = job.result?.projects ?? 0;
-      const workflows = job.result?.workflows ?? 0;
-      const memorySummary = [`episodes ${built}`, `updated ${updatedEpisodes}`, `projects ${projects}`, `workflows ${workflows}`]
-        .join(" · ");
-      toast(`整理完成：${memorySummary}`);
+    if (response.job_id) {
+      state.organizeJobState = {
+        jobId: response.job_id,
+        status: "running",
+        message: "正在整理记忆...",
+        current: null,
+        total: null,
+        error: "",
+        acknowledgedAt: "",
+        updatedAt: new Date().toISOString(),
+      };
+      await storageSet({ [STORAGE_KEYS.organizeJobState]: state.organizeJobState });
+      await applyOrganizeState();
+      startOrganizeStatePolling();
     } else {
       toast("整理完成，记忆已更新");
+      setOrganizeStatus(false);
+      organizeBtn.disabled = false;
+      organizeBtn.style.opacity = "";
     }
-    state.lastSyncAt = new Date().toISOString();
-    state.memoryItemsByCategory = {};
-    await storageSet({ [STORAGE_KEYS.lastSyncAt]: state.lastSyncAt });
-    await refreshSummary();
   } catch (err) {
     logPopupError("Organize memory failed", err, {
       backendUrl: state.backendUrl,
     });
     toast(`整理失败：${err.message}`, true);
-  } finally {
     setOrganizeStatus(false);
     organizeBtn.disabled = false;
     organizeBtn.style.opacity = "";
   }
+}
+
+async function syncOrganizeStateFromStorage() {
+  const stored = await storageGet(STORAGE_KEYS.organizeJobState);
+  state.organizeJobState = stored[STORAGE_KEYS.organizeJobState] || null;
+  return state.organizeJobState;
+}
+
+function stopOrganizeStatePolling() {
+  if (!state.organizePollTimer) return;
+  clearInterval(state.organizePollTimer);
+  state.organizePollTimer = null;
+}
+
+async function applyOrganizeState() {
+  const organizeBtn = document.getElementById("organizeBtn");
+  const jobState = state.organizeJobState;
+  if (!jobState || !jobState.jobId) {
+    setOrganizeStatus(false);
+    if (organizeBtn) {
+      organizeBtn.disabled = false;
+      organizeBtn.style.opacity = "";
+    }
+    stopOrganizeStatePolling();
+    return;
+  }
+
+  if (jobState.status === "running") {
+    setOrganizeStatus(
+      true,
+      jobState.message || "正在整理记忆...",
+      typeof jobState.current === "number" && typeof jobState.total === "number"
+        ? `${jobState.current} / ${jobState.total}`
+        : "处理中"
+    );
+    if (organizeBtn) {
+      organizeBtn.disabled = true;
+      organizeBtn.style.opacity = "0.65";
+    }
+    return;
+  }
+
+  stopOrganizeStatePolling();
+  setOrganizeStatus(false);
+  if (organizeBtn) {
+    organizeBtn.disabled = false;
+    organizeBtn.style.opacity = "";
+  }
+
+  if (jobState.status === "completed" && !jobState.acknowledgedAt) {
+    const built = jobState.result?.episodes ?? 0;
+    const updatedEpisodes = jobState.result?.updated_episodes ?? 0;
+    const projects = jobState.result?.projects ?? 0;
+    const workflows = jobState.result?.workflows ?? 0;
+    const memorySummary = [`episodes ${built}`, `updated ${updatedEpisodes}`, `projects ${projects}`, `workflows ${workflows}`]
+      .join(" · ");
+    toast(`整理完成：${memorySummary}`);
+    state.lastSyncAt = new Date().toISOString();
+    state.memoryItemsByCategory = {};
+    state.organizeJobState = { ...jobState, acknowledgedAt: new Date().toISOString() };
+    await storageSet({
+      [STORAGE_KEYS.lastSyncAt]: state.lastSyncAt,
+      [STORAGE_KEYS.organizeJobState]: state.organizeJobState,
+    });
+    await refreshSummary();
+    return;
+  }
+
+  if (jobState.status === "failed" && !jobState.acknowledgedAt) {
+    toast(`整理失败：${jobState.error || "整理失败"}`, true);
+    state.organizeJobState = { ...jobState, acknowledgedAt: new Date().toISOString() };
+    await storageSet({ [STORAGE_KEYS.organizeJobState]: state.organizeJobState });
+  }
+}
+
+function startOrganizeStatePolling() {
+  stopOrganizeStatePolling();
+  state.organizePollTimer = setInterval(() => {
+    backendApi().getJob(state.backendUrl, state.organizeJobState?.jobId || "")
+      .then(async job => {
+        state.organizeJobState = {
+          ...(state.organizeJobState || {}),
+          jobId: job.id,
+          status: job.status,
+          message: job.progress?.message || "正在整理记忆...",
+          current: typeof job.progress?.current === "number" ? job.progress.current : null,
+          total: typeof job.progress?.total === "number" ? job.progress.total : null,
+          error: job.error || "",
+          result: job.result || null,
+          updatedAt: new Date().toISOString(),
+        };
+        await storageSet({ [STORAGE_KEYS.organizeJobState]: state.organizeJobState });
+        await applyOrganizeState();
+      })
+      .catch(err => {
+        logPopupError("Sync organize job state failed", err, {
+          jobId: state.organizeJobState?.jobId,
+        });
+      });
+  }, 900);
 }
 
 async function syncStorageToFiles() {
@@ -1912,6 +2008,7 @@ async function init() {
     STORAGE_KEYS.detailedInjection,
     STORAGE_KEYS.lastSyncAt,
     STORAGE_KEYS.savedSkills,
+    STORAGE_KEYS.organizeJobState,
   ]);
 
   state.apiProvider = settings[STORAGE_KEYS.apiProvider] || state.apiProvider;
@@ -1926,6 +2023,7 @@ async function init() {
   state.realtimeUpdate = !!settings[STORAGE_KEYS.realtimeUpdate];
   state.detailedInjection = !!settings[STORAGE_KEYS.detailedInjection];
   state.lastSyncAt = settings[STORAGE_KEYS.lastSyncAt] || null;
+  state.organizeJobState = settings[STORAGE_KEYS.organizeJobState] || null;
   state.dirHandle = await loadSavedDir();
   const savedSkillIds = settings[STORAGE_KEYS.savedSkills] || [];
   state.selectedSkillIds = new Set(savedSkillIds);
@@ -1968,6 +2066,10 @@ async function init() {
   await refreshSummary();
   await initializeDefaultMemorySelection();
   renderSelectionList();
+  await applyOrganizeState();
+  if (state.organizeJobState?.status === "running") {
+    startOrganizeStatePolling();
+  }
 
   try {
     const result = await backendApi().getMySkills(state.backendUrl);
