@@ -32,7 +32,7 @@ The current repository has three cooperating parts:
    - preferences
    - projects
    - workflows
-5. The backend distills long-term persistent nodes into `interest_discoveries/`.
+5. The backend stores the Daily Notes category in `daily_notes/`.
 6. If realtime memory sync is enabled, new rounds can also trigger incremental updates through `MemoryUpdater` and the background memory engine.
 
 ## Popup Views
@@ -144,7 +144,7 @@ The active memory root currently contains directories such as:
 - `projects/`: project memory
 - `workflows/`: workflow memory
 - `skills/`: saved skills
-- `interest_discoveries/`: distilled persistent nodes
+- `daily_notes/`: Daily Notes, including reusable daily-life context, personal choices, tastes, outfits, shopping, and other non-project context
 - `metadata/`: indexes, organize state, display texts
 
 The checked-in sample memory root in this repo is `llm_mem4/`.

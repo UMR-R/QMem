@@ -60,6 +60,7 @@ RECOMMENDED_REMOTE_SOURCES = [
 ]
 LLM_TRANSFEROR_SRC = PROJECT_ROOT / "llm_memory_transferor" / "src"
 JOB_LOCK = threading.Lock()
+L2_PERSISTENT_NODE_MAINTENANCE_VERSION = "l2_persistent_nodes_v2_daily_notes"
 
 if str(LLM_TRANSFEROR_SRC) not in sys.path:
     sys.path.insert(0, str(LLM_TRANSFEROR_SRC))
@@ -143,14 +144,14 @@ CATEGORY_LABELS = {
         "preferences": "偏好设置",
         "projects": "项目记忆",
         "workflows": "工作流 / SOP",
-        "persistent": "兴趣发现",
+        "daily_notes": "日常记忆",
     },
     "en": {
         "profile": "Profile",
         "preferences": "Preferences",
         "projects": "Projects",
         "workflows": "Workflows / SOP",
-        "persistent": "Topics & Habits",
+        "daily_notes": "Daily Notes",
     },
 }
 
@@ -1698,7 +1699,8 @@ def _persistent_memory_assets_missing(settings: dict[str, Any]) -> bool:
 
 def _persistent_node_assets_missing(settings: dict[str, Any]) -> bool:
     root = get_storage_root(settings)
-    return not _persistent_root(root).exists() or not _persistent_index_path(root).exists()
+    persistent_root = _readable_persistent_root(root)
+    return not persistent_root.exists() or not _readable_persistent_index_path(root).exists()
 
 
 def _clear_project_assets_for_rebuild(settings: dict[str, Any]) -> None:
@@ -3775,7 +3777,7 @@ def build_memory_categories(settings: dict[str, Any], locale: str | None = None)
         {"id": "preferences", "label": labels["preferences"], "count": summary.breakdown["preferences"]},
         {"id": "projects", "label": labels["projects"], "count": summary.breakdown["projects"]},
         {"id": "workflows", "label": labels["workflows"], "count": summary.breakdown["workflows"]},
-        {"id": "persistent", "label": labels["persistent"], "count": summary.breakdown["persistent"]},
+        {"id": "daily_notes", "label": labels["daily_notes"], "count": summary.breakdown["persistent"]},
     ]
 
 
@@ -3784,11 +3786,34 @@ def _default_persistent_payload() -> dict[str, Any]:
 
 
 def _persistent_root(root: Path) -> Path:
+    return root / "daily_notes"
+
+
+def _legacy_interest_discoveries_root(root: Path) -> Path:
     return root / "interest_discoveries"
+
+
+def _readable_persistent_root(root: Path) -> Path:
+    current = _persistent_root(root)
+    if current.exists():
+        return current
+    legacy = _legacy_interest_discoveries_root(root)
+    if legacy.exists():
+        try:
+            legacy.rename(current)
+            return current
+        except OSError:
+            pass
+        return legacy
+    return current
 
 
 def _persistent_index_path(root: Path) -> Path:
     return _persistent_root(root) / "index.json"
+
+
+def _readable_persistent_index_path(root: Path) -> Path:
+    return _readable_persistent_root(root) / "index.json"
 
 
 def _legacy_persistent_path(root: Path) -> Path:
@@ -3828,8 +3853,8 @@ def _persistent_node_markdown(node_id: str, node: dict[str, Any]) -> str:
 
 
 def _load_persistent_nodes_from_directory(root: Path) -> dict[str, Any]:
-    persistent_root = _persistent_root(root)
-    index_path = _persistent_index_path(root)
+    persistent_root = _readable_persistent_root(root)
+    index_path = _readable_persistent_index_path(root)
     payload = _default_persistent_payload()
     if not persistent_root.exists():
         return payload
@@ -3918,7 +3943,7 @@ def memory_items_for_category(settings: dict[str, Any], category: str, locale: s
             for workflow in _valid_workflows(wiki)
         ]
 
-    if category == "persistent":
+    if category in {"persistent", "daily_notes"}:
         persistent = load_persistent_nodes(settings)
         nodes = persistent.get("nodes", {}) if isinstance(persistent, dict) else {}
         items = []
@@ -3926,7 +3951,7 @@ def memory_items_for_category(settings: dict[str, Any], category: str, locale: s
             title = node.get("description") or node.get("key") or node_id
             if _is_noise_memory_text(title):
                 continue
-            item_id = f"persistent:{node_id}"
+            item_id = f"daily_notes:{node_id}"
             display_entry = _get_persistent_display_entry(settings, display_cache, item_id, str(title))
             items.append(
                 {
@@ -4439,7 +4464,7 @@ def parse_selected_ids(selected_ids: list[str]) -> dict[str, set[str]]:
                 selected["workflows"].add(suffix)
             else:
                 selected["workflows"].add("*")
-        elif prefix == "persistent":
+        elif prefix in {"persistent", "daily_notes"}:
             if suffix and suffix != "default":
                 selected["persistent"].add(suffix)
             else:
@@ -5412,6 +5437,23 @@ def _load_persistent_distill_prompt() -> str:
     return (PROJECT_ROOT / "prompts" / "persistent_node_distill_bg.txt").read_text(encoding="utf-8")
 
 
+def compute_l2_persistent_node_maintenance_signature(
+    *,
+    episode_signature: str,
+    persistent_signature: str,
+    l1_signature: str,
+) -> str:
+    return _hash_payload(
+        {
+            "episode_signature": episode_signature,
+            "persistent_signature": persistent_signature,
+            "l1_signature": l1_signature,
+            "maintenance_version": L2_PERSISTENT_NODE_MAINTENANCE_VERSION,
+            "prompt_hash": _hash_payload(_load_persistent_distill_prompt()),
+        }
+    )
+
+
 def _canonical_memory_text(value: Any) -> str:
     text = str(value or "").strip().lower()
     text = re.sub(r"([a-z0-9])([\u4e00-\u9fff])", r"\1 \2", text)
@@ -5562,8 +5604,8 @@ def save_persistent_nodes(settings: dict[str, Any], data: dict[str, Any]) -> Non
         encoding="utf-8",
     )
     (persistent_root / "README.md").write_text(
-        "# Interest Discoveries\n\n"
-        "此目录存放“兴趣发现”层的节点化记忆资产。\n\n"
+        "# Daily Notes\n\n"
+        "此目录存放“日常记忆”层的节点化记忆资产，包含生活场景、个人选择、口味、穿搭、消费等不属于项目/画像/工作流的上下文。\n\n"
         "- `index.json`：索引与汇总\n"
         "- `<node-id>/node.json`：单条节点结构化数据\n"
         "- `<node-id>/node.md`：单条节点说明\n",
@@ -5573,6 +5615,10 @@ def save_persistent_nodes(settings: dict[str, Any], data: dict[str, Any]) -> Non
     legacy_path = _legacy_persistent_path(root)
     if legacy_path.exists():
         legacy_path.unlink()
+
+    legacy_root = _legacy_interest_discoveries_root(root)
+    if legacy_root.exists() and legacy_root != persistent_root:
+        shutil.rmtree(legacy_root)
 
 
 def apply_persistent_result(
@@ -5831,7 +5877,7 @@ def rebuild_persistent_nodes(
             progress={
                 "current": total_steps,
                 "total": total_steps,
-                "message": f"正在维护 persistent 节点：{index}/{len(episodes)}",
+                "message": f"正在维护结构化记忆节点：{index}/{len(episodes)}",
             },
         )
         update_persistent_nodes_for_episode(settings, llm, episode)
@@ -6168,12 +6214,10 @@ def _run_organize_job(job_id: str, settings: dict[str, Any]) -> None:
 
         episode_signature = compute_episode_signature(wiki)
         persistent_signature = compute_persistent_signature(wiki)
-        node_maintenance_signature = _hash_payload(
-            {
-                "episode_signature": episode_signature,
-                "persistent_signature": persistent_signature,
-                "l1_signature": l1_signature,
-            }
+        node_maintenance_signature = compute_l2_persistent_node_maintenance_signature(
+            episode_signature=episode_signature,
+            persistent_signature=persistent_signature,
+            l1_signature=l1_signature,
         )
         should_maintain_nodes = (
             bool(changed_episodes)
@@ -6190,7 +6234,7 @@ def _run_organize_job(job_id: str, settings: dict[str, Any]) -> None:
             update_job(
                 job_id,
                 status="running",
-                progress={"current": total_steps, "total": total_steps, "message": "persistent 节点未变化，跳过维护"},
+                progress={"current": total_steps, "total": total_steps, "message": "结构化记忆节点未变化，跳过维护"},
             )
 
         episode_signature = compute_episode_signature(wiki)

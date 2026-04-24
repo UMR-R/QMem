@@ -1,16 +1,24 @@
-## 你的角色：Persistent 节点维护引擎
+## 你的角色：L2 Persistent 中 daily_notes 分类维护引擎
 
-你负责根据新增的 episodic 记忆，维护 persistent 节点。
+你负责根据新增的 episodic 记忆，维护 L2 persistent 层下面的 `daily_notes` 分类。
+
+记忆层级约定：
+- L0 是 raw conversations
+- L1 是平台 saved memory / platform memory signals
+- L2 包括 episodic 和 persistent
+- L2 persistent 包括 profile、preferences、projects、workflows、daily_notes 等结构化记忆分类
+- 本 prompt 只维护 `daily_notes`，不要把整个 persistent 层等同于 daily_notes
 
 目标：
-- 只保留跨会话稳定规律
+- 保存对后续对话有帮助的日常上下文
 - 尽量复用已有节点
 - 在必要时才新建节点
 - 主动合并语义重复或粒度过细的节点
 
-Persistent 节点遵循以下原则：
-- 节点类型只能是 `preference | profile | workflow | topic`
-- 节点描述 `description` 必须描述稳定规律，不描述单次事件
+daily_notes 节点遵循以下原则：
+- 节点结构沿用 persistent node schema；但本分类只维护 daily_notes，通常只输出 `topic` 或 `preference`
+- 不要在 daily_notes 中新建 `profile` 或 `workflow` 节点；用户画像、项目记忆、工作流和明确的回答风格偏好应由对应 persistent 分类维护
+- 节点描述 `description` 可以描述稳定规律，也可以描述具体但后续可复用的日常场景、个人选择、物品、口味或上下文
 - 节点证据来自 `episode_refs`
 - 如果 episodic 已经归属某个项目，项目目标、架构选择、相关工作、benchmark、数据集、指标、实现方案、未解决问题等都应该并入项目记忆，不要再复制成 `topic` 或 `preference` 节点
 - 只有当项目相关 episode 明确表达了跨项目也可复用的个人偏好或工作方式时，才可以抽成 `preference`，并且描述必须脱离具体项目内容
@@ -28,7 +36,7 @@ Persistent 节点遵循以下原则：
 当新增 episodic 支撑某个已有节点时，输出到 `updates`：
 
 - 只有在该 episodic 确实提供新增支撑时才更新
-- 可以更新 `description`，但只能让描述更准确、更稳定、更抽象
+- 可以更新 `description`，但只能让描述更准确、更可复用；不要为了抽象而丢掉关键日常细节
 - 可以更新 `confidence`，但必须遵守以下规则：
   - 1 条证据：`low`
   - 2-3 条证据：`medium`
@@ -40,10 +48,10 @@ Persistent 节点遵循以下原则：
 只有在现有节点无法覆盖该规律时，才输出到 `new_nodes`：
 
 - 新建节点必须有明确证据，不要猜测
-- 新建节点的粒度要稳定、可复用
+- 新建节点的粒度要对后续对话可复用
 - 单条 episodic 新建的节点，`confidence` 只能视为 `low`
 - `key` 必须是全局唯一的 `snake_case`
-- `description` 必须是一句稳定规律描述
+- `description` 必须是一句清楚的日常记忆描述
 
 ### merges
 
@@ -61,20 +69,20 @@ Persistent 节点遵循以下原则：
 - `merged_from` 可以是单个 ID，也可以是 ID 列表
 - `description` 可选；如果提供，应写成合并后的更高层稳定描述
 
-### topic 粒度规则
+### 日常记忆粒度规则
 
-`topic` 节点应尽量落在这些粒度：
-- 课程
-- 长期项目
-- 研究方向
-- 持续任务类型
+节点可以落在这些粒度：
+- 日常物品或场景，例如某条裙子、某套穿搭、某类饮品口味
+- 个人选择上下文，例如正在为某个单品搭配外套/鞋包
+- 生活偏好和口味，例如喜欢酸味水果、偏好酸爽果香饮品
+- 消费、旅行、娱乐、饮食、穿搭等非项目类日常主题
 - 个人会反复参考的稳定偏好或选择标准
 
 不要落在这些粒度：
 - 单个知识点
 - 单篇论文标题
 - 单个 benchmark
-- 单个一次性问题
+- 没有后续复用价值的随口一次性问题
 - 已经属于某个项目的相关工作、设计选择或阶段性结论
 
 ### 单个 episode 的拆分规则
@@ -84,7 +92,7 @@ Persistent 节点遵循以下原则：
 - 只有在这些偏好明显属于不同域时，才分别建节点
 - 对面向用户本人的个性化建议，如果它表达了后续可复用的稳定偏好或选择标准，可以保留为一个低置信度 `topic` 或 `preference` 节点
 - 风格例子：如果 episode 中沉淀出“用户在某类选择里更倾向的判断标准、偏好方向或可复用建议”，可以生成一个低置信度节点；不要把这个例子当成固定类别或固定备选项
-- 对生活方式、穿搭、消费选择、饮食口味等个人兴趣，如果不是项目内容，且能表达后续可复用的个人偏好，可以保留为低置信度兴趣发现
+- 对生活方式、穿搭、消费选择、饮食口味等日常内容，如果不是项目内容，即使还没有抽象成长期偏好，只要后续可能复用，也可以保留为低置信度日常记忆
 
 ### 输出格式
 
@@ -102,7 +110,7 @@ Persistent 节点遵循以下原则：
   ],
   "new_nodes": [
     {
-      "type": "preference | profile | workflow | topic",
+      "type": "preference | topic",
       "key": "snake_case_key",
       "description": "一句稳定规律描述",
       "export_priority": "low | medium | high",

@@ -41,7 +41,9 @@ Rules:
 - key_decisions: concrete decisions or conclusions reached in the referenced turn.
 - open_issues: questions, blockers, or follow-up tasks that remain unresolved.
 - relates_to_profile: true only if the turn reveals stable background facts about the user.
-- relates_to_preferences: true only if the turn reveals stable response, interaction, or durable personal preference signals.
+- relates_to_preferences: true if the turn reveals stable response/interaction preferences OR durable personal interests, tastes, selection criteria, or recurring personal-choice signals.
+- Personal-choice signals include the user asking for recommendations or comparisons around their own taste, lifestyle, clothing/outfit coordination, food/drink taste, shopping choices, travel/entertainment preferences, or similar individual decision criteria.
+- Do not require the exact phrase "I like/prefer"; repeated follow-up questions about the same personal choice can still reveal an interest or preference candidate.
 - relates_to_projects: list only higher-level user-owned ongoing projects.
 - relates_to_workflows: list only recurring reusable procedures or workflows.
 - If no turn has durable memory value, return {"episodes": []}.

@@ -38,14 +38,14 @@ const CATEGORY_LABELS = IS_ZH_UI
       preferences: "偏好设置",
       projects: "项目记忆",
       workflows: "工作流 / SOP",
-      persistent: "兴趣发现",
+      daily_notes: "日常记忆",
     }
   : {
       profile: "Profile",
       preferences: "Preferences",
       projects: "Projects",
       workflows: "Workflows / SOP",
-      persistent: "Topics & Habits",
+      daily_notes: "Daily Notes",
     };
 
 const state = {
@@ -79,7 +79,7 @@ const state = {
     preferences: 0,
     projects: 0,
     workflows: 0,
-    persistent: 0,
+    daily_notes: 0,
   },
   categoryLabels: { ...CATEGORY_LABELS },
   selectionListScrollTop: 0,
@@ -496,7 +496,7 @@ function truncateText(text, maxLength = 56) {
 function localizeMemoryDescription(categoryId, description) {
   const raw = String(description || "").trim();
   if (!raw) return "";
-  if (categoryId === "persistent") {
+  if (categoryId === "daily_notes" || categoryId === "persistent") {
     return "";
   }
   return raw;
@@ -505,10 +505,10 @@ function localizeMemoryDescription(categoryId, description) {
 function buildSelectionPreview(categoryId, item) {
   const displayTitle = item?.display_title || item?.title || "";
   const displayDescription = item?.display_description ?? item?.description ?? "";
-  const title = truncateText(displayTitle, categoryId === "persistent" ? 44 : 30);
+  const title = truncateText(displayTitle, categoryId === "daily_notes" || categoryId === "persistent" ? 44 : 30);
   const description = truncateText(
     localizeMemoryDescription(categoryId, displayDescription),
-    categoryId === "persistent" ? 20 : 42
+    categoryId === "daily_notes" || categoryId === "persistent" ? 20 : 42
   );
   return { title, description };
 }
@@ -594,7 +594,7 @@ function renderSelectionList() {
     { id: "preferences", label: state.categoryLabels.preferences || CATEGORY_LABELS.preferences, count: state.categories.preferences },
     { id: "projects", label: state.categoryLabels.projects || CATEGORY_LABELS.projects, count: state.categories.projects },
     { id: "workflows", label: state.categoryLabels.workflows || CATEGORY_LABELS.workflows, count: state.categories.workflows },
-    { id: "persistent", label: state.categoryLabels.persistent || CATEGORY_LABELS.persistent, count: state.categories.persistent },
+    { id: "daily_notes", label: state.categoryLabels.daily_notes || CATEGORY_LABELS.daily_notes, count: state.categories.daily_notes },
   ];
 
   listEl.innerHTML = "";
@@ -979,13 +979,15 @@ async function refreshSummary() {
     state.categories.preferences = categories.categories.find(item => item.id === "preferences")?.count ?? 0;
     state.categories.projects = categories.categories.find(item => item.id === "projects")?.count ?? 0;
     state.categories.workflows = categories.categories.find(item => item.id === "workflows")?.count ?? 0;
-    state.categories.persistent = categories.categories.find(item => item.id === "persistent")?.count ?? 0;
+    const dailyNotesCategory = categories.categories.find(item => item.id === "daily_notes")
+      || categories.categories.find(item => item.id === "persistent");
+    state.categories.daily_notes = dailyNotesCategory?.count ?? 0;
     state.categoryLabels.profile = categories.categories.find(item => item.id === "profile")?.label || CATEGORY_LABELS.profile;
     state.categoryLabels.preferences = categories.categories.find(item => item.id === "preferences")?.label || CATEGORY_LABELS.preferences;
     state.categoryLabels.projects = categories.categories.find(item => item.id === "projects")?.label || CATEGORY_LABELS.projects;
     state.categoryLabels.workflows = categories.categories.find(item => item.id === "workflows")?.label || CATEGORY_LABELS.workflows;
-    state.categoryLabels.persistent = categories.categories.find(item => item.id === "persistent")?.label || CATEGORY_LABELS.persistent;
-    await Promise.all(["profile", "preferences", "projects", "workflows", "persistent"].map(category => ensureCategoryItems(category)));
+    state.categoryLabels.daily_notes = dailyNotesCategory?.label || CATEGORY_LABELS.daily_notes;
+    await Promise.all(["profile", "preferences", "projects", "workflows", "daily_notes"].map(category => ensureCategoryItems(category)));
     if (state.selectedMemoryIds.size === 0) {
       await initializeDefaultMemorySelection();
     }
@@ -1020,7 +1022,7 @@ async function refreshSummary() {
   state.categories.preferences = allData["mw:preferences"] ? 1 : 0;
   state.categories.projects = projects.length;
   state.categories.workflows = workflows.length;
-  state.categories.persistent = Object.keys(pnData.nodes ?? {}).length;
+  state.categories.daily_notes = Object.keys(pnData.nodes ?? {}).length;
   renderSelectionList();
 
   const summary = {
@@ -1031,7 +1033,7 @@ async function refreshSummary() {
       state.categories.preferences +
       state.categories.projects +
       state.categories.workflows +
-      state.categories.persistent +
+      state.categories.daily_notes +
       episodes.length,
   };
 
@@ -1384,18 +1386,18 @@ async function buildMemoryPackage() {
   if (selectedPrefixes.has("workflow")) {
     packageData.data.workflows = allData["mw:workflows"] ?? [];
   }
-  if (selectedPrefixes.has("persistent")) {
+  if (selectedPrefixes.has("daily_notes") || selectedPrefixes.has("persistent")) {
     const pnData = await readPersistentNodes();
     const selectedNodeIds = new Set(
       selectedIds
-        .filter(id => id.startsWith("persistent:"))
+        .filter(id => id.startsWith("daily_notes:") || id.startsWith("persistent:"))
         .map(id => id.split(":").slice(1).join(":"))
     );
-    packageData.data.persistent = Object.entries(pnData.nodes ?? {})
+    packageData.data.daily_notes = Object.entries(pnData.nodes ?? {})
       .filter(([id]) => selectedNodeIds.size === 0 || selectedNodeIds.has(id))
       .map(([id, node]) => ({ id, ...node }));
 
-    const episodeIds = new Set(packageData.data.persistent.flatMap(node => node.episode_refs ?? []));
+    const episodeIds = new Set(packageData.data.daily_notes.flatMap(node => node.episode_refs ?? []));
     packageData.data.episodic_evidence = [];
     for (const epId of episodeIds) {
       const episode = await loadEpisodeById(epId);

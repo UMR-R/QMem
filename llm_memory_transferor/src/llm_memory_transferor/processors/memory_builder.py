@@ -321,6 +321,35 @@ class MemoryBuilder:
             marker in text for marker in durable_markers
         )
 
+    @classmethod
+    def _episode_has_daily_memory_signal(cls, ep: EpisodicMemory) -> bool:
+        text = cls._normalize_match_text(
+            " ".join(
+                [
+                    ep.topic,
+                    ep.summary,
+                    " ".join(ep.key_decisions),
+                    " ".join(ep.open_issues),
+                    " ".join(ep.topics_covered),
+                ]
+            )
+        )
+        if not text:
+            return False
+        daily_domains = {
+            "outfit", "clothing", "dress", "coat", "shoe", "style", "shopping", "food", "drink",
+            "cocktail", "fruit", "travel", "restaurant", "movie", "concert",
+            "穿搭", "服装", "衣服", "裙", "风衣", "鞋", "搭配", "配色", "口味", "水果", "饮品",
+            "鸡尾酒", "购物", "旅行", "餐厅", "电影", "演出",
+        }
+        personal_choice_markers = {
+            "用户", "user", "asks", "wants", "requested", "considering", "recommend", "choose",
+            "用户询问", "想", "希望", "要求", "推荐", "选择", "是否合适", "适合", "首选",
+        }
+        return any(token in text for token in daily_domains) and any(
+            marker in text for marker in personal_choice_markers
+        )
+
     def build(
         self,
         conversations: list[RawConversation],
@@ -367,6 +396,8 @@ class MemoryBuilder:
                 skipped_noise += 1  # LLM parse failure
                 continue
             for ep in conv_episodes:
+                if self._episode_has_daily_memory_signal(ep):
+                    ep.relates_to_preferences = True
                 if not ep.relates_to_profile and not ep.relates_to_preferences \
                         and not ep.relates_to_projects and not ep.relates_to_workflows \
                         and not self._episode_has_persistent_topic_signal(ep):

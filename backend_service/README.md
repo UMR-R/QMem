@@ -103,7 +103,7 @@ The backend reads and writes a memory root with directories such as:
 - `projects/`
 - `workflows/`
 - `skills/`
-- `interest_discoveries/`
+- `daily_notes/`
 - `metadata/`
 
 ## Prompt Usage
