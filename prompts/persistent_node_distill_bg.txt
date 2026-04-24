@@ -12,9 +12,16 @@ Persistent 节点遵循以下原则：
 - 节点类型只能是 `preference | profile | workflow | topic`
 - 节点描述 `description` 必须描述稳定规律，不描述单次事件
 - 节点证据来自 `episode_refs`
+- 如果 episodic 已经归属某个项目，项目目标、架构选择、相关工作、benchmark、数据集、指标、实现方案、未解决问题等都应该并入项目记忆，不要再复制成 `topic` 或 `preference` 节点
+- 只有当项目相关 episode 明确表达了跨项目也可复用的个人偏好或工作方式时，才可以抽成 `preference`，并且描述必须脱离具体项目内容
+- 节点描述的语言要跟随输入中的 TARGET DISPLAY LANGUAGE；如果未提供，则跟随 episode 的主语言
+- 可以保留必要的专用名词、论文/模型/数据集/工具名、代码名和技术术语原文
 - 置信度 `confidence` 必须与证据数量一致
 - `updated_at` 由系统维护，你不要输出这个字段
 - `episode_refs`、`platform`、`created_at` 也由系统维护，你不要输出这些字段
+- 当【新 Episodic 记忆内容】里提供 `connected_episode_summaries` 时，你可以在 `updates` 或 `new_nodes` 中输出可选字段 `support_episode_ids`
+- `support_episode_ids` 只能包含当前 episode_id 或 connected_episode_summaries 中的 episode_id，用来说明同一个稳定规律还被哪些相邻/相关 episode 支撑
+- 如果 connected episode 提供了该规律的上游偏好、原因或约束，不要只写最后一轮的具体推荐，要把偏好链条合并成更准确的描述
 
 ### updates
 
@@ -68,6 +75,7 @@ Persistent 节点遵循以下原则：
 - 单篇论文标题
 - 单个 benchmark
 - 单个一次性问题
+- 已经属于某个项目的相关工作、设计选择或阶段性结论
 
 ### 单个 episode 的拆分规则
 
@@ -76,6 +84,7 @@ Persistent 节点遵循以下原则：
 - 只有在这些偏好明显属于不同域时，才分别建节点
 - 对面向用户本人的个性化建议，如果它表达了后续可复用的稳定偏好或选择标准，可以保留为一个低置信度 `topic` 或 `preference` 节点
 - 风格例子：如果 episode 中沉淀出“用户在某类选择里更倾向的判断标准、偏好方向或可复用建议”，可以生成一个低置信度节点；不要把这个例子当成固定类别或固定备选项
+- 对生活方式、穿搭、消费选择、饮食口味等个人兴趣，如果不是项目内容，且能表达后续可复用的个人偏好，可以保留为低置信度兴趣发现
 
 ### 输出格式
 
@@ -87,7 +96,8 @@ Persistent 节点遵循以下原则：
     {
       "id": "pn_XXXX",
       "description": "可选，更新后的稳定规律描述",
-      "confidence": "可选，low | medium | high"
+      "confidence": "可选，low | medium | high",
+      "support_episode_ids": ["可选，只能使用输入里出现过的 episode_id"]
     }
   ],
   "new_nodes": [
@@ -95,7 +105,8 @@ Persistent 节点遵循以下原则：
       "type": "preference | profile | workflow | topic",
       "key": "snake_case_key",
       "description": "一句稳定规律描述",
-      "export_priority": "low | medium | high"
+      "export_priority": "low | medium | high",
+      "support_episode_ids": ["可选，只能使用输入里出现过的 episode_id"]
     }
   ],
   "merges": [

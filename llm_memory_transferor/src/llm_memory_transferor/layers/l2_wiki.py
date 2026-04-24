@@ -61,6 +61,7 @@ class L2Wiki:
             self._move_if_needed(legacy_json, project_dir / "project.json")
             legacy_md = legacy_json.with_suffix(".md")
             self._move_if_needed(legacy_md, project_dir / "project.md")
+        self._migrate_legacy_episode_layout()
 
     @staticmethod
     def _move_if_needed(source: Path, target: Path) -> None:
@@ -262,22 +263,141 @@ class L2Wiki:
         episode.touch(episode.updated_at)
         if not episode.episode_id:
             episode.episode_id = str(uuid.uuid4())[:8]
-        base = self.wiki_dir / "episodes" / episode.episode_id
-        base.with_suffix(".json").write_text(episode.model_dump_json(indent=2, exclude=None), encoding="utf-8")
-        base.with_suffix(".md").write_text(episode.to_markdown(), encoding="utf-8")
+        conv_id = episode.conv_id or episode.episode_id
+        path = self._episode_container_path(conv_id)
+        episodes = [
+            existing
+            for existing in self._read_episode_container(path)
+            if existing.episode_id != episode.episode_id
+        ]
+        episodes.append(episode)
+        self._write_episode_container(conv_id, episodes)
         self._log_change("episode", "create", episode.episode_id)
+
+    def save_conversation_episode_index(self, conv_id: str) -> None:
+        """Compatibility shim.
+
+        Canonical episode storage is now `episodes/<conversation_id>.json`,
+        where each file contains all turn-level episodes for that chat.
+        """
+        return
+
+    def load_episode(self, episode_id: str) -> Optional[EpisodicMemory]:
+        episode_id = str(episode_id or "").strip()
+        if not episode_id:
+            return None
+        direct = self.wiki_dir / "episodes" / f"{episode_id}.json"
+        for episode in self._read_episode_container(direct):
+            if episode.episode_id == episode_id:
+                return episode
+        for f in (self.wiki_dir / "episodes").glob("*.json"):
+            try:
+                for episode in self._read_episode_container(f):
+                    if episode.episode_id == episode_id:
+                        return episode
+            except Exception:
+                continue
+        return None
 
     def list_episodes(self, project: str = "") -> list[EpisodicMemory]:
         episodes = []
         for f in (self.wiki_dir / "episodes").glob("*.json"):
             try:
-                ep = EpisodicMemory.model_validate_json(f.read_text(encoding="utf-8"))
-                if not project or ep.related_project == project:
-                    episodes.append(ep)
+                for ep in self._read_episode_container(f):
+                    project_refs = set(ep.relates_to_projects or [])
+                    if ep.related_project:
+                        project_refs.add(ep.related_project)
+                    if not project or project in project_refs:
+                        episodes.append(ep)
             except Exception:
                 pass
         episodes.sort(key=lambda e: e.created_at)
         return episodes
+
+    def _episode_container_path(self, conv_id: str) -> Path:
+        safe_name = str(conv_id or "unknown_conversation").replace("/", "_")[:160]
+        return self.wiki_dir / "episodes" / f"{safe_name}.json"
+
+    @staticmethod
+    def _episode_sort_key(ep: EpisodicMemory) -> tuple[str, int, str]:
+        turn_index = 10**9
+        if ep.turn_refs:
+            try:
+                turn_index = int(str(ep.turn_refs[0]).rsplit(":turn:", 1)[1])
+            except (IndexError, ValueError):
+                turn_index = 10**9
+        created = ep.created_at.isoformat() if ep.created_at else ""
+        return created, turn_index, ep.episode_id
+
+    def _read_episode_container(self, path: Path) -> list[EpisodicMemory]:
+        if not path.exists():
+            return []
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict) and isinstance(data.get("episodes"), list):
+            return [
+                EpisodicMemory.model_validate(item)
+                for item in data.get("episodes", [])
+                if isinstance(item, dict)
+            ]
+        if isinstance(data, dict):
+            return [EpisodicMemory.model_validate(data)]
+        return []
+
+    def _write_episode_container(self, conv_id: str, episodes: list[EpisodicMemory]) -> None:
+        clean = sorted(episodes, key=self._episode_sort_key)
+        path = self._episode_container_path(conv_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "conversation_id": conv_id,
+            "episode_count": len(clean),
+            "episodes": [episode.model_dump(mode="json") for episode in clean],
+        }
+        path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2, default=str),
+            encoding="utf-8",
+        )
+        md_path = path.with_suffix(".md")
+        md_path.write_text(
+            "\n\n---\n\n".join(episode.to_markdown() for episode in clean),
+            encoding="utf-8",
+        )
+
+    def _migrate_legacy_episode_layout(self) -> None:
+        episode_dir = self.wiki_dir / "episodes"
+        grouped: dict[str, list[EpisodicMemory]] = {}
+        legacy_paths: list[Path] = []
+        for path in episode_dir.glob("*.json"):
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if isinstance(data, dict) and isinstance(data.get("episodes"), list):
+                continue
+            try:
+                episode = EpisodicMemory.model_validate(data)
+            except Exception:
+                continue
+            conv_id = episode.conv_id or episode.episode_id
+            grouped.setdefault(conv_id, []).append(episode)
+            legacy_paths.append(path)
+        for conv_id, episodes in grouped.items():
+            target = self._episode_container_path(conv_id)
+            existing = self._read_episode_container(target) if target.exists() else []
+            by_id = {episode.episode_id: episode for episode in existing}
+            for episode in episodes:
+                by_id[episode.episode_id] = episode
+            self._write_episode_container(conv_id, list(by_id.values()))
+        for path in legacy_paths:
+            target_names = {self._episode_container_path(ep.conv_id or ep.episode_id).name for ep in grouped.get(path.stem, [])}
+            if path.name in target_names:
+                continue
+            try:
+                path.unlink()
+                md_path = path.with_suffix(".md")
+                if md_path.exists():
+                    md_path.unlink()
+            except OSError:
+                pass
 
     # ------------------------------------------------------------------
     # Change log
@@ -316,7 +436,7 @@ class L2Wiki:
             "has_preferences": self._preferences_json.exists(),
             "projects": [p.project_name for p in self.list_projects()],
             "workflow_count": len(self.load_workflows()),
-            "episode_count": len(list((self.wiki_dir / "episodes").glob("*.json"))),
+            "episode_count": len(self.list_episodes()),
         }
         self._index_json.write_text(json.dumps(index, indent=2), encoding="utf-8")
         profile = self.load_profile()

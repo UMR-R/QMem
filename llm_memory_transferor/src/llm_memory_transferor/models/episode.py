@@ -5,9 +5,25 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 from .base import MemoryBase
+
+
+class EpisodeConnection(BaseModel):
+    """A typed link from one evidence chunk to another."""
+
+    episode_id: str
+    relation: str = ""  # e.g. conversation_context, profile, preferences, project, workflow
+    key: str = ""
+    reason: str = ""
+
+
+class EpisodeDisplayText(BaseModel):
+    """Human-facing episode text keyed by language."""
+
+    title: str = ""
+    summary: str = ""
 
 
 class EpisodicMemory(MemoryBase):
@@ -19,6 +35,8 @@ class EpisodicMemory(MemoryBase):
     episode_id: str = ""
     conv_id: str = ""              # L0 raw session ID this episode was built from
     topic: str = ""                # short title (5-10 words)
+    primary_language: str = ""     # dominant language of the referenced raw turn, e.g. "zh" or "en"
+    display: dict[str, EpisodeDisplayText] = Field(default_factory=dict)
     topics_covered: list[str] = Field(default_factory=list)  # all topics in the chat
     platform: str = ""
     time_range_start: Optional[datetime] = None
@@ -26,18 +44,23 @@ class EpisodicMemory(MemoryBase):
     summary: str = ""
     key_decisions: list[str] = Field(default_factory=list)
     open_issues: list[str] = Field(default_factory=list)
+    granularity: str = "conversation"  # "conversation" for legacy; new evidence units use "turn"
     turn_refs: list[str] = Field(default_factory=list)
     # Relation flags — which persistent memory categories this episode touches
     relates_to_profile: bool = False
     relates_to_preferences: bool = False
     relates_to_projects: list[str] = Field(default_factory=list)   # project names
     relates_to_workflows: list[str] = Field(default_factory=list)  # workflow names
+    related_project: str = ""  # legacy compatibility; prefer relates_to_projects
+    connections: list[EpisodeConnection] = Field(default_factory=list)
     promoted_to_persistent: bool = False
 
     def to_markdown(self) -> str:
         lines = [f"# Episode: {self.topic or self.episode_id}\n"]
         if self.platform:
             lines.append(f"**Platform:** {self.platform}")
+        if self.primary_language:
+            lines.append(f"**Primary Language:** {self.primary_language}")
         if self.conv_id:
             lines.append(f"**Source Session:** `{self.conv_id}`")
         if self.time_range_start:
@@ -49,8 +72,16 @@ class EpisodicMemory(MemoryBase):
                 lines.append(f"**Period:** {start_str}")
         if self.topics_covered:
             lines.append(f"**Topics:** {', '.join(self.topics_covered)}")
+        if self.granularity:
+            lines.append(f"**Granularity:** {self.granularity}")
         if self.turn_refs:
             lines.append(f"**Turn Refs:** {', '.join(self.turn_refs[:6])}")
+        if self.connections:
+            connection_text = ", ".join(
+                f"{item.episode_id} ({item.relation}{':' + item.key if item.key else ''})"
+                for item in self.connections[:8]
+            )
+            lines.append(f"**Connections:** {connection_text}")
         # Relation flags
         relations = []
         if self.relates_to_profile:

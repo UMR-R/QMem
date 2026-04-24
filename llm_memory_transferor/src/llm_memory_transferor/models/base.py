@@ -18,8 +18,9 @@ def _new_id() -> str:
 
 
 class EvidenceLink(BaseModel):
-    source_type: str  # "chat_history" | "l1_signal" | "file" | "user_input"
+    source_type: str  # "l0_raw" | "chat_history" | "l1_signal" | "file" | "user_input"
     source_id: str
+    # Human-readable support text. IDs, not excerpts, are the durable index.
     excerpt: str = ""
 
 
@@ -33,9 +34,14 @@ class MemoryBase(BaseModel):
     evidence_links: list[EvidenceLink] = Field(default_factory=list)
     conflict_log: list[dict[str, Any]] = Field(default_factory=list)
     user_confirmed: bool = False
+    # Dominant language for human-facing text in this memory object.
+    primary_language: str = ""  # "zh" | "en" | ""
     # IDs of EpisodicMemory objects that contributed to this memory object.
     # For EpisodicMemory itself this is always empty.
     source_episode_ids: list[str] = Field(default_factory=list)
+    # Denormalized L0 turn IDs for easier audit/debugging. The episode layer
+    # remains the canonical bridge from persistent memory back to raw messages.
+    source_turn_refs: list[str] = Field(default_factory=list)
 
     def touch(self, ts: datetime | None = None) -> None:
         self.updated_at = ts if ts is not None else _now()

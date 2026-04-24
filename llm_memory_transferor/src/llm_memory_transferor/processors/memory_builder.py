@@ -19,6 +19,7 @@ from ..layers.l0_raw import L0RawLayer, RawConversation
 from ..layers.l1_signals import L1SignalLayer
 from ..layers.l2_wiki import L2Wiki
 from ..models import (
+    EpisodeConnection,
     EpisodicMemory,
     PreferenceMemory,
     ProfileMemory,
@@ -180,8 +181,6 @@ class MemoryBuilder:
             return []
 
         exact = list(dict.fromkeys(episode_map.get(project_name, [])))
-        if exact:
-            return exact
 
         project_goal = str(item.get("project_goal") or "").strip()
         current_stage = str(item.get("current_stage") or "").strip()
@@ -213,8 +212,10 @@ class MemoryBuilder:
                 if token and len(token) >= 2
             ][:4]
 
-        inferred: list[str] = []
+        inferred: list[str] = list(exact)
         for episode_id, episode in ep_by_id.items():
+            if episode_id in inferred:
+                continue
             summary_haystack = cls._normalize_match_text(
                 " ".join(
                     [
@@ -353,22 +354,24 @@ class MemoryBuilder:
         # ------------------------------------------------------------------ #
         # Phase 1: Build episodic memory for every conversation               #
         # ------------------------------------------------------------------ #
-        progress("Phase 1: Building episodic memory for each conversation...")
+        progress("Phase 1: Building episodic evidence chunks for each conversation...")
         episodes: list[EpisodicMemory] = []
         skipped_noise = 0
         for i, conv in enumerate(conversations):
-            if conv.word_count() < 50:
+            if len(conv.full_text().strip()) < 30:
                 skipped_noise += 1
                 continue
-            progress(f"  Episode {i + 1}/{len(conversations)}: {conv.title or conv.conv_id}")
-            ep = self._build_episode(conv)
-            if ep is None:
+            progress(f"  Episodes {i + 1}/{len(conversations)}: {conv.title or conv.conv_id}")
+            conv_episodes = self._build_episodes(conv)
+            if not conv_episodes:
                 skipped_noise += 1  # LLM parse failure
-            elif not ep.relates_to_profile and not ep.relates_to_preferences \
-                    and not ep.relates_to_projects and not ep.relates_to_workflows \
-                    and not self._episode_has_persistent_topic_signal(ep):
-                skipped_noise += 1  # no memory-relevant content
-            else:
+                continue
+            for ep in conv_episodes:
+                if not ep.relates_to_profile and not ep.relates_to_preferences \
+                        and not ep.relates_to_projects and not ep.relates_to_workflows \
+                        and not self._episode_has_persistent_topic_signal(ep):
+                    skipped_noise += 1  # no memory-relevant content
+                    continue
                 self.wiki.save_episode(ep)
                 episodes.append(ep)
 
@@ -399,6 +402,8 @@ class MemoryBuilder:
         ep_by_id: dict[str, EpisodicMemory] = {ep.episode_id: ep for ep in episodes}
 
         episode_digest = self._build_episode_digest(episodes, l1_text)
+        target_language = self._dominant_episode_language(episodes)
+        language_context = self._language_policy_context(target_language)
 
         # Episode IDs grouped by relation type — used to back-link persistent objects
         profile_ep_ids = [ep.episode_id for ep in episodes if ep.relates_to_profile]
@@ -410,6 +415,13 @@ class MemoryBuilder:
                 project_ep_map.setdefault(proj_name, []).append(ep.episode_id)
             for wf_name in ep.relates_to_workflows:
                 workflow_ep_map.setdefault(wf_name, []).append(ep.episode_id)
+        self.maintain_episode_connections(
+            episodes,
+            profile_ep_ids,
+            pref_ep_ids,
+            project_ep_map,
+            workflow_ep_map,
+        )
 
         # Episode counts per type — used for CLI summary
         results["episodes_to_profile"] = len(profile_ep_ids)
@@ -419,19 +431,19 @@ class MemoryBuilder:
 
         # --- Extract profile ---
         progress("Extracting profile from episodes...")
-        profile_context = self._filter_digest(episodes, l1_text, "profile")
+        profile_context = language_context + "\n" + self._filter_digest(episodes, l1_text, "profile")
         profile_data = self.llm.extract_json(self.prompts["profile_system"], profile_context)
         profile = self._build_profile(profile_data, l1_text, earliest_ts,
-                                      profile_ep_ids, ep_by_id)
+                                      profile_ep_ids, ep_by_id, target_language)
         self.wiki.save_profile(profile)
         results["profile"] = bool(profile.name_or_alias or profile.role_identity)
 
         # --- Extract preferences ---
         progress("Extracting preferences from episodes...")
-        pref_context = self._filter_digest(episodes, l1_text, "preferences")
+        pref_context = language_context + "\n" + self._filter_digest(episodes, l1_text, "preferences")
         pref_data = self.llm.extract_json(self.prompts["preference_system"], pref_context)
         prefs = self._build_preferences(pref_data, l1_text, earliest_ts,
-                                        pref_ep_ids, ep_by_id)
+                                        pref_ep_ids, ep_by_id, target_language)
         if profile.primary_task_types:
             prefs.primary_task_types = list(
                 dict.fromkeys(prefs.primary_task_types + profile.primary_task_types)
@@ -445,20 +457,20 @@ class MemoryBuilder:
 
         # --- Extract projects ---
         progress("Extracting projects from episodes...")
-        project_context = self._filter_digest(episodes, l1_text, "projects")
+        project_context = language_context + "\n" + self._filter_digest(episodes, l1_text, "projects")
         projects_data = self.llm.extract_json(self.prompts["projects_system"], project_context)
         projects = self._build_projects(projects_data, l1_text, earliest_ts,
-                                        project_ep_map, ep_by_id)
+                                        project_ep_map, ep_by_id, target_language)
         for proj in projects:
             self.wiki.save_project(proj)
         results["projects"] = len(projects)
 
         # --- Extract workflows ---
         progress("Extracting workflows from episodes...")
-        workflow_context = self._filter_digest(episodes, l1_text, "workflows")
+        workflow_context = language_context + "\n" + self._filter_digest(episodes, l1_text, "workflows")
         workflows_data = self.llm.extract_json(self.prompts["workflows_system"], workflow_context)
         workflows = self._build_workflows(workflows_data, l1_text, earliest_ts,
-                                          workflow_ep_map, ep_by_id)
+                                          workflow_ep_map, ep_by_id, target_language)
         self.wiki.save_workflows(workflows)
         results["workflows"] = len(workflows)
 
@@ -473,8 +485,152 @@ class MemoryBuilder:
     # Phase 1 helpers                                                      #
     # ------------------------------------------------------------------ #
 
-    def _build_episode(self, conv: RawConversation) -> EpisodicMemory | None:
-        text = conv.full_text()[:4000]
+    def _turn_text(self, conv: RawConversation, turn_id: str) -> str:
+        id_to_message = {msg.msg_id: msg for msg in conv.messages}
+        turn = next((item for item in conv.turns if item.turn_id == turn_id), None)
+        if turn is None:
+            return ""
+        messages = [id_to_message[msg_id] for msg_id in turn.message_ids if msg_id in id_to_message]
+        return "\n".join(f"[{msg.role.upper()}]: {msg.content}" for msg in messages)
+
+    def _turns_text(self, conv: RawConversation) -> str:
+        parts: list[str] = []
+        for turn in conv.turns:
+            text = self._turn_text(conv, turn.turn_id).strip()
+            if text:
+                parts.append(f"TURN {turn.turn_id}\n{text}")
+        return "\n\n".join(parts)
+
+    def _episode_items_from_response(self, data: Any) -> list[dict[str, Any]]:
+        if isinstance(data, list):
+            return [item for item in data if isinstance(item, dict)]
+        if isinstance(data, dict):
+            if isinstance(data.get("episodes"), list):
+                return [item for item in data["episodes"] if isinstance(item, dict)]
+            return [data]
+        return []
+
+    def _normalize_episode_turn_refs(self, conv: RawConversation, item: dict[str, Any]) -> list[str]:
+        valid_turn_ids = [turn.turn_id for turn in conv.turns if getattr(turn, "turn_id", "")]
+        valid_set = set(valid_turn_ids)
+        raw_refs = item.get("turn_refs")
+        if isinstance(raw_refs, str):
+            raw_refs = [raw_refs]
+        refs = [str(ref).strip() for ref in (raw_refs or []) if str(ref).strip() in valid_set]
+        if refs:
+            return list(dict.fromkeys(refs))
+        if len(valid_turn_ids) == 1:
+            return valid_turn_ids
+        return []
+
+    def _episode_time_bounds(self, conv: RawConversation, turn_refs: list[str]) -> tuple[datetime | None, datetime | None]:
+        id_to_message = {msg.msg_id: msg for msg in conv.messages}
+        times: list[datetime] = []
+        for turn_id in turn_refs:
+            turn = next((item for item in conv.turns if item.turn_id == turn_id), None)
+            if not turn:
+                continue
+            for msg_id in turn.message_ids:
+                msg = id_to_message.get(msg_id)
+                if not msg or not msg.timestamp:
+                    continue
+                try:
+                    times.append(datetime.fromisoformat(str(msg.timestamp).replace("Z", "+00:00")))
+                except ValueError:
+                    continue
+        if times:
+            return min(times), max(times)
+        return conv.start_time, conv.end_time or conv.start_time
+
+    @staticmethod
+    def _detect_primary_language(text: str) -> str:
+        cjk_count = sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff")
+        ascii_alpha_count = sum(1 for ch in text if ("a" <= ch.lower() <= "z"))
+        if cjk_count >= max(2, ascii_alpha_count // 3):
+            return "zh"
+        if ascii_alpha_count:
+            return "en"
+        return ""
+
+    def _episode_display_payload(
+        self,
+        item: dict[str, Any],
+        primary_language: str,
+        title: str,
+        summary: str,
+    ) -> dict[str, dict[str, str]]:
+        raw_display = item.get("display") if isinstance(item.get("display"), dict) else {}
+        display: dict[str, dict[str, str]] = {}
+        for lang in ["zh", "en"]:
+            value = raw_display.get(lang) if isinstance(raw_display, dict) else None
+            if isinstance(value, dict):
+                display[lang] = {
+                    "title": str(value.get("title") or "").strip(),
+                    "summary": str(value.get("summary") or "").strip(),
+                }
+        lang = primary_language if primary_language in {"zh", "en"} else self._detect_primary_language(f"{title}\n{summary}")
+        if lang in {"zh", "en"}:
+            current = display.setdefault(lang, {"title": "", "summary": ""})
+            current["title"] = current["title"] or title
+            current["summary"] = current["summary"] or summary
+        return display
+
+    @staticmethod
+    def _episode_display_text(ep: EpisodicMemory) -> tuple[str, str]:
+        lang = ep.primary_language if ep.primary_language in {"zh", "en"} else ""
+        display = ep.display.get(lang) if lang else None
+        if display:
+            title = display.title or ep.topic
+            summary = display.summary or ep.summary
+            return title, summary
+        return ep.topic, ep.summary
+
+    @classmethod
+    def _dominant_episode_language(cls, episodes: list[EpisodicMemory]) -> str:
+        scores = {"zh": 0, "en": 0}
+        for ep in episodes:
+            lang = ep.primary_language if ep.primary_language in scores else cls._detect_primary_language(
+                " ".join([ep.topic, ep.summary, " ".join(ep.key_decisions), " ".join(ep.open_issues)])
+            )
+            if lang in scores:
+                # Weight profile/project/workflow-bearing episodes slightly more
+                # because persistent memory is built from durable evidence.
+                weight = 2 if (
+                    ep.relates_to_profile
+                    or ep.relates_to_preferences
+                    or ep.relates_to_projects
+                    or ep.relates_to_workflows
+                ) else 1
+                scores[lang] += weight
+        if scores["zh"] > scores["en"]:
+            return "zh"
+        if scores["en"] > scores["zh"]:
+            return "en"
+        return ""
+
+    @staticmethod
+    def _language_policy_context(language: str) -> str:
+        if language == "zh":
+            return (
+                "TARGET DISPLAY LANGUAGE: zh\n"
+                "Write all human-facing natural-language memory values in Chinese, "
+                "while preserving necessary proper nouns, model names, paper titles, "
+                "dataset names, code names, and technical terms in their original form.\n"
+            )
+        if language == "en":
+            return (
+                "TARGET DISPLAY LANGUAGE: en\n"
+                "Write all human-facing natural-language memory values in English, "
+                "while preserving necessary proper nouns and technical terms in their original form.\n"
+            )
+        return (
+            "TARGET DISPLAY LANGUAGE: infer from the source evidence\n"
+            "Write human-facing memory values in the dominant language of the supporting episodes, "
+            "while preserving necessary proper nouns and technical terms in their original form.\n"
+        )
+
+    def _build_episodes(self, conv: RawConversation) -> list[EpisodicMemory]:
+        text = self._turns_text(conv)[:7000] or conv.full_text()[:4000]
         user_prompt = (
             f"Conversation title: {conv.title or conv.conv_id}\n"
             f"Platform: {conv.platform}\n"
@@ -482,33 +638,56 @@ class MemoryBuilder:
             f"{text}"
         )
         data = self.llm.extract_json(self.prompts["episode_system"], user_prompt)
-        if not data or not isinstance(data, dict):
-            return None
-        ep = EpisodicMemory(
-            episode_id=str(uuid.uuid4())[:8],
-            conv_id=conv.conv_id,
-            platform=conv.platform,
-            topic=data.get("topic") or data.get("title") or conv.title or conv.conv_id,
-            topics_covered=data.get("topics_covered") or [],
-            summary=data.get("summary") or "",
-            key_decisions=data.get("key_decisions") or [],
-            open_issues=data.get("open_issues") or [],
-            turn_refs=[turn.turn_id for turn in (conv.turns or []) if getattr(turn, "turn_id", "")],
-            relates_to_profile=bool(data.get("relates_to_profile")),
-            relates_to_preferences=bool(data.get("relates_to_preferences")),
-            relates_to_projects=data.get("relates_to_projects") or [],
-            relates_to_workflows=data.get("relates_to_workflows") or [],
-            time_range_start=conv.start_time,
-            time_range_end=conv.end_time,
-        )
-        if conv.start_time is not None:
-            ep.created_at = conv.start_time
-        if conv.end_time is not None:
-            ep.updated_at = conv.end_time
-        elif conv.start_time is not None:
-            ep.updated_at = conv.start_time
-        ep.add_evidence("l0_raw", conv.conv_id, conv.full_text()[:100])
-        return ep
+        items = self._episode_items_from_response(data)
+        episodes: list[EpisodicMemory] = []
+        for item in items:
+            turn_refs = self._normalize_episode_turn_refs(conv, item)
+            if not turn_refs:
+                continue
+            for turn_ref in turn_refs:
+                turn_text = self._turn_text(conv, turn_ref)
+                primary_language = str(item.get("primary_language") or "").strip().lower()
+                if primary_language not in {"zh", "en"}:
+                    primary_language = self._detect_primary_language(turn_text)
+                title = str(item.get("topic") or item.get("title") or conv.title or conv.conv_id).strip()
+                summary = str(item.get("summary") or "").strip()
+                start_time, end_time = self._episode_time_bounds(conv, [turn_ref])
+                ep = EpisodicMemory(
+                    episode_id=str(uuid.uuid4())[:8],
+                    conv_id=conv.conv_id,
+                    platform=conv.platform,
+                    topic=title,
+                    primary_language=primary_language,
+                    display=self._episode_display_payload(item, primary_language, title, summary),
+                    topics_covered=item.get("topics_covered") or [],
+                    summary=summary,
+                    key_decisions=item.get("key_decisions") or [],
+                    open_issues=item.get("open_issues") or [],
+                    granularity="turn",
+                    turn_refs=[turn_ref],
+                    relates_to_profile=bool(item.get("relates_to_profile")),
+                    relates_to_preferences=bool(item.get("relates_to_preferences")),
+                    relates_to_projects=item.get("relates_to_projects") or [],
+                    relates_to_workflows=item.get("relates_to_workflows") or [],
+                    related_project=str(item.get("related_project") or "").strip(),
+                    time_range_start=start_time,
+                    time_range_end=end_time,
+                )
+                if ep.related_project and ep.related_project not in ep.relates_to_projects:
+                    ep.relates_to_projects.append(ep.related_project)
+                if start_time is not None:
+                    ep.created_at = start_time
+                if end_time is not None:
+                    ep.updated_at = end_time
+                elif start_time is not None:
+                    ep.updated_at = start_time
+                ep.add_evidence("l0_raw", conv.conv_id, ep.summary[:240] or conv.title or conv.conv_id)
+                episodes.append(ep)
+        return episodes
+
+    def _build_episode(self, conv: RawConversation) -> EpisodicMemory | None:
+        episodes = self._build_episodes(conv)
+        return episodes[0] if episodes else None
 
     # ------------------------------------------------------------------ #
     # Phase 2 helpers                                                      #
@@ -524,10 +703,12 @@ class MemoryBuilder:
         lines.append(f"TOTAL EPISODES: {len(episodes)}\n")
         for ep in episodes:
             ts = ep.time_range_start.strftime("%Y-%m-%d") if ep.time_range_start else "unknown date"
+            title, summary = self._episode_display_text(ep)
             entry = (
-                f"[{ep.episode_id}] {ts} — {ep.topic}\n"
+                f"[{ep.episode_id}] {ts} — {title}\n"
+                f"  Language: {ep.primary_language or 'unknown'}\n"
                 f"  Topics: {', '.join(ep.topics_covered)}\n"
-                f"  Summary: {ep.summary}"
+                f"  Summary: {summary}"
             )
             if verbose:
                 if ep.key_decisions:
@@ -601,6 +782,19 @@ class MemoryBuilder:
         return global_earliest, None
 
     @staticmethod
+    def _episode_turn_refs(
+        ep_ids: list[str],
+        ep_by_id: dict[str, EpisodicMemory],
+    ) -> list[str]:
+        refs: list[str] = []
+        for eid in ep_ids:
+            ep = ep_by_id.get(str(eid or "").strip())
+            if not ep:
+                continue
+            refs.extend(str(ref).strip() for ref in ep.turn_refs if str(ref).strip())
+        return list(dict.fromkeys(refs))
+
+    @staticmethod
     def _best_episode_ts(
         entry_text: str,
         ep_ids: list[str],
@@ -640,6 +834,132 @@ class MemoryBuilder:
     # Phase 2 build helpers                                                #
     # ------------------------------------------------------------------ #
 
+    @staticmethod
+    def _turn_index(ep: EpisodicMemory) -> int:
+        if not ep.turn_refs:
+            return 10**9
+        try:
+            return int(str(ep.turn_refs[0]).rsplit(":turn:", 1)[1])
+        except (IndexError, ValueError):
+            return 10**9
+
+    @staticmethod
+    def _add_episode_connection(
+        ep: EpisodicMemory,
+        target_id: str,
+        relation: str,
+        key: str = "",
+        reason: str = "",
+    ) -> None:
+        if not target_id or target_id == ep.episode_id:
+            return
+        candidate = EpisodeConnection(
+            episode_id=target_id,
+            relation=relation,
+            key=key,
+            reason=reason,
+        )
+        for existing in ep.connections:
+            if (
+                existing.episode_id == candidate.episode_id
+                and existing.relation == candidate.relation
+                and existing.key == candidate.key
+            ):
+                return
+        ep.connections.append(candidate)
+
+    def _connect_episode_group(
+        self,
+        ep_by_id: dict[str, EpisodicMemory],
+        episode_ids: list[str],
+        relation: str,
+        key: str = "",
+        reason: str = "",
+        max_neighbors: int = 20,
+    ) -> None:
+        clean_ids = [eid for eid in dict.fromkeys(episode_ids) if eid in ep_by_id]
+        if relation == "project" and key:
+            for eid in clean_ids:
+                if key not in ep_by_id[eid].relates_to_projects:
+                    ep_by_id[eid].relates_to_projects.append(key)
+        elif relation == "workflow" and key:
+            for eid in clean_ids:
+                if key not in ep_by_id[eid].relates_to_workflows:
+                    ep_by_id[eid].relates_to_workflows.append(key)
+        if len(clean_ids) < 2:
+            return
+        for eid in clean_ids:
+            others = [other for other in clean_ids if other != eid][:max_neighbors]
+            for other in others:
+                self._add_episode_connection(ep_by_id[eid], other, relation, key, reason)
+
+    def maintain_episode_connections(
+        self,
+        episodes: list[EpisodicMemory],
+        profile_ep_ids: list[str],
+        pref_ep_ids: list[str],
+        project_ep_map: dict[str, list[str]],
+        workflow_ep_map: dict[str, list[str]],
+    ) -> None:
+        """Refresh deterministic episode-to-episode links.
+
+        Episode chunks stay turn-level. Connections provide two kinds of
+        traversal: neighboring turns in the same raw conversation, and semantic
+        grouping maintained by persistent memory categories.
+        """
+        ep_by_id = {ep.episode_id: ep for ep in episodes}
+        for ep in episodes:
+            ep.connections = []
+
+        by_conversation: dict[str, list[EpisodicMemory]] = {}
+        for ep in episodes:
+            if ep.conv_id:
+                by_conversation.setdefault(ep.conv_id, []).append(ep)
+        for conv_eps in by_conversation.values():
+            ordered = sorted(conv_eps, key=self._turn_index)
+            for index, ep in enumerate(ordered):
+                for neighbor in (ordered[index - 1:index] + ordered[index + 1:index + 2]):
+                    self._add_episode_connection(
+                        ep,
+                        neighbor.episode_id,
+                        "conversation_context",
+                        ep.conv_id,
+                        "adjacent turn in the same raw conversation",
+                    )
+
+        self._connect_episode_group(
+            ep_by_id,
+            profile_ep_ids,
+            "profile",
+            reason="shared profile evidence",
+        )
+        self._connect_episode_group(
+            ep_by_id,
+            pref_ep_ids,
+            "preferences",
+            reason="shared preference evidence",
+        )
+        for project_name, ep_ids in project_ep_map.items():
+            self._connect_episode_group(
+                ep_by_id,
+                ep_ids,
+                "project",
+                project_name,
+                "same persistent project",
+            )
+        for workflow_name, ep_ids in workflow_ep_map.items():
+            self._connect_episode_group(
+                ep_by_id,
+                ep_ids,
+                "workflow",
+                workflow_name,
+                "same persistent workflow",
+            )
+
+        for ep in episodes:
+            if ep.connections:
+                self.wiki.save_episode(ep)
+
     def _build_profile(
         self,
         data: dict,
@@ -647,8 +967,11 @@ class MemoryBuilder:
         global_earliest: datetime | None,
         episode_ids: list[str],
         ep_by_id: dict[str, EpisodicMemory],
+        target_language: str = "",
     ) -> ProfileMemory:
         profile = self.wiki.load_profile() or ProfileMemory()
+        if target_language:
+            profile.primary_language = target_language
         if isinstance(data, dict):
             for field in ProfileMemory.model_fields:
                 if field in data and data[field]:
@@ -659,6 +982,9 @@ class MemoryBuilder:
             profile.add_evidence("l0_raw", "episode_digest", "derived from episodic memory")
         profile.source_episode_ids = list(dict.fromkeys(
             profile.source_episode_ids + episode_ids
+        ))
+        profile.source_turn_refs = list(dict.fromkeys(
+            profile.source_turn_refs + self._episode_turn_refs(episode_ids, ep_by_id)
         ))
         created, updated = self._ep_timestamps(episode_ids, ep_by_id, global_earliest)
         if created is not None:
@@ -674,8 +1000,11 @@ class MemoryBuilder:
         global_earliest: datetime | None,
         episode_ids: list[str],
         ep_by_id: dict[str, EpisodicMemory],
+        target_language: str = "",
     ) -> PreferenceMemory:
         prefs = self.wiki.load_preferences() or PreferenceMemory()
+        if target_language:
+            prefs.primary_language = target_language
         if isinstance(data, dict):
             for field in PreferenceMemory.model_fields:
                 if field in data and data[field]:
@@ -686,6 +1015,9 @@ class MemoryBuilder:
             prefs.add_evidence("l0_raw", "episode_digest", "derived from episodic memory")
         prefs.source_episode_ids = list(dict.fromkeys(
             prefs.source_episode_ids + episode_ids
+        ))
+        prefs.source_turn_refs = list(dict.fromkeys(
+            prefs.source_turn_refs + self._episode_turn_refs(episode_ids, ep_by_id)
         ))
         created, updated = self._ep_timestamps(episode_ids, ep_by_id, global_earliest)
         if created is not None:
@@ -701,6 +1033,7 @@ class MemoryBuilder:
         global_earliest: datetime | None,
         episode_map: dict[str, list[str]],
         ep_by_id: dict[str, EpisodicMemory],
+        target_language: str = "",
     ) -> list[ProjectMemory]:
         if not isinstance(data, list):
             return []
@@ -716,6 +1049,8 @@ class MemoryBuilder:
                 continue
             existing = self.wiki.load_project(item["project_name"])
             proj = existing or ProjectMemory(project_name=item["project_name"])
+            if target_language:
+                proj.primary_language = target_language
             ep_ids = self._infer_project_episode_ids(item, episode_map, ep_by_id)
             created, updated = self._ep_timestamps(ep_ids, ep_by_id, global_earliest)
             for field in ProjectMemory.model_fields:
@@ -743,6 +1078,9 @@ class MemoryBuilder:
             proj.source_episode_ids = list(dict.fromkeys(
                 proj.source_episode_ids + ep_ids
             ))
+            proj.source_turn_refs = list(dict.fromkeys(
+                proj.source_turn_refs + self._episode_turn_refs(ep_ids, ep_by_id)
+            ))
             if existing is None and created is not None:
                 proj.created_at = created
             if updated is not None:
@@ -757,6 +1095,7 @@ class MemoryBuilder:
         global_earliest: datetime | None,
         episode_map: dict[str, list[str]],
         ep_by_id: dict[str, EpisodicMemory],
+        target_language: str = "",
     ) -> list[WorkflowMemory]:
         if not isinstance(data, list):
             return []
@@ -777,6 +1116,8 @@ class MemoryBuilder:
                 wf = WorkflowMemory(workflow_name=name)
                 if created is not None:
                     wf.created_at = created
+            if target_language:
+                wf.primary_language = target_language
             if updated is not None:
                 wf.updated_at = updated
             for field in WorkflowMemory.model_fields:
@@ -787,6 +1128,9 @@ class MemoryBuilder:
             wf.add_evidence(source, source_id, "")
             wf.source_episode_ids = list(dict.fromkeys(
                 wf.source_episode_ids + ep_ids
+            ))
+            wf.source_turn_refs = list(dict.fromkeys(
+                wf.source_turn_refs + self._episode_turn_refs(ep_ids, ep_by_id)
             ))
             if name not in existing:
                 workflows.append(wf)

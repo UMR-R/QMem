@@ -17,6 +17,8 @@ Rules:
 - Include only stable background facts that should remain useful across sessions.
 - Leave fields empty (`""` or `[]`) if evidence is weak or missing.
 - Do NOT guess or infer beyond evidence.
+- Natural-language output should follow the TARGET DISPLAY LANGUAGE supplied in the user prompt, or otherwise the dominant language of the supporting evidence.
+- Preserve necessary proper nouns, paper/model/dataset/tool names, code names, and technical terms in their original form.
 
 Field guidance:
 - name_or_alias: stable self-identifier if clearly stated.

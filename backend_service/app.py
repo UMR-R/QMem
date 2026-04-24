@@ -69,7 +69,7 @@ from llm_memory_transferor.layers.l0_raw import L0RawLayer, RawConversation, Raw
 from llm_memory_transferor.layers.l1_signals import L1SignalLayer  # noqa: E402
 from llm_memory_transferor.layers.l2_wiki import L2Wiki  # noqa: E402
 from llm_memory_transferor.layers.l3_schema import L3Schema  # noqa: E402
-from llm_memory_transferor.models import EpisodicMemory, PreferenceMemory, ProfileMemory, ProjectMemory, WorkflowMemory  # noqa: E402
+from llm_memory_transferor.models import EpisodeConnection, EpisodicMemory, PreferenceMemory, ProfileMemory, ProjectMemory, WorkflowMemory  # noqa: E402
 from llm_memory_transferor.models.base import MemoryBase  # noqa: E402
 from llm_memory_transferor.processors import MemoryBuilder, MemoryUpdater  # noqa: E402
 from llm_memory_transferor.utils.llm_client import LLMClient  # noqa: E402
@@ -1448,7 +1448,7 @@ def _preferences_payload_fallback(settings: dict[str, Any]) -> dict[str, Any]:
         if not suffix:
             continue
         field, has_item, _ = suffix.partition(":")
-        if field in {"id", "created_at", "updated_at", "version", "evidence_links", "source_episode_ids"}:
+        if field in {"id", "created_at", "updated_at", "version", "evidence_links", "source_episode_ids", "source_turn_refs"}:
             continue
         if not field:
             continue
@@ -1768,8 +1768,11 @@ def compute_episode_signature(wiki: L2Wiki) -> str:
         {
             "episode_id": ep.episode_id,
             "conv_id": ep.conv_id,
+            "granularity": ep.granularity,
+            "turn_refs": ep.turn_refs,
             "topic": ep.topic,
             "summary": ep.summary,
+            "connections": [item.model_dump(mode="json") for item in ep.connections],
             "projects": ep.relates_to_projects,
             "workflows": ep.relates_to_workflows,
             "updated_at": ep.updated_at.isoformat() if ep.updated_at else "",
@@ -1830,7 +1833,7 @@ def _normalize_custom_instruction_blocks(values: list[Any]) -> list[dict[str, st
         label = "instruction"
         content = ""
         if isinstance(value, dict):
-            label = str(value.get("label") or value.get("title") or label).strip() or label
+            label = str(value.get("label") or value.get("name") or value.get("title") or label).strip() or label
             content = str(value.get("content") or value.get("text") or "").strip()
         else:
             content = str(value or "").strip()
@@ -1884,14 +1887,44 @@ def _normalize_platform_skill_records(values: list[Any]) -> list[dict[str, Any]]
 def _normalize_agent_config(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         return {}
-    return {
+    raw_instructions = value.get("instructions") or ""
+    if isinstance(raw_instructions, list):
+        instructions = "\n".join(str(item).strip() for item in raw_instructions if str(item).strip())
+    else:
+        instructions = str(raw_instructions or "").strip()
+    goal = str(value.get("goal") or "").strip()
+    description = str(value.get("description") or goal).strip()
+    normalized = {
         "name": str(value.get("name") or "").strip(),
-        "description": str(value.get("description") or "").strip(),
-        "instructions": str(value.get("instructions") or "").strip(),
-        "conversation_starters": _unique_string_list(list(value.get("conversation_starters") or []), max_items=8),
+        "description": description,
+        "goal": goal,
+        "instructions": instructions,
+        "conversation_starters": _unique_string_list(
+            list(value.get("conversation_starters") or value.get("conversationStarters") or []),
+            max_items=8,
+        ),
         "knowledge": _unique_string_list(list(value.get("knowledge") or []), max_items=8),
         "tools": _unique_string_list(list(value.get("tools") or []), max_items=8),
+        "handoff_rules": _unique_string_list(
+            list(value.get("handoff_rules") or value.get("handoffRules") or []),
+            max_items=8,
+        ),
     }
+    if not any(
+        normalized.get(field)
+        for field in [
+            "name",
+            "description",
+            "goal",
+            "instructions",
+            "conversation_starters",
+            "knowledge",
+            "tools",
+            "handoff_rules",
+        ]
+    ):
+        return {}
+    return normalized
 
 
 def build_platform_memory_record(payload: PlatformMemoryImportRequest) -> dict[str, Any]:
@@ -2959,6 +2992,29 @@ def _normalize_primary_task_type(value: str) -> str:
     return label
 
 
+def _looks_like_over_specific_task_type(value: str) -> bool:
+    label = _normalize_primary_task_type(value)
+    if not label:
+        return True
+    text = _canonical_memory_text(label).replace(" ", "")
+    action_markers = {
+        "推荐", "建议", "选择", "选购", "搭配", "分析", "总结", "规划", "写作", "润色",
+        "调试", "实现", "测试", "排查", "比较", "整理", "设计",
+        "recommend", "advice", "suggest", "choose", "compare", "analyze", "summarize",
+        "plan", "write", "debug", "test", "design",
+    }
+    # A broad label should usually be just an action mode, not action + concrete
+    # object. If a label is longer and starts with an action marker, it is likely
+    # a one-turn topic such as "推荐酸味饮品".
+    broad_connectors = {"与", "和", "或", "及", "、", "and", "or"}
+    has_broad_connector = any(connector in text for connector in broad_connectors)
+    if len(label) >= 5 and not has_broad_connector and any(text.startswith(marker) for marker in action_markers):
+        return True
+    if len(label) > 10:
+        return True
+    return False
+
+
 def _task_type_similarity_key(value: str) -> str:
     text = _canonical_memory_text(value).replace(" ", "")
     for suffix in ("任务", "需求", "场景", "工作", "处理"):
@@ -2982,6 +3038,8 @@ def _dedupe_primary_task_types(
     for value in values:
         label = _normalize_primary_task_type(value)
         if not label:
+            continue
+        if _looks_like_over_specific_task_type(label):
             continue
         key = _task_type_similarity_key(label)
         if not key:
@@ -3061,6 +3119,8 @@ def _infer_primary_task_types(
         "你是一个用户任务习惯归纳器。"
         "请根据 episodic、project、workflow 证据，归纳用户最常见、最稳定的任务类型。"
         "任务类型必须是宽泛、可复用的类别，而不是项目名、研究主题或一次性问题。"
+        "任务类型要描述反复出现的动作方式，不要包含具体对象、商品、地点、饮品、衣物、论文、模型或数据集。"
+        "如果证据只是一次具体咨询，应归并为更宽泛的动作类型，或直接忽略。"
         "必须主动合并近义项，不要把同一类习惯拆成多个相近标签。"
         "标签必须来自证据中体现的长期使用习惯，不要根据单个关键词强行命名。"
         "输出数量控制在 1 到 3 个。"
@@ -3092,7 +3152,7 @@ def _infer_primary_task_types(
     deduped = _dedupe_primary_task_types(normalized, projects, max_items=3)
     if deduped:
         return deduped
-    return _infer_primary_task_types_fallback(episodes, projects, workflows, existing)
+    return _dedupe_primary_task_types([str(value) for value in existing or []], projects, max_items=3)
 
 
 def _extract_ordered_steps_from_text(text: str) -> list[str]:
@@ -3466,7 +3526,7 @@ def load_l1_signals(settings: dict[str, Any]) -> tuple[L1SignalLayer, str]:
             seen_names.add(path.name)
             try:
                 signals = layer.load_file(target_path if target_path.exists() else path)
-                meaningful = [sig for sig in signals if sig.signal_type != "generic"]
+                meaningful = [sig for sig in signals if sig.is_meaningful()]
                 if meaningful:
                     serialized = [
                         {
@@ -3678,7 +3738,7 @@ def build_summary(settings: dict[str, Any]) -> SummaryResponse:
     workflows_count = len(_valid_workflows(wiki))
 
     projects_count = len(_valid_projects(wiki))
-    episodes_count = count_json_files(episodes_dir)
+    episodes_count = len(wiki.list_episodes())
     raw_count = count_raw_conversations(raw_dir)
 
     persistent_data = load_persistent_nodes(settings)
@@ -3754,6 +3814,8 @@ def _persistent_node_markdown(node_id: str, node: dict[str, Any]) -> str:
         lines.append(f"- 平台: {', '.join(str(item) for item in node.get('platform', []) if str(item).strip())}")
     if node.get("episode_refs"):
         lines.append(f"- Episode 引用: {', '.join(str(item) for item in node.get('episode_refs', []) if str(item).strip())}")
+    if node.get("turn_refs"):
+        lines.append(f"- Turn 引用: {', '.join(str(item) for item in node.get('turn_refs', []) if str(item).strip())}")
     if node.get("created_at"):
         lines.append(f"- 创建时间: `{node.get('created_at')}`")
     if node.get("updated_at"):
@@ -4131,6 +4193,8 @@ def derive_my_skills(settings: dict[str, Any]) -> list[dict[str, Any]]:
         nodes = persistent_nodes
         episodes_by_id = {episode.episode_id: episode for episode in wiki.list_episodes()}
         for node_id, node in list(nodes.items()):
+            if str(node.get("type") or "").strip().lower() != "workflow":
+                continue
             refs = node.get("episode_refs", []) or []
             if len(refs) < 2:
                 continue
@@ -4228,19 +4292,40 @@ def raw_conversation_payload(conv: RawConversation) -> dict[str, Any]:
     }
 
 
+def detect_primary_language(text: str) -> str:
+    cjk_count = sum(1 for ch in str(text or "") if "\u4e00" <= ch <= "\u9fff")
+    ascii_alpha_count = sum(1 for ch in str(text or "") if ("a" <= ch.lower() <= "z"))
+    if cjk_count >= max(2, ascii_alpha_count // 3):
+        return "zh"
+    if ascii_alpha_count:
+        return "en"
+    return ""
+
+
 def build_fallback_episode(conv: RawConversation, episode_id: str) -> EpisodicMemory:
-    excerpt = conv.full_text().strip().replace("\n", " ")
-    if len(excerpt) > 220:
-        excerpt = excerpt[:217] + "..."
+    preview = conv.full_text().strip().replace("\n", " ")
+    if len(preview) > 220:
+        preview = preview[:217] + "..."
+    summary = preview or "该对话已记录，但自动提取摘要失败。"
+    primary_language = detect_primary_language(conv.full_text())
+    display = {}
+    if primary_language:
+        display[primary_language] = {
+            "title": conv.title or conv.conv_id,
+            "summary": summary,
+        }
     episode = EpisodicMemory(
         episode_id=episode_id,
         conv_id=conv.conv_id,
         platform=conv.platform,
         topic=conv.title or conv.conv_id,
+        primary_language=primary_language,
+        display=display,
         topics_covered=[conv.title] if conv.title else [],
-        summary=excerpt or "该对话已记录，但自动提取摘要失败。",
+        summary=summary,
         key_decisions=[],
         open_issues=[],
+        granularity="conversation",
         turn_refs=[turn.turn_id for turn in (conv.turns or []) if getattr(turn, "turn_id", "")],
         relates_to_profile=False,
         relates_to_preferences=False,
@@ -4255,7 +4340,7 @@ def build_fallback_episode(conv: RawConversation, episode_id: str) -> EpisodicMe
         episode.updated_at = conv.end_time
     elif conv.start_time is not None:
         episode.updated_at = conv.start_time
-    episode.add_evidence("l0_raw", conv.conv_id, excerpt[:100] if excerpt else conv.conv_id)
+    episode.add_evidence("l0_raw", conv.conv_id, summary[:240] if summary else conv.conv_id)
     return episode
 
 
@@ -4483,6 +4568,60 @@ def _turn_payloads_from_message_dicts(conversation_id: str, messages: list[dict[
     return turns
 
 
+def _episode_container_path(episodes_dir: Path, conv_id: str) -> Path:
+    safe_name = str(conv_id or "unknown_conversation").replace("/", "_")[:160]
+    return episodes_dir / f"{safe_name}.json"
+
+
+def _episode_records_from_file(path: Path) -> list[dict[str, Any]]:
+    data = read_json_file(path)
+    if isinstance(data, dict) and isinstance(data.get("episodes"), list):
+        return [item for item in data.get("episodes", []) if isinstance(item, dict)]
+    if isinstance(data, dict) and data.get("episode_id"):
+        return [data]
+    return []
+
+
+def _read_episode_record(episodes_dir: Path, episode_id: str) -> dict[str, Any] | None:
+    episode_id = str(episode_id or "").strip()
+    if not episode_id:
+        return None
+    direct = episodes_dir / f"{episode_id}.json"
+    for episode in _episode_records_from_file(direct):
+        if str(episode.get("episode_id") or "").strip() == episode_id:
+            return episode
+    for path in episodes_dir.glob("*.json"):
+        for episode in _episode_records_from_file(path):
+            if str(episode.get("episode_id") or "").strip() == episode_id:
+                return episode
+    return None
+
+
+def _episode_container_has_ids(episodes_dir: Path, conv_id: str, episode_ids: list[str]) -> bool:
+    path = _episode_container_path(episodes_dir, conv_id)
+    if not path.exists():
+        return False
+    existing_ids = {
+        str(episode.get("episode_id") or "").strip()
+        for episode in _episode_records_from_file(path)
+    }
+    return all(episode_id in existing_ids for episode_id in episode_ids)
+
+
+def _remove_episode_storage_for_conversation(episodes_dir: Path, conv_id: str, episode_ids: list[str]) -> None:
+    for path in (
+        _episode_container_path(episodes_dir, conv_id),
+        _episode_container_path(episodes_dir, conv_id).with_suffix(".md"),
+    ):
+        if path.exists():
+            path.unlink()
+    for old_episode_id in episode_ids:
+        for suffix in (".json", ".md"):
+            old_path = episodes_dir / f"{old_episode_id}{suffix}"
+            if old_path.exists():
+                old_path.unlink()
+
+
 def _collect_raw_support_from_episode_ids(
     episodes_dir: Path,
     episode_ids: list[str] | set[str],
@@ -4494,12 +4633,20 @@ def _collect_raw_support_from_episode_ids(
         ep_id = str(episode_id or "").strip()
         if not ep_id:
             continue
-        episode = read_json_file(episodes_dir / f"{ep_id}.json")
+        episode = _read_episode_record(episodes_dir, ep_id)
         if not isinstance(episode, dict):
             continue
         conv_id = str(episode.get("conv_id") or "").strip()
         if conv_id:
             raw_ids.add(conv_id)
+            semantic_hints = [
+                str(episode.get("summary") or "").strip(),
+                *[str(item or "").strip() for item in (episode.get("key_decisions") or [])],
+                *[str(item or "").strip() for item in (episode.get("open_issues") or [])],
+            ]
+            for hint in semantic_hints:
+                if hint:
+                    excerpt_hints.setdefault(conv_id, []).append(hint)
         for turn_id in episode.get("turn_refs", []) or []:
             turn_text = str(turn_id or "").strip()
             if not turn_text:
@@ -4524,6 +4671,24 @@ def _collect_raw_support_from_episode_ids(
                 if excerpt:
                     excerpt_hints.setdefault(conv_id, []).append(excerpt)
     return raw_ids, excerpt_hints, turn_refs
+
+
+def _expand_episode_ids_with_connections(
+    episodes_dir: Path,
+    episode_ids: set[str],
+) -> set[str]:
+    expanded = set(episode_ids)
+    for episode_id in list(episode_ids):
+        episode = _read_episode_record(episodes_dir, episode_id)
+        if not isinstance(episode, dict):
+            continue
+        for connection in episode.get("connections", []) or []:
+            if not isinstance(connection, dict):
+                continue
+            connected_id = str(connection.get("episode_id") or "").strip()
+            if connected_id:
+                expanded.add(connected_id)
+    return expanded
 
 
 def _collect_raw_support_from_memory_object(
@@ -4551,6 +4716,15 @@ def _collect_raw_support_from_memory_object(
         excerpt_hints.setdefault(conv_id, []).extend(hints)
     for conv_id, refs in turn_refs.items():
         episode_turn_refs.setdefault(conv_id, set()).update(refs)
+    for turn_id in getattr(memory_obj, "source_turn_refs", []) or []:
+        turn_text = str(turn_id or "").strip()
+        if not turn_text:
+            continue
+        turn_conv_id = turn_text.split(":turn:", 1)[0]
+        if not turn_conv_id:
+            continue
+        raw_ids.add(turn_conv_id)
+        episode_turn_refs.setdefault(turn_conv_id, set()).add(turn_text)
     return raw_ids, excerpt_hints, episode_turn_refs
 
 
@@ -4881,13 +5055,22 @@ def build_selected_memory_payload(
                 continue
             selected_nodes.append({"id": node_id, **node})
             selected_episode_ids.update(node.get("episode_refs", []))
+            for turn_id in node.get("turn_refs", []) or []:
+                turn_text = str(turn_id or "").strip()
+                if not turn_text:
+                    continue
+                conv_id = turn_text.split(":turn:", 1)[0]
+                if conv_id:
+                    raw_conversation_ids.add(conv_id)
+                    raw_turn_refs.setdefault(conv_id, set()).add(turn_text)
         if selected_nodes:
             payload["memory"]["persistent_nodes"] = selected_nodes
 
     if include_episodic_evidence and selected_episode_ids:
+        selected_episode_ids = _expand_episode_ids_with_connections(episodes_dir, selected_episode_ids)
         evidence = []
         for ep_id in sorted(selected_episode_ids):
-            episode = read_json_file(episodes_dir / f"{ep_id}.json")
+            episode = _read_episode_record(episodes_dir, ep_id)
             if episode:
                 evidence.append(episode)
         episode_raw_ids, episode_hints, episode_turn_refs = _collect_raw_support_from_episode_ids(episodes_dir, selected_episode_ids)
@@ -4965,7 +5148,7 @@ def build_persistent_appendix(settings: dict[str, Any], selected_node_ids: set[s
         episodes_dir = root / "episodes"
         evidence = []
         for ep_id in sorted(selected_episode_ids):
-            data = read_json_file(episodes_dir / f"{ep_id}.json")
+            data = _read_episode_record(episodes_dir, ep_id)
             if data:
                 evidence.append(data)
         payload["episodic_evidence"] = evidence
@@ -5242,27 +5425,39 @@ def _normalize_overlap_text(value: Any) -> str:
     return _canonical_memory_text(value)
 
 
-def _persistent_topic_is_project_like(node: dict[str, Any]) -> bool:
+def _persistent_node_is_project_like(node: dict[str, Any]) -> bool:
     text = _normalize_overlap_text(" ".join([
         str(node.get("key") or ""),
         str(node.get("description") or ""),
     ]))
-    project_like_tokens = {
+    project_shape_tokens = {
         "project", "platform", "system", "framework", "mvp", "prototype", "build", "develop",
-        "项目", "平台", "系统", "框架", "构建", "搭建", "开发", "推进", "统一评测",
+        "evaluation", "benchmark", "leaderboard",
+        "项目", "平台", "系统", "框架", "构建", "搭建", "开发", "推进", "评测", "排行榜",
     }
-    return any(token in text for token in project_like_tokens)
+    project_decision_tokens = {
+        "positioning", "architecture", "roadmap", "diagnostic", "pipeline", "dataset",
+        "定位", "架构", "路线", "能力诊断", "数据集", "指标", "模块",
+    }
+    return any(token in text for token in project_shape_tokens) or (
+        any(token in text for token in project_decision_tokens)
+        and any(token in text for token in {"用户", "user", "倾向", "关注", "prefer", "focus"})
+    )
 
 
-def _persistent_topic_overlaps_project(node: dict[str, Any], project: ProjectMemory) -> bool:
-    if str(node.get("type") or "").strip().lower() != "topic":
+def _persistent_node_overlaps_project(node: dict[str, Any], project: ProjectMemory) -> bool:
+    node_type = str(node.get("type") or "").strip().lower()
+    if node_type not in {"topic", "preference"}:
         return False
-    if not _persistent_topic_is_project_like(node):
+    if not _persistent_node_is_project_like(node):
         return False
 
-    node_refs = set(node.get("episode_refs") or [])
+    node_refs = {str(ref).strip() for ref in (node.get("episode_refs") or []) if str(ref).strip()}
+    node_turn_refs = {str(ref).strip() for ref in (node.get("turn_refs") or []) if str(ref).strip()}
     project_refs = set(getattr(project, "source_episode_ids", []) or [])
+    project_turn_refs = set(getattr(project, "source_turn_refs", []) or [])
     has_episode_overlap = bool(node_refs & project_refs)
+    has_turn_overlap = bool(node_turn_refs & project_turn_refs)
 
     node_text = _normalize_overlap_text(" ".join([
         str(node.get("key") or ""),
@@ -5272,19 +5467,26 @@ def _persistent_topic_overlaps_project(node: dict[str, Any], project: ProjectMem
         project.project_name,
         project.project_goal,
         project.current_stage,
+        " ".join(entry.text for entry in project.finished_decisions[:5]),
+        " ".join(entry.text for entry in project.unresolved_questions[:5]),
+        " ".join(entry.text for entry in project.relevant_entities[:8]),
+        " ".join(entry.text for entry in project.important_constraints[:5]),
+        " ".join(entry.text for entry in project.next_actions[:5]),
     ]))
     lexical_overlap = False
     if node_text and project_text:
+        project_tokens = [
+            token
+            for token in re.split(r"[^a-zA-Z0-9\u4e00-\u9fff]+", project_text)
+            if token and len(token) >= 2
+        ]
         lexical_overlap = (
             node_text in project_text
             or project_text in node_text
-            or sum(
-                1 for token in re.split(r"[^a-zA-Z0-9\u4e00-\u9fff]+", project_text)
-                if token and len(token) >= 2 and token in node_text
-            ) >= 2
+            or sum(1 for token in project_tokens if token in node_text) >= 2
         )
 
-    return has_episode_overlap and lexical_overlap
+    return (has_episode_overlap or has_turn_overlap) and lexical_overlap
 
 
 def _prune_persistent_nodes_against_projects(settings: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
@@ -5301,7 +5503,7 @@ def _prune_persistent_nodes_against_projects(settings: dict[str, Any], payload: 
     for node_id, node in nodes.items():
         if not isinstance(node, dict):
             continue
-        if any(_persistent_topic_overlaps_project(node, project) for project in projects):
+        if any(_persistent_node_overlaps_project(node, project) for project in projects):
             continue
         pruned_nodes[node_id] = node
 
@@ -5378,36 +5580,68 @@ def apply_persistent_result(
     result: dict[str, Any],
     episode_id: str,
     platform: str,
+    turn_refs: list[str] | None = None,
+    primary_language: str = "",
+    support_turn_refs_by_episode: dict[str, list[str]] | None = None,
 ) -> None:
     now = datetime.now(timezone.utc).isoformat()
     nodes = pn_data.setdefault("nodes", {})
     pn_data.setdefault("pn_next_id", 1)
+    clean_turn_refs = [str(ref).strip() for ref in (turn_refs or []) if str(ref).strip()]
+    support_turn_refs_by_episode = support_turn_refs_by_episode or {}
+
+    def support_refs(item: dict[str, Any]) -> tuple[list[str], list[str]]:
+        allowed_ids = {episode_id, *support_turn_refs_by_episode.keys()}
+        refs: list[str] = []
+        for raw_ref in [episode_id, *(item.get("support_episode_ids") or [])]:
+            ref = str(raw_ref or "").strip()
+            if ref and ref in allowed_ids and ref not in refs:
+                refs.append(ref)
+        turn_ids: list[str] = []
+        for ref in refs:
+            for turn_ref in support_turn_refs_by_episode.get(ref, []):
+                if turn_ref and turn_ref not in turn_ids:
+                    turn_ids.append(turn_ref)
+        for turn_ref in clean_turn_refs:
+            if turn_ref and turn_ref not in turn_ids:
+                turn_ids.append(turn_ref)
+        return refs, turn_ids
 
     for upd in result.get("updates", []):
         node = nodes.get(upd.get("id"))
         if not node:
             continue
-        if episode_id and episode_id not in (node.get("episode_refs") or []):
-            node["episode_refs"] = [*(node.get("episode_refs") or []), episode_id]
+        refs, turn_ids = support_refs(upd)
+        for ref in refs:
+            if ref not in (node.get("episode_refs") or []):
+                node["episode_refs"] = [*(node.get("episode_refs") or []), ref]
+        for turn_ref in turn_ids:
+            if turn_ref not in (node.get("turn_refs") or []):
+                node["turn_refs"] = [*(node.get("turn_refs") or []), turn_ref]
         if platform and platform not in (node.get("platform") or []):
             node["platform"] = [*(node.get("platform") or []), platform]
         if upd.get("description"):
             node["description"] = upd["description"]
+        if primary_language:
+            node["primary_language"] = primary_language
         if upd.get("confidence"):
             node["confidence"] = upd["confidence"]
         node["updated_at"] = now
 
     for new_node in result.get("new_nodes", []):
+        refs, turn_ids = support_refs(new_node)
         node_id = f"pn_{str(pn_data['pn_next_id']).zfill(4)}"
         pn_data["pn_next_id"] += 1
         nodes[node_id] = {
             "type": new_node["type"],
             "key": new_node["key"],
             "description": new_node["description"],
-            "episode_refs": [episode_id] if episode_id else [],
+            "episode_refs": refs,
+            "turn_refs": turn_ids,
             "platform": [platform] if platform else [],
             "confidence": "low",
             "export_priority": new_node.get("export_priority", "medium"),
+            "primary_language": primary_language,
             "created_at": now,
             "updated_at": now,
         }
@@ -5425,9 +5659,14 @@ def apply_persistent_result(
             for ref in source.get("episode_refs", []):
                 if ref not in (target.get("episode_refs") or []):
                     target["episode_refs"] = [*(target.get("episode_refs") or []), ref]
+            for turn_ref in source.get("turn_refs", []):
+                if turn_ref not in (target.get("turn_refs") or []):
+                    target["turn_refs"] = [*(target.get("turn_refs") or []), turn_ref]
             for src_platform in source.get("platform", []):
                 if src_platform not in (target.get("platform") or []):
                     target["platform"] = [*(target.get("platform") or []), src_platform]
+            if not target.get("primary_language") and source.get("primary_language"):
+                target["primary_language"] = source.get("primary_language")
             del nodes[src_id]
         ref_count = len(target.get("episode_refs") or [])
         if ref_count >= 4:
@@ -5436,6 +5675,8 @@ def apply_persistent_result(
             target["confidence"] = "medium"
         if merge.get("description"):
             target["description"] = merge["description"]
+        if primary_language:
+            target["primary_language"] = primary_language
         target["updated_at"] = now
 
 
@@ -5458,21 +5699,86 @@ def update_persistent_nodes_for_episode(
         }
         for node_id, node in pn_data.get("nodes", {}).items()
     ]
+    raw_display = getattr(episode, "display", {}) or {}
+    display = {
+        str(lang): value.model_dump() if hasattr(value, "model_dump") else value
+        for lang, value in raw_display.items()
+        if isinstance(raw_display, dict)
+    }
+    wiki = get_wiki(settings)
+    connected_episode_summaries: list[dict[str, Any]] = []
+    support_turn_refs_by_episode = {
+        episode.episode_id: [str(ref).strip() for ref in (episode.turn_refs or []) if str(ref).strip()]
+    }
+    for connection in (getattr(episode, "connections", []) or [])[:8]:
+        if str(getattr(connection, "relation", "") or "") not in {"preferences", "persistent_node", "conversation_context"}:
+            continue
+        connected = wiki.load_episode(str(getattr(connection, "episode_id", "") or ""))
+        if not connected:
+            continue
+        support_turn_refs_by_episode[connected.episode_id] = [
+            str(ref).strip() for ref in (connected.turn_refs or []) if str(ref).strip()
+        ]
+        connected_episode_summaries.append(
+            {
+                "episode_id": connected.episode_id,
+                "relation": getattr(connection, "relation", ""),
+                "topic": connected.topic,
+                "summary": connected.summary,
+                "turn_refs": connected.turn_refs,
+                "key_decisions": connected.key_decisions[:3],
+                "open_issues": connected.open_issues[:2],
+                "relates_to_preferences": connected.relates_to_preferences,
+                "relates_to_projects": connected.relates_to_projects,
+            }
+        )
     episode_summary = {
         "episode_id": episode.episode_id,
         "topic": episode.topic,
+        "primary_language": getattr(episode, "primary_language", "") or "",
+        "display": display,
         "summary": episode.summary,
         "key_decisions": episode.key_decisions,
         "open_issues": episode.open_issues,
         "relates_to_projects": episode.relates_to_projects,
+        "connected_episode_summaries": connected_episode_summaries,
+    }
+    primary_language = getattr(episode, "primary_language", "") or detect_primary_language(
+        " ".join([
+            str(getattr(episode, "topic", "") or ""),
+            str(getattr(episode, "summary", "") or ""),
+            " ".join(getattr(episode, "key_decisions", []) or []),
+            " ".join(getattr(episode, "open_issues", []) or []),
+        ])
+    )
+    language_context = {
+        "primary_language": primary_language,
+        "policy": (
+            "description 使用中文，必要专名和技术词保留原文"
+            if primary_language == "zh"
+            else (
+                "description uses English; preserve necessary proper nouns and technical terms"
+                if primary_language == "en"
+                else "infer from episode language; preserve necessary proper nouns and technical terms"
+            )
+        ),
     }
     user_prompt = (
+        f"【TARGET DISPLAY LANGUAGE】\n{json.dumps(language_context, ensure_ascii=False, indent=2)}\n\n"
         f"【现有 Persistent 节点】\n{json.dumps(existing_summary, ensure_ascii=False, indent=2)}\n\n"
         f"【新 Episodic 记忆内容】\n{json.dumps(episode_summary, ensure_ascii=False, indent=2)}"
     )
     result = llm.extract_json(_load_persistent_distill_prompt(), user_prompt)
     if isinstance(result, dict) and result:
-        apply_persistent_result(pn_data, result, episode.episode_id, episode.platform)
+        apply_persistent_result(
+            pn_data,
+            result,
+            episode.episode_id,
+            episode.platform,
+            episode.turn_refs,
+            primary_language,
+            support_turn_refs_by_episode,
+        )
         save_persistent_nodes(settings, pn_data)
 
 
@@ -5536,6 +5842,50 @@ def rebuild_persistent_nodes(
     }
 
 
+def connect_episodes_by_persistent_nodes(settings: dict[str, Any], wiki: L2Wiki) -> None:
+    episodes = wiki.list_episodes()
+    ep_by_id = {episode.episode_id: episode for episode in episodes}
+    for episode in episodes:
+        original_count = len(episode.connections)
+        episode.connections = [
+            connection
+            for connection in episode.connections
+            if connection.relation != "persistent_node"
+        ]
+        if len(episode.connections) != original_count:
+            wiki.save_episode(episode)
+    nodes = load_persistent_nodes(settings).get("nodes", {})
+    changed: set[str] = set()
+    for node_id, node in nodes.items():
+        if not isinstance(node, dict):
+            continue
+        refs = [str(ref).strip() for ref in (node.get("episode_refs") or []) if str(ref).strip() in ep_by_id]
+        if len(refs) < 2:
+            continue
+        label = str(node.get("display_title") or node.get("key") or node.get("description") or node_id).strip()[:80]
+        for ref in refs:
+            episode = ep_by_id[ref]
+            for other_ref in refs[:20]:
+                if other_ref == ref:
+                    continue
+                connection = EpisodeConnection(
+                    episode_id=other_ref,
+                    relation="persistent_node",
+                    key=label,
+                    reason="same persistent memory node",
+                )
+                if not any(
+                    existing.episode_id == connection.episode_id
+                    and existing.relation == connection.relation
+                    and existing.key == connection.key
+                    for existing in episode.connections
+                ):
+                    episode.connections.append(connection)
+                    changed.add(ref)
+    for episode_id in changed:
+        wiki.save_episode(ep_by_id[episode_id])
+
+
 def rebuild_persistent_memory(
     settings: dict[str, Any],
     builder: MemoryBuilder,
@@ -5564,6 +5914,13 @@ def rebuild_persistent_memory(
             project_ep_map.setdefault(project_name, []).append(ep.episode_id)
         for workflow_name in ep.relates_to_workflows:
             workflow_ep_map.setdefault(workflow_name, []).append(ep.episode_id)
+    builder.maintain_episode_connections(
+        episodes,
+        profile_ep_ids,
+        pref_ep_ids,
+        project_ep_map,
+        workflow_ep_map,
+    )
 
     def stage(message: str, offset: int) -> None:
         update_job(
@@ -5634,6 +5991,7 @@ def rebuild_persistent_memory(
         existing.reuse_frequency = existing.reuse_frequency or workflow.reuse_frequency
         existing.occurrence_count = max(existing.occurrence_count, workflow.occurrence_count)
         existing.source_episode_ids = list(dict.fromkeys(existing.source_episode_ids + workflow.source_episode_ids))
+        existing.source_turn_refs = list(dict.fromkeys(existing.source_turn_refs + workflow.source_turn_refs))
     workflows = list(workflow_map.values())
     wiki.save_workflows(workflows)
     save_workflow_asset_library(settings, workflows)
@@ -5652,6 +6010,14 @@ def rebuild_persistent_memory(
             max_items=3,
         )
         wiki.save_preferences(prefs)
+
+    builder.maintain_episode_connections(
+        episodes,
+        list(profile.source_episode_ids or []),
+        list(prefs.source_episode_ids or []),
+        {project.project_name: list(project.source_episode_ids or []) for project in projects},
+        {workflow.workflow_name: list(workflow.source_episode_ids or []) for workflow in workflows},
+    )
 
     save_display_texts(settings, build_display_texts(builder.llm, profile, prefs))
 
@@ -5711,9 +6077,16 @@ def _run_organize_job(job_id: str, settings: dict[str, Any]) -> None:
             current_step += 1
             raw_key = f"{conv.platform}:{conv.conv_id}"
             signature = conversation_signature(conv)
-            episode_id = raw_index.get(raw_key, {}).get("episode_id") or stable_episode_id(raw_key)
             existing_meta = raw_index.get(raw_key, {})
-            episode_path = wiki.wiki_dir / "episodes" / f"{episode_id}.json"
+            existing_episode_ids = [
+                str(item).strip()
+                for item in (
+                    existing_meta.get("episode_ids")
+                    or ([existing_meta.get("episode_id")] if existing_meta.get("episode_id") else [])
+                )
+                if str(item or "").strip()
+            ]
+            episodes_dir = wiki.wiki_dir / "episodes"
 
             update_job(
                 job_id,
@@ -5725,22 +6098,36 @@ def _run_organize_job(job_id: str, settings: dict[str, Any]) -> None:
                 },
             )
 
-            if existing_meta.get("signature") == signature and episode_path.exists():
+            if (
+                existing_meta.get("signature") == signature
+                and existing_meta.get("episode_schema") == "turn_v1"
+                and existing_episode_ids
+                and _episode_container_has_ids(episodes_dir, conv.conv_id, existing_episode_ids)
+            ):
                 continue
 
-            episode = builder._build_episode(conv)
-            if episode is None:
-                episode = build_fallback_episode(conv, episode_id)
+            _remove_episode_storage_for_conversation(episodes_dir, conv.conv_id, existing_episode_ids)
+
+            built_episodes = builder._build_episodes(conv)
+            if not built_episodes:
+                episode_id = stable_episode_id(f"{raw_key}:fallback")
+                built_episodes = [build_fallback_episode(conv, episode_id)]
                 status = "fallback_built"
             else:
-                status = "episode_built"
+                status = "turn_episodes_built"
 
-            episode.episode_id = episode_id
-            wiki.save_episode(episode)
-            changed_episodes.append(episode)
+            saved_episode_ids: list[str] = []
+            for episode in built_episodes:
+                first_turn = episode.turn_refs[0] if episode.turn_refs else "conversation"
+                episode.episode_id = stable_episode_id(f"{raw_key}:{first_turn}:{episode.topic}")
+                wiki.save_episode(episode)
+                changed_episodes.append(episode)
+                saved_episode_ids.append(episode.episode_id)
             raw_index[raw_key] = {
                 "signature": signature,
-                "episode_id": episode_id,
+                "episode_id": saved_episode_ids[0] if saved_episode_ids else "",
+                "episode_ids": saved_episode_ids,
+                "episode_schema": "turn_v1",
                 "status": status,
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }
@@ -5779,6 +6166,7 @@ def _run_organize_job(job_id: str, settings: dict[str, Any]) -> None:
                 progress={"current": len(conversations) + 1, "total": total_steps, "message": "persistent 未变化，跳过重建"},
             )
 
+        episode_signature = compute_episode_signature(wiki)
         persistent_signature = compute_persistent_signature(wiki)
         node_maintenance_signature = _hash_payload(
             {
@@ -5797,6 +6185,7 @@ def _run_organize_job(job_id: str, settings: dict[str, Any]) -> None:
             node_result = rebuild_persistent_nodes(settings, llm, wiki.list_episodes(), job_id, total_steps)
             persistent_result.update(node_result)
             persistent_result["nodes_maintained"] = True
+            connect_episodes_by_persistent_nodes(settings, wiki)
         else:
             update_job(
                 job_id,
@@ -5804,6 +6193,7 @@ def _run_organize_job(job_id: str, settings: dict[str, Any]) -> None:
                 progress={"current": total_steps, "total": total_steps, "message": "persistent 节点未变化，跳过维护"},
             )
 
+        episode_signature = compute_episode_signature(wiki)
         organize_state["raw_index"] = raw_index
         organize_state["last_organized_at"] = datetime.now(timezone.utc).isoformat()
         organize_state["l1_signature"] = l1_signature

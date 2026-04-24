@@ -10,6 +10,7 @@ from ..layers.l1_signals import L1SignalLayer
 from ..layers.l2_wiki import L2Wiki
 from ..layers.l3_schema import ConflictResolution, L3Schema
 from ..models import (
+    EpisodeConnection,
     EpisodicMemory,
     PreferenceMemory,
     ProfileMemory,
@@ -33,6 +34,191 @@ class MemoryUpdater:
         self.schema = schema
         self.prompts = load_processor_prompts()
 
+    @staticmethod
+    def _detect_primary_language(text: str) -> str:
+        cjk_count = sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff")
+        ascii_alpha_count = sum(1 for ch in text if ("a" <= ch.lower() <= "z"))
+        if cjk_count >= max(2, ascii_alpha_count // 3):
+            return "zh"
+        if ascii_alpha_count:
+            return "en"
+        return ""
+
+    @staticmethod
+    def _language_policy_context(language: str) -> str:
+        if language == "zh":
+            return (
+                "TARGET DISPLAY LANGUAGE: zh\n"
+                "Write all human-facing natural-language memory values in Chinese, "
+                "while preserving necessary proper nouns, model names, paper titles, "
+                "dataset names, code names, and technical terms in their original form.\n"
+            )
+        if language == "en":
+            return (
+                "TARGET DISPLAY LANGUAGE: en\n"
+                "Write all human-facing natural-language memory values in English, "
+                "while preserving necessary proper nouns and technical terms in their original form.\n"
+            )
+        return (
+            "TARGET DISPLAY LANGUAGE: infer from the new conversation\n"
+            "Write human-facing memory values in the dominant language of the new conversation, "
+            "while preserving necessary proper nouns and technical terms in their original form.\n"
+        )
+
+    @classmethod
+    def _episode_display_payload(
+        cls,
+        ep_data: dict[str, Any],
+        primary_language: str,
+        title: str,
+        summary: str,
+    ) -> dict[str, dict[str, str]]:
+        raw_display = ep_data.get("display") if isinstance(ep_data.get("display"), dict) else {}
+        display: dict[str, dict[str, str]] = {}
+        for lang in ["zh", "en"]:
+            value = raw_display.get(lang) if isinstance(raw_display, dict) else None
+            if isinstance(value, dict):
+                display[lang] = {
+                    "title": str(value.get("title") or "").strip(),
+                    "summary": str(value.get("summary") or "").strip(),
+                }
+        lang = primary_language if primary_language in {"zh", "en"} else cls._detect_primary_language(
+            f"{title}\n{summary}"
+        )
+        if lang in {"zh", "en"}:
+            current = display.setdefault(lang, {"title": "", "summary": ""})
+            current["title"] = current["title"] or title
+            current["summary"] = current["summary"] or summary
+        return display
+
+    @staticmethod
+    def _turn_index(ep: EpisodicMemory) -> int:
+        if not ep.turn_refs:
+            return 10**9
+        try:
+            return int(str(ep.turn_refs[0]).rsplit(":turn:", 1)[1])
+        except (IndexError, ValueError):
+            return 10**9
+
+    @staticmethod
+    def _add_episode_connection(
+        ep: EpisodicMemory,
+        target_id: str,
+        relation: str,
+        key: str = "",
+        reason: str = "",
+    ) -> bool:
+        if not target_id or target_id == ep.episode_id:
+            return False
+        for existing in ep.connections:
+            if (
+                existing.episode_id == target_id
+                and existing.relation == relation
+                and existing.key == key
+            ):
+                return False
+        ep.connections.append(
+            EpisodeConnection(
+                episode_id=target_id,
+                relation=relation,
+                key=key,
+                reason=reason,
+            )
+        )
+        return True
+
+    def _connect_episode_group(
+        self,
+        ep_by_id: dict[str, EpisodicMemory],
+        episode_ids: list[str],
+        relation: str,
+        key: str = "",
+        reason: str = "",
+    ) -> set[str]:
+        changed: set[str] = set()
+        clean_ids = [eid for eid in dict.fromkeys(episode_ids) if eid in ep_by_id]
+        if len(clean_ids) < 2:
+            return changed
+        for eid in clean_ids:
+            for other_id in clean_ids:
+                if self._add_episode_connection(ep_by_id[eid], other_id, relation, key, reason):
+                    changed.add(eid)
+        return changed
+
+    def _refresh_incremental_episode_connections(self, episode_id: str) -> None:
+        episodes = self.wiki.list_episodes()
+        ep_by_id = {ep.episode_id: ep for ep in episodes}
+        episode = ep_by_id.get(episode_id)
+        if not episode:
+            return
+
+        changed: set[str] = set()
+        same_conv = sorted(
+            [ep for ep in episodes if ep.conv_id and ep.conv_id == episode.conv_id],
+            key=self._turn_index,
+        )
+        for index, ep in enumerate(same_conv):
+            if ep.episode_id != episode_id:
+                continue
+            for neighbor in (same_conv[index - 1:index] + same_conv[index + 1:index + 2]):
+                if self._add_episode_connection(
+                    ep,
+                    neighbor.episode_id,
+                    "conversation_context",
+                    ep.conv_id,
+                    "adjacent turn in the same raw conversation",
+                ):
+                    changed.add(ep.episode_id)
+                if self._add_episode_connection(
+                    neighbor,
+                    ep.episode_id,
+                    "conversation_context",
+                    ep.conv_id,
+                    "adjacent turn in the same raw conversation",
+                ):
+                    changed.add(neighbor.episode_id)
+
+        profile = self.wiki.load_profile()
+        if profile and episode_id in profile.source_episode_ids:
+            changed.update(self._connect_episode_group(
+                ep_by_id,
+                profile.source_episode_ids,
+                "profile",
+                reason="shared profile evidence",
+            ))
+
+        prefs = self.wiki.load_preferences()
+        if prefs and episode_id in prefs.source_episode_ids:
+            changed.update(self._connect_episode_group(
+                ep_by_id,
+                prefs.source_episode_ids,
+                "preferences",
+                reason="shared preference evidence",
+            ))
+
+        for project in self.wiki.list_projects():
+            if episode_id in project.source_episode_ids:
+                changed.update(self._connect_episode_group(
+                    ep_by_id,
+                    project.source_episode_ids,
+                    "project",
+                    project.project_name,
+                    "same persistent project",
+                ))
+
+        for workflow in self.wiki.load_workflows():
+            if episode_id in workflow.source_episode_ids:
+                changed.update(self._connect_episode_group(
+                    ep_by_id,
+                    workflow.source_episode_ids,
+                    "workflow",
+                    workflow.workflow_name,
+                    "same persistent workflow",
+                ))
+
+        for changed_id in changed:
+            self.wiki.save_episode(ep_by_id[changed_id])
+
     def update(
         self,
         new_conversation_text: str,
@@ -50,6 +236,8 @@ class MemoryUpdater:
         # Build current state summary for context
         progress("Loading current memory state...")
         current_state = self._summarize_current_state()
+        target_language = self._detect_primary_language(new_conversation_text)
+        language_context = self._language_policy_context(target_language)
 
         # Get L1 signals text
         l1_text = l1_layer.combined_text() if l1_layer else ""
@@ -58,6 +246,7 @@ class MemoryUpdater:
         progress("Analyzing conversation for memory deltas...")
         prompt = (
             f"CURRENT MEMORY STATE:\n{current_state}\n\n"
+            f"{language_context}\n"
             f"NEW CONVERSATION:\n{new_conversation_text[:4000]}"
             + (f"\n\nPLATFORM SIGNALS:\n{l1_text[:1000]}" if l1_text else "")
         )
@@ -77,6 +266,8 @@ class MemoryUpdater:
         if profile_updates:
             progress("Updating profile...")
             profile = self.wiki.load_profile() or ProfileMemory()
+            if target_language:
+                profile.primary_language = target_language
             for field, value in profile_updates.items():
                 if not value or field not in ProfileMemory.model_fields:
                     continue
@@ -97,6 +288,8 @@ class MemoryUpdater:
         if any(pref_updates.values()):
             progress("Updating preferences...")
             prefs = self.wiki.load_preferences() or PreferenceMemory()
+            if target_language:
+                prefs.primary_language = target_language
             if pref_updates.get("add_style"):
                 prefs.style_preference = list(
                     set(prefs.style_preference + pref_updates["add_style"])
@@ -131,6 +324,8 @@ class MemoryUpdater:
                     proj = ProjectMemory(project_name=name)
                 else:
                     continue
+            if target_language:
+                proj.primary_language = target_language
             now = conversation_end_time or datetime.now(timezone.utc)
             if pu.get("stage_update"):
                 proj.current_stage = pu["stage_update"]
@@ -184,8 +379,12 @@ class MemoryUpdater:
                         workflow_name=name,
                         typical_steps=wu.get("steps_update") or [],
                     )
+                    if target_language:
+                        wf.primary_language = target_language
                     existing[name] = wf
                     changed = True
+                if name in existing and target_language:
+                    existing[name].primary_language = target_language
             if changed:
                 progress("Updating workflows...")
                 self.wiki.save_workflows(list(existing.values()))
@@ -196,42 +395,65 @@ class MemoryUpdater:
         new_episode_id: str | None = None
         if ep_data and ep_data.get("topic"):
             progress("Creating episode record...")
+            episode_language = str(ep_data.get("primary_language") or "").strip().lower()
+            if episode_language not in {"zh", "en"}:
+                episode_language = target_language
+            episode_title = ep_data.get("topic") or ep_data.get("title") or ""
+            episode_summary = ep_data.get("summary") or ""
             ep = EpisodicMemory(
                 episode_id=str(uuid.uuid4())[:8],
                 conv_id=conv_id,
                 platform=platform,
-                topic=ep_data.get("topic") or ep_data.get("title") or "",
+                topic=episode_title,
+                primary_language=episode_language,
+                display=self._episode_display_payload(ep_data, episode_language, episode_title, episode_summary),
                 topics_covered=ep_data.get("topics_covered") or [],
-                summary=ep_data.get("summary") or "",
+                summary=episode_summary,
                 key_decisions=ep_data.get("key_decisions") or [],
                 open_issues=ep_data.get("open_issues") or [],
+                granularity="turn" if turn_refs else "conversation",
                 turn_refs=[str(turn_ref).strip() for turn_ref in (turn_refs or []) if str(turn_ref).strip()],
                 relates_to_profile=bool(ep_data.get("relates_to_profile")),
                 relates_to_preferences=bool(ep_data.get("relates_to_preferences")),
                 relates_to_projects=ep_data.get("relates_to_projects") or [],
                 relates_to_workflows=ep_data.get("relates_to_workflows") or [],
+                related_project=str(ep_data.get("related_project") or "").strip(),
+                time_range_start=conversation_end_time,
+                time_range_end=conversation_end_time,
             )
-            ep.add_evidence("chat_history", platform, new_conversation_text[:80])
+            if conversation_end_time is not None:
+                ep.created_at = conversation_end_time
+                ep.updated_at = conversation_end_time
+            if ep.related_project and ep.related_project not in ep.relates_to_projects:
+                ep.relates_to_projects.append(ep.related_project)
+            ep.add_evidence("chat_history", platform, ep.summary[:240] or ep.topic or new_conversation_text[:120])
             self.wiki.save_episode(ep)
             new_episode_id = ep.episode_id
             results["episode_created"] = ep.episode_id
 
         # Back-link episode to affected persistent memory objects
         if new_episode_id:
+            new_turn_refs = [str(ref).strip() for ref in (turn_refs or []) if str(ref).strip()]
             if profile_updates:
                 profile = self.wiki.load_profile()
-                if profile and new_episode_id not in profile.source_episode_ids:
-                    profile.source_episode_ids.append(new_episode_id)
+                if profile:
+                    if new_episode_id not in profile.source_episode_ids:
+                        profile.source_episode_ids.append(new_episode_id)
+                    profile.source_turn_refs = list(dict.fromkeys(profile.source_turn_refs + new_turn_refs))
                     self.wiki.save_profile(profile)
             if any(pref_updates.values()):
                 prefs = self.wiki.load_preferences()
-                if prefs and new_episode_id not in prefs.source_episode_ids:
-                    prefs.source_episode_ids.append(new_episode_id)
+                if prefs:
+                    if new_episode_id not in prefs.source_episode_ids:
+                        prefs.source_episode_ids.append(new_episode_id)
+                    prefs.source_turn_refs = list(dict.fromkeys(prefs.source_turn_refs + new_turn_refs))
                     self.wiki.save_preferences(prefs)
             for name in updated_projects:
                 proj = self.wiki.load_project(name)
-                if proj and new_episode_id not in proj.source_episode_ids:
-                    proj.source_episode_ids.append(new_episode_id)
+                if proj:
+                    if new_episode_id not in proj.source_episode_ids:
+                        proj.source_episode_ids.append(new_episode_id)
+                    proj.source_turn_refs = list(dict.fromkeys(proj.source_turn_refs + new_turn_refs))
                     self.wiki.save_project(proj)
             if workflow_updates:
                 workflows = self.wiki.load_workflows()
@@ -242,11 +464,15 @@ class MemoryUpdater:
                     if isinstance(item, dict) and str(item.get("workflow_name") or "").strip()
                 }
                 for workflow in workflows:
-                    if workflow.workflow_name in touched_names and new_episode_id not in workflow.source_episode_ids:
-                        workflow.source_episode_ids.append(new_episode_id)
+                    if workflow.workflow_name in touched_names:
+                        if new_episode_id not in workflow.source_episode_ids:
+                            workflow.source_episode_ids.append(new_episode_id)
+                        workflow.source_turn_refs = list(dict.fromkeys(workflow.source_turn_refs + new_turn_refs))
                         changed = True
                 if changed:
                     self.wiki.save_workflows(workflows)
+
+            self._refresh_incremental_episode_connections(new_episode_id)
 
         # --- Health check: detect L1 vs L2 divergence ---
         if l1_layer:
