@@ -21,6 +21,108 @@ The current repository has three cooperating parts:
 - Inject exported memory or selected skills into the current session.
 - Manage both personal skills and recommended skills from the backend catalog.
 
+## Quick Start
+
+### 1. Start the local backend
+
+From the repository root:
+
+```bash
+pip install -r backend_service/requirements.txt
+uvicorn backend_service.app:app --host 127.0.0.1 --port 8765 --reload
+```
+
+Recommended backend URL:
+
+```text
+http://127.0.0.1:8765
+```
+
+`backend_service/requirements.txt` is the intended first-run install entrypoint
+for the local backend and includes the runtime dependencies needed by the
+in-repo `llm_memory_transferor` modules imported by `backend_service.app`.
+
+### 2. Load the Chrome extension from this repository
+
+1. Open Chrome and go to `chrome://extensions/`.
+2. Turn on `Developer mode` in the top-right corner.
+3. Click `Load unpacked`.
+4. Select the repository root folder:
+
+```text
+memory_assistant_git/
+```
+
+Do not select only `popup/` or `background/`. Chrome needs the root because the
+extension manifest lives at:
+
+```text
+manifest.json
+```
+
+After loading, you should see the Memory Assistant extension card in the
+extensions page.
+
+### 3. Pin the extension and open the popup
+
+1. Click the Chrome extensions icon in the toolbar.
+2. Pin `Memory Assistant` so it stays visible.
+3. Click the extension icon to open the popup.
+
+If the popup does not open correctly, go back to `chrome://extensions/`,
+open the extension details page, and inspect errors first.
+
+### 4. Configure the popup
+
+In `Settings`, fill in:
+
+- `Backend URL`: usually `http://127.0.0.1:8765`
+- `API key`: your model provider key
+- `Local storage directory`: where the backend should store raw chats and memory
+
+The current backend defaults are:
+
+- `api_provider = openai_compat`
+- `api_base_url = https://api.deepseek.com/v1`
+- `api_model = deepseek-chat`
+
+By default, organize and incremental updates use the backend LLM configuration
+above. Platform memory collection is handled through the current AI page.
+
+### 5. Add data and build memory
+
+There are two main ways to accumulate conversation data:
+
+- `Import History`: use the popup `Settings` page to import local `json`, `jsonl`, `md`, or `txt` chat exports
+- `Sync Conversation`: turn on sync in the popup, keep chatting on a supported AI site, and let the extension capture new rounds in realtime
+
+After raw conversations have been collected, open `Migrate` and click
+`Organize Memory` to rebuild:
+
+- episodes
+- profile
+- preferences
+- projects
+- workflows
+- daily notes / persistent nodes
+
+### 6. Export or inject memory
+
+After memory is organized:
+
+1. Open `Migrate`
+2. Select the memory sections you want
+3. Click `Export` to create a package, or `Inject` to inject into the current AI session
+
+### 7. Use the Skill page
+
+The `Skill` page lets you:
+
+- save recommended skills into your personal set
+- export skills
+- inject skills into the current session
+- manage backend-provided skill assets
+
 ## Current Product Flow
 
 1. The extension captures raw conversations or imports them manually.
@@ -63,55 +165,9 @@ The current repository has three cooperating parts:
 
 ## Local Backend
 
-The extension talks to a local FastAPI service. Main endpoints currently include:
-
-- `GET /api/health`
-- `GET/POST /api/settings`
-- `POST /api/settings/test-connection`
-- `GET /api/summary`
-- `GET /api/sync/status`
-- `POST /api/sync/toggle`
-- `POST /api/conversations/current/import`
-- `POST /api/platform-memory/import`
-- `POST /api/memory/organize`
-- `GET /api/memory/categories`
-- `GET /api/memory/items`
-- `POST /api/export/package`
-- `POST /api/inject/package`
-- `GET /api/skills/my`
-- `GET /api/skills/recommended`
-- `POST /api/skills/save`
-- `POST /api/skills/export`
-- `POST /api/skills/delete`
-- `POST /api/skills/inject`
-- `POST /api/import/history`
-- `POST /api/cache/clear`
-- `GET /api/jobs/{job_id}`
-
-Start the backend from the repository root:
-
-```bash
-pip install -r backend_service/requirements.txt
-uvicorn backend_service.app:app --host 127.0.0.1 --port 8765 --reload
-```
-
-`backend_service/requirements.txt` is the intended first-run install entrypoint for the local backend and includes the runtime dependencies needed by the in-repo `llm_memory_transferor` modules imported by `backend_service.app`.
-
-Recommended backend URL:
-
-```text
-http://127.0.0.1:8765
-```
-
-## Default LLM Settings
-
-The backend defaults are:
-
-- `api_provider = openai_compat`
-- `api_base_url = https://api.deepseek.com/v1`
-- `api_model = deepseek-chat`
-
-By default, organize and incremental updates use the backend LLM configuration above. Platform memory collection is handled through the current AI page.
+The extension talks to a local FastAPI backend in `backend_service/`. For the
+main user flow, the important thing is simply that the backend is running and
+the popup can reach it at the configured URL.
 
 ## Active Prompt Files
 
@@ -158,24 +214,6 @@ The checked-in sample memory root in this repo is `llm_mem4/`.
 - `prompts/`: editable runtime prompts
 - `llm_memory_transferor/`: Python library, CLI, exporters, tests, and evaluation scripts
 - `llm_mem4/`: example memory store generated by the system
-
-## Quick Start
-
-1. Load the extension in Chrome from the repository root.
-2. Start the backend:
-
-```bash
-uvicorn backend_service.app:app --host 127.0.0.1 --port 8765 --reload
-```
-
-3. Open the popup and configure:
-   - backend URL
-   - API key
-   - storage directory
-4. Use `Add Current Conversation`, `Add Platform Memory`, or `Import History` to add source data.
-5. Click `Organize Memory` to build structured memory.
-6. Select memory sections and use `Export` or `Inject`.
-7. Use the `Skill` page to save, export, or inject skills.
 
 ## Notes
 
