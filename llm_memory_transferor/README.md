@@ -128,6 +128,163 @@ mwiki export --target claude --output my_memory
 mwiki bootstrap --target claude
 ```
 
+## Testing On LongMemEval
+
+The repository includes a LongMemEval adapter and runner under
+`eval/longmemeval/`.
+
+Recommended benchmark file:
+
+```text
+llm_memory_transferor/data/longmemeval_oracle.json
+```
+
+Before running generation, configure one LLM backend. The examples below assume
+an OpenAI-compatible endpoint such as DeepSeek:
+
+```bash
+export OPENAI_BASE_URL=https://api.deepseek.com/v1
+export MWIKI_API_KEY=sk-...
+```
+
+All commands below are run from the `llm_memory_transferor/` directory.
+
+### Test persistent memory
+
+Use `memory-wiki` mode to test the full pipeline with persistent memory
+derivation. This mode builds episodes from each LongMemEval haystack, derives
+L2 memory, generates a bootstrap-style memory context, and answers questions
+from that memory plus retrieved evidence.
+
+Quick sample:
+
+```bash
+python -m eval.longmemeval.run generate \
+  --data data/longmemeval_oracle.json \
+  --output results/hypothesis_persistent_test.jsonl \
+  --mode memory-wiki \
+  --top-k 5 \
+  --backend openai_compat \
+  --model deepseek-chat \
+  --limit 20
+```
+
+Full run:
+
+```bash
+python -m eval.longmemeval.run generate \
+  --data data/longmemeval_oracle.json \
+  --output results/hypothesis_persistent.jsonl \
+  --mode memory-wiki \
+  --top-k 5 \
+  --backend openai_compat \
+  --model deepseek-chat
+```
+
+### Test popup organize flow
+
+Use `popup-organize` mode to simulate the real product path triggered by
+clicking "Organize Memory" in the popup. This mode writes the LongMemEval
+haystack into backend raw storage, runs the backend organize flow, builds
+profile, preferences, projects, workflows, and persistent nodes, and then
+answers using the organized memory package plus retrieved evidence.
+
+Quick sample:
+
+```bash
+python -m eval.longmemeval.run generate \
+  --data data/longmemeval_oracle.json \
+  --output results/hypothesis_popup_organize_test.jsonl \
+  --mode popup-organize \
+  --top-k 5 \
+  --backend openai_compat \
+  --model deepseek-chat \
+  --limit 20
+```
+
+Full run:
+
+```bash
+python -m eval.longmemeval.run generate \
+  --data data/longmemeval_oracle.json \
+  --output results/hypothesis_popup_organize.jsonl \
+  --mode popup-organize \
+  --top-k 5 \
+  --backend openai_compat \
+  --model deepseek-chat
+```
+
+### Test episodic memory
+
+Use `episodic-memory` mode to stop after the episodic layer. This mode builds
+`EpisodicMemory` objects from the haystack, retrieves the most relevant episode
+summaries, and answers from episodic memory only without deriving L2 persistent
+memory.
+
+Quick sample:
+
+```bash
+python -m eval.longmemeval.run generate \
+  --data data/longmemeval_oracle.json \
+  --output results/hypothesis_episode_test.jsonl \
+  --mode episodic-memory \
+  --top-k 5 \
+  --backend openai_compat \
+  --model deepseek-chat \
+  --limit 20
+```
+
+Full run:
+
+```bash
+python -m eval.longmemeval.run generate \
+  --data data/longmemeval_oracle.json \
+  --output results/hypothesis_episode.jsonl \
+  --mode episodic-memory \
+  --top-k 5 \
+  --backend openai_compat \
+  --model deepseek-chat
+```
+
+### Optional baselines
+
+Retrieval-only baseline:
+
+```bash
+python -m eval.longmemeval.run retrieve \
+  --data data/longmemeval_oracle.json \
+  --output results/retrieval_output.jsonl \
+  --top-k 50 \
+  --granularity session
+```
+
+Full-history baseline:
+
+```bash
+python -m eval.longmemeval.run generate \
+  --data data/longmemeval_oracle.json \
+  --output results/hypothesis_full_history.jsonl \
+  --mode full-history \
+  --backend openai_compat \
+  --model deepseek-chat
+```
+
+### Official LongMemEval scoring
+
+After generation, score the output with the official LongMemEval evaluator:
+
+```bash
+cd <longmemeval_repo>/src/evaluation
+
+python evaluate_qa.py gpt-4o \
+  /path/to/results/hypothesis_episode.jsonl \
+  /path/to/data/longmemeval_oracle.json
+
+python print_qa_metrics.py \
+  /path/to/results/hypothesis_episode.jsonl.eval-results-gpt-4o \
+  /path/to/data/longmemeval_oracle.json
+```
+
 ## Supported CLI Commands
 
 - `mwiki scan`

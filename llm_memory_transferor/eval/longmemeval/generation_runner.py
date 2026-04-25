@@ -34,6 +34,9 @@ from pathlib import Path
 import click
 from tqdm import tqdm
 
+from llm_memory_transferor.layers.l2_wiki import L2Wiki
+from llm_memory_transferor.models import EpisodicMemory
+from llm_memory_transferor.processors.memory_builder import MemoryBuilder
 from llm_memory_transferor.utils.llm_client import LLMClient
 
 from .adapter import (
@@ -180,6 +183,202 @@ def answer_memory_wiki(
     return llm.summarize(system, user_msg, temperature=0.0)
 
 
+def _build_popup_memory_payload_for_entry(
+    entry: dict,
+    llm: LLMClient,
+    model: str | None,
+    backend: str | None,
+    api_key: str | None,
+    base_url: str | None,
+) -> dict:
+    """Simulate the backend organize flow triggered by the popup."""
+    from backend_service import app as backend_app
+
+    convs, _ = entry_to_conversations(entry)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        storage_root = Path(tmpdir) / "storage"
+        settings = {
+            "api_provider": backend or llm.backend_name,
+            "api_key": api_key or "",
+            "api_base_url": base_url or "",
+            "api_model": model or llm.model,
+            "storage_path": str(storage_root),
+            "keep_updated": True,
+            "realtime_update": False,
+            "detailed_injection": False,
+            "last_sync_at": None,
+            "backend_url": "",
+            "saved_skill_ids": [],
+            "dismissed_skill_ids": [],
+        }
+
+        backend_app.persist_raw_conversations(storage_root, convs, platform_hint="longmemeval")
+        job = backend_app.create_job("memory_organize", status="running")
+        backend_app._run_organize_job(job["id"], settings)
+        final_job = backend_app.JOB_REGISTRY.get(job["id"], {})
+        if final_job.get("status") != "completed":
+            raise RuntimeError(final_job.get("error") or "Popup organize flow failed")
+
+        selected_ids = [
+            "profile:default",
+            "preferences:default",
+            "projects:default",
+            "workflows:default",
+            "persistent:default",
+        ]
+        return backend_app.build_selected_memory_payload(
+            settings,
+            selected_ids,
+            include_episodic_evidence=True,
+            detailed_injection=False,
+        )
+
+
+def answer_popup_organized_memory(
+    entry: dict,
+    llm: LLMClient,
+    top_k: int,
+    max_context_chars: int,
+    model: str | None,
+    backend: str | None,
+    api_key: str | None,
+    base_url: str | None,
+) -> str:
+    """
+    Simulate clicking "Organize Memory" in the popup, then answer using the
+    organized memory package plus retrieved conversation evidence.
+    """
+    try:
+        memory_payload = _build_popup_memory_payload_for_entry(
+            entry, llm, model, backend, api_key, base_url
+        )
+    except Exception:
+        return answer_memory_wiki(entry, llm, top_k, max_context_chars)
+
+    ranked_items = retrieve_for_entry(entry, top_k=top_k * 3, granularity="session")
+    retrieved_context = format_retrieved_context(entry, ranked_items, top_k=top_k)
+    retrieved_context = retrieved_context[:max_context_chars]
+
+    memory_context = json.dumps(memory_payload, ensure_ascii=False, indent=2)
+    memory_context = memory_context[:max_context_chars]
+
+    question = entry["question"]
+    question_date = entry.get("question_date", "")
+    date_suffix = f"\n\nQuestion date: {question_date}" if question_date else ""
+
+    system = _get_system_prompt(
+        entry.get("question_type", ""),
+        wiki_context=f"ORGANIZED MEMORY PACKAGE:\n{memory_context}",
+    )
+    user_msg = (
+        f"RELEVANT CONVERSATION EXCERPTS:\n{retrieved_context}"
+        f"{date_suffix}\n\nQUESTION: {question}"
+    )
+    return llm.summarize(system, user_msg, temperature=0.0)
+
+
+def _build_episodes_for_entry(entry: dict, llm: LLMClient) -> list[EpisodicMemory]:
+    """Build episodic memories directly from the haystack without deriving L2 memory."""
+    convs, _ = entry_to_conversations(entry)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        builder = MemoryBuilder(llm=llm, wiki=L2Wiki(Path(tmpdir) / "wiki"))
+        episodes: list[EpisodicMemory] = []
+        for conv in convs:
+            if len(conv.full_text().strip()) < 30:
+                continue
+            episodes.extend(builder._build_episodes(conv))
+        return episodes
+
+
+def _retrieve_episode_summaries(
+    episodes: list[EpisodicMemory],
+    question: str,
+    top_k: int,
+) -> list[EpisodicMemory]:
+    """Simple keyword retrieval over episode summaries and metadata."""
+    question_lower = question.lower()
+    question_tokens = set(question_lower.split())
+
+    scored: list[tuple[float, EpisodicMemory]] = []
+    for ep in episodes:
+        haystack = " ".join(
+            part for part in [
+                ep.topic,
+                ep.summary,
+                " ".join(ep.key_decisions),
+                " ".join(ep.open_issues),
+                " ".join(ep.topics_covered),
+                " ".join(ep.relates_to_projects),
+                " ".join(ep.relates_to_workflows),
+            ] if part
+        ).lower()
+        if not haystack.strip():
+            continue
+        score = sum(1 for tok in question_tokens if tok in haystack)
+        if question_lower and question_lower in haystack:
+            score += len(question_tokens)
+        if ep.related_project and ep.related_project.lower() in question_lower:
+            score += 2
+        scored.append((score, ep))
+
+    scored.sort(
+        key=lambda item: (
+            item[0],
+            item[1].time_range_end or item[1].time_range_start or item[1].created_at,
+        ),
+        reverse=True,
+    )
+    return [ep for _, ep in scored[:top_k]]
+
+
+def _format_episodic_context(episodes: list[EpisodicMemory]) -> str:
+    parts: list[str] = []
+    for ep in episodes:
+        ts = ep.time_range_start.strftime("%Y-%m-%d") if ep.time_range_start else "unknown date"
+        lines = [
+            f"=== Episode {ep.episode_id} [{ts}] ===",
+            f"Session: {ep.conv_id or 'unknown'}",
+            f"Title: {ep.topic or 'untitled'}",
+            f"Summary: {ep.summary or 'N/A'}",
+        ]
+        if ep.topics_covered:
+            lines.append(f"Topics: {', '.join(ep.topics_covered[:8])}")
+        if ep.key_decisions:
+            lines.append(f"Key decisions: {'; '.join(ep.key_decisions[:4])}")
+        if ep.open_issues:
+            lines.append(f"Open issues: {'; '.join(ep.open_issues[:4])}")
+        if ep.relates_to_projects:
+            lines.append(f"Projects: {', '.join(ep.relates_to_projects[:4])}")
+        if ep.relates_to_workflows:
+            lines.append(f"Workflows: {', '.join(ep.relates_to_workflows[:4])}")
+        parts.append("\n".join(lines))
+    return "\n\n".join(parts)
+
+
+def answer_episodic_memory(
+    entry: dict, llm: LLMClient, top_k: int, max_context_chars: int
+) -> str:
+    """Answer from retrieved episodic memories only, without L2 aggregation."""
+    episodes = _build_episodes_for_entry(entry, llm)
+    if not episodes:
+        return answer_retrieval_augmented(entry, llm, top_k, max_context_chars)
+
+    retrieved = _retrieve_episode_summaries(episodes, entry["question"], top_k=top_k)
+    if not retrieved:
+        return answer_retrieval_augmented(entry, llm, top_k, max_context_chars)
+
+    context = _format_episodic_context(retrieved)[:max_context_chars]
+    question = entry["question"]
+    question_date = entry.get("question_date", "")
+    date_suffix = f"\n\nQuestion date: {question_date}" if question_date else ""
+
+    system = _get_system_prompt(entry.get("question_type", ""))
+    user_msg = f"EPISODIC MEMORY:\n{context}{date_suffix}\n\nQUESTION: {question}"
+    return llm.summarize(system, user_msg, temperature=0.0)
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -190,7 +389,7 @@ def answer_memory_wiki(
 @click.option("--output", required=True, type=click.Path(),
               help="Output JSONL path with hypotheses.")
 @click.option("--mode", default="retrieval-augmented", show_default=True,
-              type=click.Choice(["retrieval-augmented", "full-history", "memory-wiki"]),
+              type=click.Choice(["retrieval-augmented", "full-history", "episodic-memory", "memory-wiki", "popup-organize"]),
               help="Answering mode.")
 @click.option("--top-k", default=5, show_default=True,
               help="Number of retrieved sessions to use as context (retrieval modes).")
@@ -256,8 +455,23 @@ def run_generation(
                     )
                 elif mode == "full-history":
                     hypothesis = answer_full_history(entry, llm, max_context_chars)
+                elif mode == "episodic-memory":
+                    hypothesis = answer_episodic_memory(
+                        entry, llm, top_k, max_context_chars
+                    )
                 elif mode == "memory-wiki":
                     hypothesis = answer_memory_wiki(entry, llm, top_k, max_context_chars)
+                elif mode == "popup-organize":
+                    hypothesis = answer_popup_organized_memory(
+                        entry,
+                        llm,
+                        top_k,
+                        max_context_chars,
+                        model,
+                        backend,
+                        api_key,
+                        base_url,
+                    )
                 else:
                     raise ValueError(f"Unknown mode: {mode}")
             except Exception as e:

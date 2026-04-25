@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -12,7 +13,21 @@ from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
-console = Console()
+def _configure_text_io() -> None:
+    """Prefer UTF-8 process output on Windows consoles."""
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+
+
+_configure_text_io()
+
+console = Console(safe_box=True, emoji=False)
 
 # Default wiki directory: ./wiki relative to cwd
 DEFAULT_WIKI = Path.cwd() / "wiki"

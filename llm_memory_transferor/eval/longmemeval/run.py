@@ -28,7 +28,7 @@ cli.add_command(run_generation, name="generate")
 @click.option("--data", required=True, type=click.Path(exists=True))
 @click.option("--output-dir", required=True, type=click.Path())
 @click.option("--mode", default="retrieval-augmented",
-              type=click.Choice(["retrieval-augmented", "full-history", "memory-wiki"]))
+              type=click.Choice(["retrieval-augmented", "full-history", "episodic-memory", "memory-wiki", "popup-organize"]))
 @click.option("--top-k", default=5)
 @click.option("--model", default="claude-haiku-4-5-20251001")
 @click.option("--limit", default=None, type=int)
