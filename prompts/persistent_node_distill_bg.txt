@@ -28,8 +28,19 @@ daily_notes 节点遵循以下原则：
 - `updated_at` 由系统维护，你不要输出这个字段
 - `episode_refs`、`platform`、`created_at` 也由系统维护，你不要输出这些字段
 - 当【新 Episodic 记忆内容】里提供 `connected_episode_summaries` 时，你可以在 `updates` 或 `new_nodes` 中输出可选字段 `support_episode_ids`
-- `support_episode_ids` 只能包含当前 episode_id 或 connected_episode_summaries 中的 episode_id，用来说明同一个稳定规律还被哪些相邻/相关 episode 支撑
+- `support_episode_ids` 只能包含当前 episode_id 或 connected_episode_summaries 中的 episode_id，用来说明同一个稳定规律还被哪些相邻/相关 episode 直接支撑
+- 不要因为两个 episode 都属于“偏好/日常/建议/选择”这类宽泛关系，就把它们互相写进 `support_episode_ids`；必须能从摘要、主题或关键证据中看出它们在支撑同一个节点
+- 如果一个 connected episode 只是同属大类，但谈的是不同对象、场景或选择问题，不要把它作为证据
 - 如果 connected episode 提供了该规律的上游偏好、原因或约束，不要只写最后一轮的具体推荐，要把偏好链条合并成更准确的描述
+
+### 需要尊重证据确认规则
+
+- 严格区分用户事实、用户偏好、用户正在考虑的问题，以及 assistant 给出的建议。
+- 只有用户明确说喜欢、偏好、选择、决定、采纳、确认，才能写成“用户偏好/用户首选/用户决定”。
+- 如果只是用户询问搭配、购买、饮食、旅行等建议，而 assistant 给出推荐，节点应写成“用户正在为 X 寻找/比较建议；assistant 曾建议 Y，待用户确认”。
+- 不要把 assistant-only recommendations 写成用户偏好。尤其避免在没有用户确认时使用“偏好 Y”“首选 Y”“决定 Y”“主打 Y”。
+- `type: preference` 只用于用户确认过的偏好或稳定选择标准；assistant-only recommendations 通常应使用 `type: topic`。
+- `key` 也要反映证据状态：没有用户确认时不要使用 `prefers_*`，应使用 `*_context`、`*_options`、`*_candidate_suggestions` 等更中性的 key。
 
 ### updates
 
@@ -91,6 +102,7 @@ daily_notes 节点遵循以下原则：
 - 如果几条偏好属于同一选择标准、长期关注方向或相近任务域，优先合并成一个更高层、更稳定的节点
 - 只有在这些偏好明显属于不同域时，才分别建节点
 - 对面向用户本人的个性化建议，如果它表达了后续可复用的稳定偏好或选择标准，可以保留为一个低置信度 `topic` 或 `preference` 节点
+- 如果个性化建议只来自 assistant，且用户没有确认，保留为 `topic`，并在描述中标注“assistant 建议/待确认”
 - 风格例子：如果 episode 中沉淀出“用户在某类选择里更倾向的判断标准、偏好方向或可复用建议”，可以生成一个低置信度节点；不要把这个例子当成固定类别或固定备选项
 - 对生活方式、穿搭、消费选择、饮食口味等日常内容，如果不是项目内容，即使还没有抽象成长期偏好，只要后续可能复用，也可以保留为低置信度日常记忆
 

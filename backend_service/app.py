@@ -60,7 +60,7 @@ RECOMMENDED_REMOTE_SOURCES = [
 ]
 LLM_TRANSFEROR_SRC = PROJECT_ROOT / "llm_memory_transferor" / "src"
 JOB_LOCK = threading.Lock()
-L2_PERSISTENT_NODE_MAINTENANCE_VERSION = "l2_persistent_nodes_v2_daily_notes"
+L2_PERSISTENT_NODE_MAINTENANCE_VERSION = "l2_persistent_nodes_v3_daily_notes_support_guard"
 
 if str(LLM_TRANSFEROR_SRC) not in sys.path:
     sys.path.insert(0, str(LLM_TRANSFEROR_SRC))
@@ -5469,6 +5469,106 @@ def _normalize_overlap_text(value: Any) -> str:
     return _canonical_memory_text(value)
 
 
+_PERSISTENT_SUPPORT_STOPWORDS = {
+    "user", "assistant", "episode", "summary", "topic", "context", "memory", "node",
+    "用户", "助手", "助理", "建议", "推荐", "询问", "了解", "选择", "偏好", "日常", "记忆",
+    "上下文", "相关", "提供", "讨论", "表达", "希望", "需要", "可以", "适合", "关于",
+    "进行", "寻找", "比较", "参考", "问题", "内容", "信息", "方向", "个人", "具体",
+    "进一步", "尚未", "确认", "正在", "后续", "搭配", "选项", "场景", "上下游",
+}
+
+_PERSISTENT_SUPPORT_STOP_SUBSTRINGS = {
+    "用户", "助手", "助理", "询问", "进一步", "尚未", "确认", "推荐", "建议",
+    "寻找", "比较", "适合", "正在", "曾按", "曾建议", "具体", "后续",
+}
+
+
+def _is_memory_support_term(term: str) -> bool:
+    if not term or len(term) < 2:
+        return False
+    if term in _PERSISTENT_SUPPORT_STOPWORDS:
+        return False
+    return not any(stop in term for stop in _PERSISTENT_SUPPORT_STOP_SUBSTRINGS)
+
+
+def _memory_support_terms(value: Any) -> set[str]:
+    text = _canonical_memory_text(value)
+    if not text:
+        return set()
+    for phrase in sorted(_PERSISTENT_SUPPORT_STOP_SUBSTRINGS, key=len, reverse=True):
+        text = text.replace(phrase, " ")
+    text = re.sub(r"\s+", " ", text).strip()
+
+    terms: set[str] = set()
+    for token in re.findall(r"[a-z0-9][a-z0-9_]{2,}", text):
+        token = token.strip("_")
+        if _is_memory_support_term(token):
+            terms.add(token)
+
+    for chunk in re.findall(r"[\u4e00-\u9fff]{2,}", text):
+        if _is_memory_support_term(chunk) and 2 <= len(chunk) <= 12:
+            terms.add(chunk)
+        for size in (2, 3):
+            if len(chunk) < size:
+                continue
+            for index in range(0, len(chunk) - size + 1):
+                gram = chunk[index:index + size]
+                if _is_memory_support_term(gram):
+                    terms.add(gram)
+
+    return {term for term in terms if _is_memory_support_term(term)}
+
+
+def _persistent_node_support_text(node: dict[str, Any]) -> str:
+    return " ".join(
+        str(value or "")
+        for value in [
+            node.get("key"),
+            node.get("description"),
+            node.get("display_title"),
+            node.get("display_summary"),
+        ]
+    )
+
+
+def _episode_support_text(episode: Any) -> str:
+    display = getattr(episode, "display", {}) or {}
+    display_texts: list[str] = []
+    if isinstance(display, dict):
+        for value in display.values():
+            if hasattr(value, "model_dump"):
+                value = value.model_dump()
+            if isinstance(value, dict):
+                display_texts.extend(str(item or "") for item in value.values())
+    return " ".join(
+        str(value or "")
+        for value in [
+            getattr(episode, "topic", ""),
+            getattr(episode, "summary", ""),
+            " ".join(getattr(episode, "topics_covered", []) or []),
+            " ".join(getattr(episode, "key_decisions", []) or []),
+            " ".join(getattr(episode, "open_issues", []) or []),
+            " ".join(display_texts),
+        ]
+    )
+
+
+def _episode_supports_persistent_node(node: dict[str, Any], episode: Any) -> bool:
+    """Require direct semantic overlap before linking an episode to a daily note."""
+    if episode is None:
+        return False
+    node_terms = _memory_support_terms(_persistent_node_support_text(node))
+    episode_terms = _memory_support_terms(_episode_support_text(episode))
+    if not node_terms or not episode_terms:
+        return False
+
+    overlap = node_terms & episode_terms
+    if len(overlap) >= 2:
+        return True
+
+    return any(len(term) >= 4 for term in overlap)
+
+
 def _persistent_node_is_project_like(node: dict[str, Any]) -> bool:
     text = _normalize_overlap_text(" ".join([
         str(node.get("key") or ""),
@@ -5555,6 +5655,53 @@ def _prune_persistent_nodes_against_projects(settings: dict[str, Any], payload: 
     return payload
 
 
+def _prune_persistent_node_support_refs(settings: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    nodes = payload.get("nodes")
+    if not isinstance(nodes, dict) or not nodes:
+        return payload
+
+    try:
+        episodes = get_wiki(settings).list_episodes()
+    except Exception:
+        return payload
+
+    ep_by_id = {episode.episode_id: episode for episode in episodes}
+    if not ep_by_id:
+        return payload
+
+    for node_id, node in nodes.items():
+        if not isinstance(node, dict):
+            continue
+        node_for_match = {"id": node_id, **node}
+        refs = [str(ref).strip() for ref in (node.get("episode_refs") or []) if str(ref).strip()]
+        known_refs = [ref for ref in refs if ref in ep_by_id]
+        if not known_refs:
+            continue
+
+        kept_refs = [
+            ref
+            for ref in known_refs
+            if _episode_supports_persistent_node(node_for_match, ep_by_id[ref])
+        ]
+        if not kept_refs:
+            continue
+
+        allowed_turn_refs: list[str] = []
+        for ref in kept_refs:
+            for turn_ref in getattr(ep_by_id[ref], "turn_refs", []) or []:
+                turn_ref = str(turn_ref).strip()
+                if turn_ref and turn_ref not in allowed_turn_refs:
+                    allowed_turn_refs.append(turn_ref)
+
+        node["episode_refs"] = kept_refs
+        existing_turn_refs = [str(ref).strip() for ref in (node.get("turn_refs") or []) if str(ref).strip()]
+        if allowed_turn_refs:
+            filtered_turn_refs = [ref for ref in existing_turn_refs if ref in allowed_turn_refs]
+            node["turn_refs"] = filtered_turn_refs or allowed_turn_refs
+
+    return payload
+
+
 def save_persistent_nodes(settings: dict[str, Any], data: dict[str, Any]) -> None:
     root = get_storage_root(settings, create=True)
     payload = _default_persistent_payload()
@@ -5566,6 +5713,7 @@ def save_persistent_nodes(settings: dict[str, Any], data: dict[str, Any]) -> Non
             "nodes": data.get("nodes", payload["nodes"]),
         })
     payload = _prune_persistent_nodes_against_projects(settings, payload)
+    payload = _prune_persistent_node_support_refs(settings, payload)
 
     persistent_root = _persistent_root(root)
     persistent_root.mkdir(parents=True, exist_ok=True)
@@ -5631,35 +5779,42 @@ def apply_persistent_result(
     turn_refs: list[str] | None = None,
     primary_language: str = "",
     support_turn_refs_by_episode: dict[str, list[str]] | None = None,
+    support_episodes_by_id: dict[str, Any] | None = None,
 ) -> None:
     now = datetime.now(timezone.utc).isoformat()
     nodes = pn_data.setdefault("nodes", {})
     pn_data.setdefault("pn_next_id", 1)
-    clean_turn_refs = [str(ref).strip() for ref in (turn_refs or []) if str(ref).strip()]
     support_turn_refs_by_episode = support_turn_refs_by_episode or {}
+    support_episodes_by_id = support_episodes_by_id or {}
 
-    def support_refs(item: dict[str, Any]) -> tuple[list[str], list[str]]:
+    def support_refs(item: dict[str, Any], node: dict[str, Any]) -> tuple[list[str], list[str]]:
         allowed_ids = {episode_id, *support_turn_refs_by_episode.keys()}
         refs: list[str] = []
         for raw_ref in [episode_id, *(item.get("support_episode_ids") or [])]:
             ref = str(raw_ref or "").strip()
-            if ref and ref in allowed_ids and ref not in refs:
+            support_episode = support_episodes_by_id.get(ref)
+            if (
+                ref
+                and ref in allowed_ids
+                and ref not in refs
+                and support_episode is not None
+                and _episode_supports_persistent_node(node, support_episode)
+            ):
                 refs.append(ref)
         turn_ids: list[str] = []
         for ref in refs:
             for turn_ref in support_turn_refs_by_episode.get(ref, []):
                 if turn_ref and turn_ref not in turn_ids:
                     turn_ids.append(turn_ref)
-        for turn_ref in clean_turn_refs:
-            if turn_ref and turn_ref not in turn_ids:
-                turn_ids.append(turn_ref)
         return refs, turn_ids
 
     for upd in result.get("updates", []):
         node = nodes.get(upd.get("id"))
         if not node:
             continue
-        refs, turn_ids = support_refs(upd)
+        refs, turn_ids = support_refs(upd, node)
+        if not refs:
+            continue
         for ref in refs:
             if ref not in (node.get("episode_refs") or []):
                 node["episode_refs"] = [*(node.get("episode_refs") or []), ref]
@@ -5677,7 +5832,14 @@ def apply_persistent_result(
         node["updated_at"] = now
 
     for new_node in result.get("new_nodes", []):
-        refs, turn_ids = support_refs(new_node)
+        candidate_node = {
+            "type": new_node.get("type"),
+            "key": new_node.get("key"),
+            "description": new_node.get("description"),
+        }
+        refs, turn_ids = support_refs(new_node, candidate_node)
+        if not refs:
+            continue
         node_id = f"pn_{str(pn_data['pn_next_id']).zfill(4)}"
         pn_data["pn_next_id"] += 1
         nodes[node_id] = {

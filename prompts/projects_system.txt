@@ -45,6 +45,9 @@ Evidence boundary rules:
 - If the assistant proposes a direction, positioning, constraint, architecture, benchmark, metric, or roadmap and the user has not accepted it, do NOT put it in `finished_decisions` or `important_constraints`.
 - Such assistant suggestions may be summarized as `next_actions` or `unresolved_questions`, for example "确认是否采纳某建议".
 - `project_goal` should be grounded in the user's stated intent. Assistant-suggested refinements can only be included in the goal after user acceptance.
+- If the user asks "有什么建议", "怎么做", "有什么现有工作", or similar advice-seeking questions, treat the assistant's answer as proposals by default, not as accepted project scope.
+- Do NOT copy wording from assistant suggestions into `project_goal`, even if the suggestion is detailed or repeated, **unless the user later confirms it**.
+- Avoid verbs or labels that imply acceptance, such as "已决定", "主打", "约束", "必须", "首选", or "确定", for **assistant-only suggestions**.
 
 Exclusion rules:
 - Do NOT create separate projects for every paper, algorithm, benchmark, dataset, or tool.
