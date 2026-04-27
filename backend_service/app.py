@@ -6948,6 +6948,37 @@ async def import_history(
 
 @app.post("/api/cache/clear")
 def cache_clear(payload: CacheClearRequest) -> dict[str, Any]:
+    if payload.scope == "all_memory":
+        root = get_storage_root(load_settings(), create=True)
+        target_dirs = [
+            "raw",
+            "platform_memory",
+            "episodes",
+            "profile",
+            "preferences",
+            "projects",
+            "workflows",
+            "skills",
+            "daily_notes",
+            "metadata",
+            "logs",
+        ]
+        cleared: list[str] = []
+        for name in target_dirs:
+            path = root / name
+            if not path.exists():
+                continue
+            if path.is_file():
+                path.unlink()
+            else:
+                shutil.rmtree(path)
+            cleared.append(name)
+        return {
+            "ok": True,
+            "message": "All memory files cleared",
+            "cleared": cleared,
+            "memory_root": str(root),
+        }
     if payload.scope == "temporary" and UPLOADS_DIR.exists():
         for child in UPLOADS_DIR.iterdir():
             if child.is_file():

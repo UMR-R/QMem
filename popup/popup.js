@@ -8,6 +8,7 @@ const STORAGE_KEYS = {
   apiBaseUrl: "api_base_url",
   apiModel: "api_model",
   backendUrl: "backend_url",
+  storagePath: "storage_path",
   keepUpdated: "keepUpdated",
   keepUpdatedStrategy: "keepUpdatedStrategy",
   realtimeUpdate: "realtimeUpdate",
@@ -279,9 +280,14 @@ async function ensureDirPermission() {
 }
 
 async function pickDirectory() {
+  const previousDirName = state.dirHandle?.name || "";
   const handle = await window.showDirectoryPicker({ mode: "readwrite" });
   await dbSet(DIR_KEY, handle);
   state.dirHandle = handle;
+  const currentInput = document.getElementById("storageDirInput")?.value.trim() || "";
+  if (!state.storagePath || currentInput === previousDirName) {
+    state.storagePath = handle.name || "";
+  }
   renderDirectory();
   toast(`目录已设置：${handle.name}`);
 }
@@ -1055,6 +1061,7 @@ async function saveSettings(showToast = true) {
       [STORAGE_KEYS.apiBaseUrl]: state.apiBaseUrl,
       [STORAGE_KEYS.apiModel]: state.apiModel,
       [STORAGE_KEYS.backendUrl]: state.backendUrl,
+      [STORAGE_KEYS.storagePath]: state.storagePath,
       [STORAGE_KEYS.detailedInjection]: state.detailedInjection,
     });
     const backendSettings = await backendApi().saveSettings(state.backendUrl, {
@@ -1074,6 +1081,7 @@ async function saveSettings(showToast = true) {
     state.apiModel = backendSettings.api_model || state.apiModel;
     state.storagePath = backendSettings.storage_path || state.storagePath;
     state.detailedInjection = !!backendSettings.detailed_injection;
+    renderDirectory();
     renderSettings();
     renderSync();
     renderActionAvailability();
@@ -1809,7 +1817,44 @@ async function clearCache() {
   toast("临时缓存已清理");
 }
 
+async function clearAllMemoryFiles() {
+  const confirmed = window.confirm(
+    "这会删除已保存的对话和记忆文件，但保留当前设置。确定继续吗？",
+  );
+  if (!confirmed) return;
+
+  await backendApi().clearCache(state.backendUrl, { scope: "all_memory" });
+
+  const allData = await storageGet(null);
+  const removableKeys = Object.keys(allData).filter(key => (
+    key.startsWith("mw:")
+    || key.startsWith("chat:")
+    || key === "_raw_progress"
+    || key === "_sw_keepalive"
+    || key === "pending_flush"
+  ));
+  if (removableKeys.length) {
+    await new Promise(resolve => chrome.storage.local.remove(removableKeys, resolve));
+  }
+
+  state.selectedMemoryIds.clear();
+  state.expandedCategories.clear();
+  state.memoryItemsByCategory = {};
+  state.organizeJobState = null;
+  await storageSet({ [STORAGE_KEYS.organizeJobState]: null });
+  await refreshSummary();
+  renderSettings();
+  renderActionAvailability();
+  toast("所有记忆文件已清理");
+}
+
 function bindEvents() {
+  const clearCacheBtn = document.getElementById("clearCacheBtn");
+  const clearAllMemoryBtn = document.getElementById("clearAllMemoryBtn");
+  if (clearCacheBtn && clearAllMemoryBtn && clearCacheBtn.parentElement === clearAllMemoryBtn.parentElement) {
+    clearCacheBtn.insertAdjacentElement("afterend", clearAllMemoryBtn);
+  }
+
   document.getElementById("menuBtn").addEventListener("click", () => setView("settings"));
   document.getElementById("gotoMigrateBtn").addEventListener("click", () => setView("migrate"));
   document.getElementById("gotoSettingsBtn").addEventListener("click", () => setView("settings"));
@@ -1831,12 +1876,15 @@ function bindEvents() {
   });
 
   document.getElementById("syncBtn").addEventListener("click", toggleSync);
-  document.getElementById("selectDirBtn").addEventListener("click", async () => {
-    try {
-      await pickDirectory();
-    } catch (err) {
-      if (err.name !== "AbortError") toast(`选择目录失败：${err.message}`, true);
-    }
+  document.getElementById("selectDirBtn").addEventListener("click", () => {
+    saveSettings(false).then(() => {
+      toast("本地目录已保存");
+    }).catch(err => {
+      if (!isExpectedSettingsFailure(err)) {
+        logPopupError("Save storage path failed", err, { backendUrl: state.backendUrl || DEFAULT_BACKEND_URL });
+      }
+      toast(`保存失败：${errorMessage(err, "无法保存本地目录")}`, true);
+    });
   });
 
   document.getElementById("saveSettingsBtn").addEventListener("click", () => {
@@ -1993,6 +2041,11 @@ function bindEvents() {
   });
 
   document.getElementById("clearCacheBtn").addEventListener("click", clearCache);
+  document.getElementById("clearAllMemoryBtn").addEventListener("click", () => {
+    clearAllMemoryFiles().catch(err => {
+      toast(`清理失败：${errorMessage(err, "无法清理所有记忆文件")}`, true);
+    });
+  });
 }
 
 async function init() {
@@ -2024,6 +2077,7 @@ async function init() {
   state.keepUpdated = true;
   state.realtimeUpdate = !!settings[STORAGE_KEYS.realtimeUpdate];
   state.detailedInjection = !!settings[STORAGE_KEYS.detailedInjection];
+  state.storagePath = settings[STORAGE_KEYS.storagePath] || state.storagePath;
   state.lastSyncAt = settings[STORAGE_KEYS.lastSyncAt] || null;
   state.organizeJobState = settings[STORAGE_KEYS.organizeJobState] || null;
   state.dirHandle = await loadSavedDir();

@@ -136,7 +136,7 @@ The repository includes a LongMemEval adapter and runner under
 Recommended benchmark file:
 
 ```text
-llm_memory_transferor/data/longmemeval_oracle.json
+llm_memory_transferor/data/longmemeval_s_cleaned.json
 ```
 
 Before running generation, configure one LLM backend. The examples below assume
@@ -151,18 +151,16 @@ All commands below are run from the `llm_memory_transferor/` directory.
 
 ### Test persistent memory
 
-Use `memory-wiki` mode to test the full pipeline with persistent memory
-derivation. This mode builds episodes from each LongMemEval haystack, derives
-L2 memory, generates a bootstrap-style memory context, and answers questions
-from that memory plus retrieved evidence.
+Use `popup-organize-persistent` mode to simulate the real popup organize flow
+and answer from the organized persistent memory only.
 
 Quick sample:
 
 ```bash
 python -m eval.longmemeval.run generate \
-  --data data/longmemeval_oracle.json \
+  --data data/longmemeval_s_cleaned.json \
   --output results/hypothesis_persistent_test.jsonl \
-  --mode memory-wiki \
+  --mode popup-organize-persistent \
   --top-k 5 \
   --backend openai_compat \
   --model deepseek-chat \
@@ -173,15 +171,15 @@ Full run:
 
 ```bash
 python -m eval.longmemeval.run generate \
-  --data data/longmemeval_oracle.json \
+  --data data/longmemeval_s_cleaned.json \
   --output results/hypothesis_persistent.jsonl \
-  --mode memory-wiki \
+  --mode popup-organize-persistent \
   --top-k 5 \
   --backend openai_compat \
   --model deepseek-chat
 ```
 
-### Test popup organize flow
+### Test popup organize flow with raw evidence
 
 Use `popup-organize` mode to simulate the real product path triggered by
 clicking "Organize Memory" in the popup. This mode writes the LongMemEval
@@ -193,7 +191,7 @@ Quick sample:
 
 ```bash
 python -m eval.longmemeval.run generate \
-  --data data/longmemeval_oracle.json \
+  --data data/longmemeval_s_cleaned.json \
   --output results/hypothesis_popup_organize_test.jsonl \
   --mode popup-organize \
   --top-k 5 \
@@ -206,7 +204,7 @@ Full run:
 
 ```bash
 python -m eval.longmemeval.run generate \
-  --data data/longmemeval_oracle.json \
+  --data data/longmemeval_s_cleaned.json \
   --output results/hypothesis_popup_organize.jsonl \
   --mode popup-organize \
   --top-k 5 \
@@ -216,18 +214,16 @@ python -m eval.longmemeval.run generate \
 
 ### Test episodic memory
 
-Use `episodic-memory` mode to stop after the episodic layer. This mode builds
-`EpisodicMemory` objects from the haystack, retrieves the most relevant episode
-summaries, and answers from episodic memory only without deriving L2 persistent
-memory.
+Use `popup-organize-episodic` mode to simulate the real popup organize flow and
+answer from the organized episodic evidence only.
 
 Quick sample:
 
 ```bash
 python -m eval.longmemeval.run generate \
-  --data data/longmemeval_oracle.json \
+  --data data/longmemeval_s_cleaned.json \
   --output results/hypothesis_episode_test.jsonl \
-  --mode episodic-memory \
+  --mode popup-organize-episodic \
   --top-k 5 \
   --backend openai_compat \
   --model deepseek-chat \
@@ -238,9 +234,9 @@ Full run:
 
 ```bash
 python -m eval.longmemeval.run generate \
-  --data data/longmemeval_oracle.json \
+  --data data/longmemeval_s_cleaned.json \
   --output results/hypothesis_episode.jsonl \
-  --mode episodic-memory \
+  --mode popup-organize-episodic \
   --top-k 5 \
   --backend openai_compat \
   --model deepseek-chat
@@ -252,7 +248,7 @@ Retrieval-only baseline:
 
 ```bash
 python -m eval.longmemeval.run retrieve \
-  --data data/longmemeval_oracle.json \
+  --data data/longmemeval_s_cleaned.json \
   --output results/retrieval_output.jsonl \
   --top-k 50 \
   --granularity session
@@ -262,7 +258,7 @@ Full-history baseline:
 
 ```bash
 python -m eval.longmemeval.run generate \
-  --data data/longmemeval_oracle.json \
+  --data data/longmemeval_s_cleaned.json \
   --output results/hypothesis_full_history.jsonl \
   --mode full-history \
   --backend openai_compat \
@@ -278,11 +274,11 @@ cd <longmemeval_repo>/src/evaluation
 
 python evaluate_qa.py gpt-4o \
   /path/to/results/hypothesis_episode.jsonl \
-  /path/to/data/longmemeval_oracle.json
+  /path/to/data/longmemeval_s_cleaned.json
 
 python print_qa_metrics.py \
   /path/to/results/hypothesis_episode.jsonl.eval-results-gpt-4o \
-  /path/to/data/longmemeval_oracle.json
+  /path/to/data/longmemeval_s_cleaned.json
 ```
 
 ## Supported CLI Commands

@@ -220,9 +220,10 @@
         <div class="settings-card">
           <h3>本地目录</h3>
           <div class="field-row">
-            <input id="storageDirInput" class="text-input" type="text" placeholder="请输入或选择本地存储目录">
-            <button id="selectDirBtn" class="outline-mini-btn" type="button">选择目录</button>
+            <input id="storageDirInput" class="text-input" type="text" placeholder="请输入本地 backend 可用的绝对路径">
+            <button id="selectDirBtn" class="outline-mini-btn" type="button">保存</button>
           </div>
+          <p class="helper-text">用于设置本地 backend 保存对话和记忆文件的目录。请填写当前操作系统可用的绝对路径。</p>
         </div>
 
         <div class="settings-card">
@@ -252,6 +253,10 @@
           <button id="importHistoryBtn" class="settings-action-row" type="button">
             <span>导入对话</span>
             <small>支持 txt/md/json 的原始对话</small>
+          </button>
+          <button id="clearAllMemoryBtn" class="settings-action-row danger-row" type="button">
+            <span>清理所有记忆</span>
+            <small>删除已保存的对话和记忆文件，但保留当前设置</small>
           </button>
           <button id="clearCacheBtn" class="settings-action-row danger-row" type="button">
             <span>清理缓存</span>

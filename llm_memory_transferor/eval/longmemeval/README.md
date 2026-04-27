@@ -8,13 +8,16 @@ Tests the Portable Personal Memory Layer against the [LongMemEval](https://githu
 
 LongMemEval gives each question a "haystack" of conversation sessions (up to ~115k tokens for the `_s` variant). The system must answer the question using only what appears in that history.
 
-We run three modes, each testing a different layer of the system:
+We run several modes, each testing a different layer of the system:
 
 | Mode | What it tests | Cost |
 |---|---|---|
 | `retrieval-augmented` | L0 keyword retrieval → Claude answers from top-K sessions | Low (retrieval free, generation ~$0.002/q with Haiku) |
 | `full-history` | Claude answers from the full truncated haystack | Medium |
 | `memory-wiki` | Full pipeline: L2 MWiki built from haystack, bootstrap injected, then retrieval+answer | High (LLM extraction per question) |
+| `popup-organize` | Simulated popup organize flow plus raw retrieved session excerpts | High |
+| `popup-organize-persistent` | Simulated popup organize flow, answer from organized persistent memory only | High |
+| `popup-organize-episodic` | Simulated popup organize flow, answer from organized episodic evidence only | High |
 
 ---
 
@@ -37,7 +40,7 @@ for f in ['longmemeval_s_cleaned.json', 'longmemeval_oracle.json']:
 "
 ```
 
-We recommend starting with `longmemeval_oracle.json` (smallest, only evidence sessions per question).
+Use `longmemeval_s_cleaned.json` for evaluation in this repository.
 
 ### 2. Set API keys
 
@@ -57,13 +60,14 @@ pip install tqdm
 
 ## Running the evaluation
 
-All commands are run from the project root.
+All commands below are run from the `llm_memory_transferor/` directory.
+If you are at the monorepo root, first run `cd llm_memory_transferor`.
 
 ### Quick test (20 questions)
 
 ```bash
 python -m eval.longmemeval.run generate \
-  --data data/longmemeval_oracle.json \
+  --data data/longmemeval_s_cleaned.json \
   --output results/hypothesis_test.jsonl \
   --mode retrieval-augmented \
   --top-k 5 \
@@ -75,7 +79,7 @@ python -m eval.longmemeval.run generate \
 
 ```bash
 python -m eval.longmemeval.run retrieve \
-  --data data/longmemeval_oracle.json \
+  --data data/longmemeval_s_cleaned.json \
   --output results/retrieval_output.jsonl \
   --top-k 50 \
   --granularity session
@@ -83,35 +87,95 @@ python -m eval.longmemeval.run retrieve \
 
 Prints retrieval metrics (recall@K, NDCG@K) immediately without needing GPT-4o.
 
+### Chroma retrieval benchmark
+
+This repository also includes a retrieval-only ChromaDB benchmark path that
+keeps the canonical raw and episode storage unchanged.
+
+Raw session baseline:
+
+```bash
+python -m eval.longmemeval.run retrieve-chroma \
+  --data data/longmemeval_s_cleaned.json \
+  --output results/retrieval_chroma_raw_session.jsonl \
+  --mode raw-session \
+  --top-k 50
+```
+
+Raw user-turn baseline:
+
+```bash
+python -m eval.longmemeval.run retrieve-chroma \
+  --data data/longmemeval_s_cleaned.json \
+  --output results/retrieval_chroma_raw_turn.jsonl \
+  --mode raw-turn \
+  --top-k 50
+```
+
+Episode retrieval benchmark:
+
+```bash
+python -m eval.longmemeval.run retrieve-chroma \
+  --data data/longmemeval_s_cleaned.json \
+  --output results/retrieval_chroma_episode.jsonl \
+  --mode episode \
+  --top-k 50 \
+  --backend openai_compat \
+  --model deepseek-chat
+```
+
 ### Full generation (retrieval-augmented)
 
 ```bash
 python -m eval.longmemeval.run generate \
-  --data data/longmemeval_oracle.json \
+  --data data/longmemeval_s_cleaned.json \
   --output results/hypothesis_rag.jsonl \
   --mode retrieval-augmented \
   --top-k 5 \
   --model claude-haiku-4-5-20251001
 ```
 
-### Full pipeline (memory-wiki mode)
+### Popup organize plus raw evidence
 
 ```bash
 python -m eval.longmemeval.run generate \
-  --data data/longmemeval_oracle.json \
-  --output results/hypothesis_wiki.jsonl \
-  --mode memory-wiki \
+  --data data/longmemeval_s_cleaned.json \
+  --output results/hypothesis_popup_organize.jsonl \
+  --mode popup-organize \
   --top-k 5 \
-  --model claude-sonnet-4-6
+  --backend openai_compat \
+  --model deepseek-chat
 ```
 
-Note: `memory-wiki` mode builds an L2 MWiki for every question's haystack — it makes many LLM calls and is expensive for the full 500-question set. Use `--limit 50` for sampling.
+### Popup organize persistent-only
+
+```bash
+python -m eval.longmemeval.run generate \
+  --data data/longmemeval_s_cleaned.json \
+  --output results/hypothesis_popup_persistent.jsonl \
+  --mode popup-organize-persistent \
+  --top-k 5 \
+  --backend openai_compat \
+  --model deepseek-chat
+```
+
+### Popup organize episodic-only
+
+```bash
+python -m eval.longmemeval.run generate \
+  --data data/longmemeval_s_cleaned.json \
+  --output results/hypothesis_popup_episodic.jsonl \
+  --mode popup-organize-episodic \
+  --top-k 5 \
+  --backend openai_compat \
+  --model deepseek-chat
+```
 
 ### All modes in one command
 
 ```bash
 python -m eval.longmemeval.run full-eval \
-  --data data/longmemeval_oracle.json \
+  --data data/longmemeval_s_cleaned.json \
   --output-dir results/run_01/ \
   --mode retrieval-augmented \
   --top-k 5 \
@@ -130,11 +194,11 @@ cd <longmemeval_repo>/src/evaluation
 
 python evaluate_qa.py gpt-4o \
   /path/to/results/hypothesis_rag.jsonl \
-  /path/to/data/longmemeval_oracle.json
+  /path/to/data/longmemeval_s_cleaned.json
 
 python print_qa_metrics.py \
   /path/to/results/hypothesis_rag.jsonl.eval-results-gpt-4o \
-  /path/to/data/longmemeval_oracle.json
+  /path/to/data/longmemeval_s_cleaned.json
 ```
 
 ---
@@ -189,7 +253,7 @@ Results depend on the benchmark variant and mode. Rough reference points from th
 | BM25 retrieval + GPT-4o | ~44% |
 | Oracle retrieval + GPT-4o | ~60% |
 
-Our `retrieval-augmented` mode (L0 keyword search + Claude Haiku) is comparable to the BM25 baseline. The `memory-wiki` mode adds structured memory context on top of retrieval, which should improve preference and multi-session question types.
+Our `retrieval-augmented` mode (L0 keyword search + Claude Haiku) is comparable to the BM25 baseline. The popup-organize variants test the closer-to-product memory path on top of the same benchmark.
 
 ---
 
