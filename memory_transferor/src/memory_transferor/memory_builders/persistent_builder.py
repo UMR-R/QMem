@@ -4,7 +4,8 @@ import json
 from hashlib import sha1
 from typing import Any
 
-from memory_transferor.memory_models import Episode, PersistentMemoryItem
+from memory_transferor.memory_models import Episode, EpisodeGroup, PersistentMemoryItem
+from memory_transferor.memory_policy import PersistentMemoryPolicy
 from memory_transferor.runtime import LLMClient
 
 
@@ -40,6 +41,8 @@ Core rules:
 - Use timestamps and event order to resolve "current", "previous", "before", "after", "latest", and superseded facts.
 - Keep each item atomic, but do not split merely because a sentence has multiple synonyms.
 - Prefer recall usefulness over compression. Do not hide distinct reusable facts inside one broad description when they would be retrieved separately later.
+- EPISODE_GROUPS are pre-persistent connection groups. Use them as grouping hints, not as proof that every episode in the group supports every item.
+- Prefer evidence_episode_ids that directly support the item. Do not include a whole group by default.
 
 Type boundaries:
 - profile: identity, background, language mode, role, domain context, or durable communication context.
@@ -66,10 +69,15 @@ Classification guardrails:
 class PersistentBuilder:
     """Distill persistent memory from episodes."""
 
-    def __init__(self, llm: LLMClient) -> None:
+    def __init__(self, llm: LLMClient, policy: PersistentMemoryPolicy | None = None) -> None:
         self.llm = llm
+        self.policy = policy or PersistentMemoryPolicy()
 
-    def build(self, episodes: list[Episode]) -> list[PersistentMemoryItem]:
+    def build(
+        self,
+        episodes: list[Episode],
+        episode_groups: list[EpisodeGroup] | None = None,
+    ) -> list[PersistentMemoryItem]:
         evidence = []
         for ep in episodes:
             evidence.append(
@@ -78,11 +86,29 @@ class PersistentBuilder:
                     "turn_id": ep.turn_id,
                     "timestamp": ep.timestamp.isoformat() if ep.timestamp else "",
                     "summary": ep.summary,
+                    "connection_group_ids": ep.connection_group_ids,
+                    "connections": [
+                        {
+                            "target_episode_id": connection.target_episode_id,
+                            "relation": connection.relation,
+                            "confidence": connection.confidence,
+                            "score": connection.score,
+                            "bidirectional_verified": connection.bidirectional_verified,
+                        }
+                        for connection in ep.connections
+                    ],
                 }
             )
+        groups = [
+            group.model_dump(mode="json")
+            for group in (episode_groups or [])
+        ]
         payload = self.llm.extract_json(
             _SYSTEM,
-            "EVIDENCE:\n" + json.dumps(evidence, ensure_ascii=False, indent=2),
+            "EPISODE_GROUPS:\n"
+            + json.dumps(groups, ensure_ascii=False, indent=2)
+            + "\n\nEVIDENCE:\n"
+            + json.dumps(evidence, ensure_ascii=False, indent=2),
         )
         if isinstance(payload, dict):
             items = payload.get("items", [])
@@ -90,11 +116,12 @@ class PersistentBuilder:
             items = payload
         else:
             items = []
-        return [
+        persistent_items = [
             PersistentMemoryItem.model_validate(self._normalize_item(item))
             for item in items
             if isinstance(item, dict)
         ]
+        return self.policy.apply(persistent_items)
 
     def _normalize_item(self, item: dict[str, Any]) -> dict[str, Any]:
         item = dict(item)

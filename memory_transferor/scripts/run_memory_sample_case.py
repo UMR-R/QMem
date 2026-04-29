@@ -11,6 +11,7 @@ SRC = ROOT / "src"
 sys.path.insert(0, str(SRC))
 
 from memory_transferor.memory_builders import EpisodeBuilder, PersistentBuilder
+from memory_transferor.episode_graph import EpisodeGraphBuilder
 from memory_transferor.memory_models import RawChatSession, RawChatTurn
 from memory_transferor.memory_store import MemoryWorkspace
 from memory_transferor.runtime import LLMClient, parse_timestamp
@@ -98,6 +99,7 @@ def main() -> None:
     parser.add_argument("--api-key", default=None)
     parser.add_argument("--base-url", default="https://api.deepseek.com/v1")
     parser.add_argument("--model", default="deepseek-chat")
+    parser.add_argument("--graph-only", action="store_true", help="Stop after raw -> episodes -> episode graph.")
     args = parser.parse_args()
 
     sessions, expected = load_sample_sessions(args.sample)
@@ -106,21 +108,37 @@ def main() -> None:
     workspace.ensure()
     workspace.raw.save_sessions(sessions)
 
-    episodes = EpisodeBuilder().build(sessions)
-    workspace.episodes.save(episodes)
+    raw_episodes = EpisodeBuilder().build(sessions)
+    episode_graph = EpisodeGraphBuilder().build(raw_episodes)
+    episodes = episode_graph.episodes
+    workspace.episodes.save(episodes, episode_graph.groups)
+
+    print(f"OUTPUT_DIR={output}")
+    print(f"SESSIONS={len(sessions)}")
+    print(f"TURNS={sum(len(session.turns) for session in sessions)}")
+    print(f"EPISODES={len(episodes)}")
+    print(f"CONNECTION_GROUPS={len(episode_graph.groups)}")
+    if args.graph_only:
+        group_types: dict[str, int] = {}
+        for group in episode_graph.groups:
+            group_types[group.relation] = group_types.get(group.relation, 0) + 1
+        print("GROUP_TYPES=" + json.dumps(group_types, ensure_ascii=False, sort_keys=True))
+        print(
+            "GROUP_SIZES="
+            + json.dumps(
+                sorted([len(group.episode_ids) for group in episode_graph.groups], reverse=True)
+            )
+        )
+        return
 
     llm = LLMClient(api_key=args.api_key, base_url=args.base_url, model=args.model)
-    persistent_items = PersistentBuilder(llm).build(episodes)
+    persistent_items = PersistentBuilder(llm).build(episodes, episode_graph.groups)
     workspace.persistent.save_items(persistent_items)
 
     actual_types: dict[str, int] = {}
     for item in persistent_items:
         actual_types[item.type] = actual_types.get(item.type, 0) + 1
 
-    print(f"OUTPUT_DIR={output}")
-    print(f"SESSIONS={len(sessions)}")
-    print(f"TURNS={sum(len(session.turns) for session in sessions)}")
-    print(f"EPISODES={len(episodes)}")
     print(f"PERSISTENT_ITEMS={len(persistent_items)}")
     print("ACTUAL_TYPES=" + json.dumps(actual_types, ensure_ascii=False, sort_keys=True))
     print("EXPECTED_TYPES=" + json.dumps(expected, ensure_ascii=False, sort_keys=True))

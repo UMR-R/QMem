@@ -87,3 +87,18 @@
     - 让项目知识库文档和当前重构规划保持一致。
     - 避免后续继续混淆 canonical memory storage、外部索引和 eval benchmark 的边界。
     - 为下一阶段实现 episode connection/grouping 与 L3 policy 做上下文铺垫。
+
+- 🏠 实现 episode_graph 与 memory_policy 第一版
+  - 改了什么：
+    - 给 `Episode` 增加 `connections` 和 `connection_group_ids`，并新增 `EpisodeConnection`、`EpisodeGroup` 模型。
+    - 新增 `episode_graph/connection.py`、`connection_policy.py`、`grouping.py`、`validators.py`，实现同 conversation 相邻 turn 连接、跨 conversation mutual top-k semantic 连接、直接邻居 group 生成、group size 限制和非传递式扩张。
+    - 新增 `memory_policy/upgrade_policy.py`、`temporal_policy.py`、`type_boundary_policy.py`、`split_merge_policy.py`、`persistent_policy.py`，实现 confidence / export priority 归一、profile/preference/topic 类型边界校验、workflow final check 拆分和宽泛 topic 子方向拆分。
+    - 更新 `PersistentBuilder`，让 persistent 抽取接收 episode groups，并在 LLM 输出后经过 deterministic policy 后处理。
+    - 更新 `EpisodeStore`，把 connection groups 随 session episode 文件一起落盘。
+    - 更新最小样本 runner，改为 `raw -> episodes -> episode_graph -> persistent -> policy -> store`，并新增 `--graph-only` 离线验证模式。
+    - 本地验证：最小样本生成 33 个 episodes、12 个 connection groups，其中 9 个 conversation groups、3 个 semantic groups，最大 group size 为 7。
+    - 经用户允许后，用第三方模型跑通端到端样本；输出 14 条 persistent items，其中 workflow 被拆成主流程和 final check 两条，topic 子方向由 policy 进行可控拆分。
+  - 为了什么：
+    - 把 episode connection/grouping 从空骨架推进到可运行的 L3 基础设施。
+    - 让 episode 先形成 connection group，再作为 persistent 抽取上下文，而不是完全依赖 prompt 自行判断。
+    - 把容易不稳定的类型边界、workflow check 拆分和 topic 拆分从 prompt 中部分迁移到可测试的 deterministic policy。
