@@ -35,6 +35,12 @@ Field guidance:
 - common_languages: habitual working languages or language background, not temporary response preference.
 - long_term_research_or_work_focus: repeated long-horizon directions, not short-term tasks.
 
+Display grouping boundary:
+- `identity` displays name_or_alias, role_identity, and organization_or_affiliation.
+- `knowledge_background` displays domain_background only. Do NOT use common_languages as knowledge background.
+- `long_term_focus` displays long_term_research_or_work_focus.
+- common_languages can support language handling or evidence, but should not be presented as the user's knowledge储备.
+
 Exclusion rules:
 - Do NOT put response-style preferences into profile.
 - Do NOT put one-off tasks, temporary topics, prompts, tools, experiments, feature ideas, project-stage details, unresolved questions, or workflow steps into profile.

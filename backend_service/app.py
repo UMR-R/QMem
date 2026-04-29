@@ -59,11 +59,14 @@ RECOMMENDED_REMOTE_SOURCES = [
     },
 ]
 LLM_TRANSFEROR_SRC = PROJECT_ROOT / "llm_memory_transferor" / "src"
+MEMORY_TRANSFEROR_SRC = PROJECT_ROOT / "memory_transferor" / "src"
 JOB_LOCK = threading.Lock()
 L2_PERSISTENT_NODE_MAINTENANCE_VERSION = "l2_persistent_nodes_v3_daily_notes_support_guard"
 
 if str(LLM_TRANSFEROR_SRC) not in sys.path:
     sys.path.insert(0, str(LLM_TRANSFEROR_SRC))
+if str(MEMORY_TRANSFEROR_SRC) not in sys.path:
+    sys.path.insert(0, str(MEMORY_TRANSFEROR_SRC))
 
 from llm_memory_transferor.exporters import BootstrapGenerator, PackageExporter  # noqa: E402
 from llm_memory_transferor.layers.l0_raw import L0RawLayer, RawConversation, RawMessage  # noqa: E402
@@ -74,6 +77,7 @@ from llm_memory_transferor.models import EpisodeConnection, EpisodicMemory, Pref
 from llm_memory_transferor.models.base import MemoryBase  # noqa: E402
 from llm_memory_transferor.processors import MemoryBuilder, MemoryUpdater  # noqa: E402
 from llm_memory_transferor.utils.llm_client import LLMClient  # noqa: E402
+from memory_transferor.memory_export import base_display_taxonomy, taxonomy_group_source_fields  # noqa: E402
 
 
 JOB_REGISTRY: dict[str, dict[str, Any]] = {}
@@ -154,7 +158,6 @@ CATEGORY_LABELS = {
         "daily_notes": "Daily Notes",
     },
 }
-
 
 DEFAULT_RECOMMENDED_SKILLS = [
     {
@@ -1440,7 +1443,7 @@ def _preferences_payload_fallback(settings: dict[str, Any]) -> dict[str, Any]:
         return {}
 
     payload: dict[str, Any] = {}
-    list_fields = {"primary_task_types", "style_preference", "terminology_preference", "formatting_constraints", "forbidden_expressions", "revision_preference"}
+    list_fields = {"style_preference", "terminology_preference", "formatting_constraints", "forbidden_expressions", "revision_preference"}
 
     for item_id, entry in display_cache.items():
         if not str(item_id).startswith("preferences:"):
@@ -1475,11 +1478,6 @@ def _preferences_payload_fallback(settings: dict[str, Any]) -> dict[str, Any]:
         else:
             payload[field] = desc
 
-    profile = get_wiki(settings).load_profile()
-    if profile and getattr(profile, "primary_task_types", None):
-        payload.setdefault("primary_task_types", [])
-        payload["primary_task_types"] = list(dict.fromkeys(payload["primary_task_types"] + list(profile.primary_task_types)))
-
     return payload
 
 
@@ -1502,6 +1500,198 @@ def _display_text(value: dict[str, Any] | None, locale: str | None, fallback: st
     bucket = _locale_bucket(locale)
     text = str(value.get(bucket) or "").strip()
     return text or fallback
+
+
+def _display_locale(locale: str | None) -> str:
+    return _locale_bucket(locale or "zh")
+
+
+def _localized_language_display(value: Any, locale: str | None, *, response_preference: bool = False) -> str:
+    raw = str(value or "").strip()
+    normalized = raw.lower()
+    bucket = _display_locale(locale)
+    language_map = {
+        "zh": ("中文为主", "Mostly Chinese"),
+        "zh-cn": ("中文为主", "Mostly Chinese"),
+        "chinese": ("中文为主", "Mostly Chinese"),
+        "中文": ("中文为主", "Mostly Chinese"),
+        "汉语": ("中文为主", "Mostly Chinese"),
+        "en": ("英文为主", "Mostly English"),
+        "english": ("英文为主", "Mostly English"),
+        "英文": ("英文为主", "Mostly English"),
+        "英语": ("英文为主", "Mostly English"),
+    }
+    zh_text, en_text = language_map.get(normalized, language_map.get(raw, (raw, raw)))
+    if response_preference:
+        if bucket == "zh":
+            return f"回答以{zh_text.removesuffix('为主')}为主" if zh_text.endswith("为主") else f"回答以{zh_text}为主"
+        return f"Respond mostly in {en_text.removeprefix('Mostly ').lower()}" if en_text.startswith("Mostly ") else en_text
+    return zh_text if bucket == "zh" else en_text
+
+
+def _localized_granularity_display(value: Any, locale: str | None) -> str:
+    raw = str(value or "").strip()
+    normalized = raw.lower()
+    bucket = _display_locale(locale)
+    mapping = {
+        "concise": ("偏简洁", "Concise"),
+        "detailed": ("偏详细", "Detailed"),
+        "step-by-step": ("步骤化说明", "Step-by-step"),
+    }
+    zh_text, en_text = mapping.get(normalized, (raw, raw))
+    return zh_text if bucket == "zh" else en_text
+
+
+def _memory_display_value(group: str, field: str, value: Any, locale: str | None) -> str:
+    if isinstance(value, list):
+        parts = [_memory_display_value(group, field, item, locale) for item in value]
+        parts = [part for part in parts if part]
+        return "；".join(dict.fromkeys(parts))
+
+    if field in {"common_languages", "language_preference"}:
+        return _localized_language_display(
+            value,
+            locale,
+            response_preference=False,
+        )
+    if field == "response_granularity":
+        return _localized_granularity_display(value, locale)
+    return str(value or "").strip()
+
+
+def _profile_display_title(field: str, locale: str | None) -> str:
+    bucket = _display_locale(locale)
+    zh = {
+        "name_or_alias": "个人背景",
+        "role_identity": "个人背景",
+        "organization_or_affiliation": "个人背景",
+        "domain_background": "领域背景",
+        "common_languages": "语言与表达背景",
+        "long_term_research_or_work_focus": "长期关注方向",
+    }
+    en = {
+        "name_or_alias": "Personal Background",
+        "role_identity": "Personal Background",
+        "organization_or_affiliation": "Personal Background",
+        "domain_background": "Domain Background",
+        "common_languages": "Language and Expression Background",
+        "long_term_research_or_work_focus": "Long-term Focus",
+    }
+    labels = zh if bucket == "zh" else en
+    return labels.get(field, _localized_field_label("profile", field, locale))
+
+
+def _preference_display_title(field: str, locale: str | None) -> str:
+    bucket = _display_locale(locale)
+    style_fields = {
+        "style_preference",
+        "terminology_preference",
+        "formatting_constraints",
+        "forbidden_expressions",
+        "revision_preference",
+        "response_granularity",
+    }
+    if field == "language_preference":
+        return "回答语言偏好" if bucket == "zh" else "Response Language Preference"
+    if field in style_fields:
+        return "回答风格与格式" if bucket == "zh" else "Response Style and Format"
+    return _localized_field_label("preferences", field, locale)
+
+
+def _base_display_taxonomy(category: str) -> list[dict[str, Any]]:
+    return [dict(group) for group in base_display_taxonomy(category)]
+
+
+def _taxonomy_group_source_fields(category: str, group_id: str) -> list[str]:
+    return taxonomy_group_source_fields(category, group_id)
+
+
+def _taxonomy_title(group: dict[str, Any], locale: str | None) -> str:
+    title = group.get("title")
+    if isinstance(title, dict):
+        return _display_text(title, locale, str(group.get("group_id") or ""))
+    return str(title or group.get("group_id") or "").strip()
+
+
+def _payload_field_value(
+    payload: dict[str, Any],
+    field: str,
+    *,
+    category: str,
+    episodes: list[EpisodicMemory] | None = None,
+    projects: list[ProjectMemory] | None = None,
+) -> Any:
+    value = payload.get(field)
+    if field == "primary_task_types":
+        return _stable_primary_task_types(
+            [str(item) for item in (value or [])],
+            episodes or [],
+            projects or [],
+        )
+    return value
+
+
+def _taxonomy_group_description(
+    *,
+    category: str,
+    payload: dict[str, Any],
+    group: dict[str, Any],
+    locale: str | None,
+    episodes: list[EpisodicMemory] | None = None,
+    projects: list[ProjectMemory] | None = None,
+) -> tuple[str, list[str]]:
+    parts: list[str] = []
+    active_fields: list[str] = []
+    for field in group.get("source_fields", []) or []:
+        field_name = str(field or "").strip()
+        if not field_name:
+            continue
+        value = _payload_field_value(
+            payload,
+            field_name,
+            category=category,
+            episodes=episodes,
+            projects=projects,
+        )
+        if not value:
+            continue
+        text = _memory_display_value(category, field_name, value, locale)
+        if not text or _is_noise_memory_text(text):
+            continue
+        active_fields.append(field_name)
+        parts.append(text)
+    description = "；".join(dict.fromkeys(parts))
+    return truncate_text(description, 140), active_fields
+
+
+def _daily_note_display_texts(
+    node_id: str,
+    node: dict[str, Any],
+    display_entry: dict[str, Any],
+    locale: str | None,
+) -> tuple[str, str]:
+    raw_description = str(node.get("description") or "").strip()
+    raw_key = str(node.get("key") or node_id).strip()
+    cached_title = _display_text(display_entry.get("title"), locale, "").strip()
+    cached_description = _display_text(display_entry.get("description"), locale, "").strip()
+
+    description = cached_description or raw_description or raw_key
+    if not description or _is_noise_memory_text(description):
+        description = raw_key
+    description = truncate_text(description, 140)
+
+    title_source = cached_title
+    if not title_source or title_source == cached_description or len(title_source) > 48:
+        title_source = raw_description or raw_key
+    first_sentence = re.split(r"[。；;\n]", title_source, maxsplit=1)[0].strip()
+    first_sentence = re.sub(
+        r"^用户(正在|曾经|曾|希望|需要|喜欢|倾向于|进一步|正在寻找|寻找|询问|想要|想)?",
+        "",
+        first_sentence,
+    ).strip("，,。；;：: ")
+    first_sentence = re.sub(r"^为一?条?", "", first_sentence).strip("，,。；;：: ")
+    title = truncate_text(first_sentence or raw_key or node_id, 32)
+    return title, description
 
 
 def _split_display_list_text(text: str) -> list[str]:
@@ -3076,13 +3266,113 @@ def _dedupe_primary_task_types(
     return labels
 
 
+def _task_type_support_text(episode: EpisodicMemory) -> str:
+    return _canonical_memory_text(
+        " ".join(
+            [
+                episode.topic,
+                episode.summary,
+                " ".join(episode.key_decisions),
+                " ".join(episode.open_issues),
+                " ".join(episode.topics_covered),
+            ]
+        )
+    )
+
+
+def _task_type_is_mentioned(label: str, text: str) -> bool:
+    key = _task_type_similarity_key(label)
+    if not key or not text:
+        return False
+    compact_text = text.replace(" ", "")
+    if key in compact_text:
+        return True
+    if re.fullmatch(r"[\u4e00-\u9fff]{4,}", key):
+        edge_tokens = list(dict.fromkeys([key[:2], key[-2:]]))
+        weak_tokens = {"建议", "列表", "任务", "类型", "需求", "场景"}
+        if any(token not in weak_tokens and token in compact_text for token in edge_tokens):
+            return True
+    tokens = [
+        token
+        for token in re.split(r"[^a-zA-Z0-9\u4e00-\u9fff]+", label)
+        if token and len(token) >= 2
+    ]
+    if re.search(r"[\u4e00-\u9fff]", key) and len(key) >= 4:
+        tokens.extend(key[index:index + 2] for index in range(0, len(key) - 1))
+    if not tokens and len(key) >= 4:
+        tokens = [key[index:index + 2] for index in range(0, len(key) - 1)]
+    tokens = list(dict.fromkeys(tokens))
+    if not tokens:
+        return False
+    hits = sum(1 for token in tokens if token in compact_text)
+    return hits >= min(2, len(tokens))
+
+
+def _task_type_has_explicit_stability_signal(text: str) -> bool:
+    markers = {
+        "经常", "常常", "长期", "反复", "通常", "主要", "偏好", "喜欢让你", "以后",
+        "每次", "稳定", "固定", "习惯", "always", "usually", "often", "frequently",
+        "prefer", "preference", "from now on",
+    }
+    return any(marker in text for marker in markers)
+
+
+def _stable_primary_task_types(
+    values: list[str],
+    episodes: list[EpisodicMemory],
+    projects: list[ProjectMemory] | None = None,
+    explicit_text: str = "",
+) -> list[str]:
+    """Keep only durable task modes, not one-off episode topics."""
+    candidates = _dedupe_primary_task_types(values, projects, max_items=3)
+    if not candidates:
+        return []
+
+    explicit_haystack = _canonical_memory_text(explicit_text)
+    total_episodes = len(episodes)
+    total_conversations = len({episode.conv_id or episode.episode_id for episode in episodes})
+    kept: list[str] = []
+    for label in candidates:
+        if explicit_haystack and _task_type_is_mentioned(label, explicit_haystack):
+            kept.append(label)
+            continue
+
+        supporting_conversations: set[str] = set()
+        supporting_episodes: set[str] = set()
+        explicit_episode_signal = False
+        for episode in episodes:
+            text = _task_type_support_text(episode)
+            if not _task_type_is_mentioned(label, text):
+                continue
+            supporting_episodes.add(episode.episode_id)
+            supporting_conversations.add(episode.conv_id or episode.episode_id)
+            if _task_type_has_explicit_stability_signal(text):
+                explicit_episode_signal = True
+
+        support_episode_count = len(supporting_episodes)
+        support_conversation_count = len(supporting_conversations)
+        episode_ratio = support_episode_count / total_episodes if total_episodes else 0.0
+        conversation_ratio = support_conversation_count / total_conversations if total_conversations else 0.0
+        strong_absolute_support = support_conversation_count >= 2 or support_episode_count >= 3
+        small_sample_ratio_support = (
+            1 <= total_episodes <= 12
+            and support_episode_count >= 1
+            and (episode_ratio >= 0.1 or conversation_ratio >= 0.2)
+        )
+
+        if explicit_episode_signal or strong_absolute_support or small_sample_ratio_support:
+            kept.append(label)
+
+    return kept[:3]
+
+
 def _infer_primary_task_types_fallback(
     episodes: list[EpisodicMemory],
     projects: list[ProjectMemory],
     workflows: list[WorkflowMemory],
     existing: list[str] | None = None,
 ) -> list[str]:
-    return _dedupe_primary_task_types([str(value) for value in existing or []], projects, max_items=3)
+    return _stable_primary_task_types([str(value) for value in existing or []], episodes, projects)
 
 
 def _infer_primary_task_types(
@@ -3092,6 +3382,10 @@ def _infer_primary_task_types(
     workflows: list[WorkflowMemory],
     existing: list[str] | None = None,
 ) -> list[str]:
+    stable_existing = _stable_primary_task_types([str(value) for value in existing or []], episodes, projects)
+    if not stable_existing:
+        return []
+
     episode_evidence = []
     for episode in episodes[-12:]:
         episode_evidence.append(
@@ -3159,10 +3453,10 @@ def _infer_primary_task_types(
         for value in result.get("task_types", []) or []:
             normalized.append(str(value))
 
-    deduped = _dedupe_primary_task_types(normalized, projects, max_items=3)
+    deduped = _stable_primary_task_types(normalized, episodes, projects)
     if deduped:
         return deduped
-    return _dedupe_primary_task_types([str(value) for value in existing or []], projects, max_items=3)
+    return stable_existing
 
 
 def _extract_ordered_steps_from_text(text: str) -> list[str]:
@@ -3963,13 +4257,19 @@ def memory_items_for_category(settings: dict[str, Any], category: str, locale: s
                 continue
             item_id = f"daily_notes:{node_id}"
             display_entry = _get_persistent_display_entry(settings, display_cache, item_id, str(title))
+            display_title, display_description = _daily_note_display_texts(
+                node_id,
+                node,
+                display_entry,
+                locale,
+            )
             items.append(
                 {
                     "id": item_id,
-                    "title": title,
-                    "description": "",
-                    "display_title": _display_text(display_entry.get("title"), locale, title),
-                    "display_description": _display_text(display_entry.get("description"), locale, str(title)),
+                    "title": display_title,
+                    "description": display_description,
+                    "display_title": display_title,
+                    "display_description": display_description,
                     "selected": False,
                 }
             )
@@ -3979,53 +4279,32 @@ def memory_items_for_category(settings: dict[str, Any], category: str, locale: s
         profile = wiki.load_profile()
         if profile:
             items = []
-            labels = FIELD_LABELS["profile"]["zh"]
-            for field, label in labels.items():
-                if field == "primary_task_types":
+            profile_payload = profile.model_dump(mode="json")
+            for group in _base_display_taxonomy("profile"):
+                description, active_fields = _taxonomy_group_description(
+                    category="profile",
+                    payload=profile_payload,
+                    group=group,
+                    locale=locale,
+                )
+                if not description:
                     continue
-                value = getattr(profile, field, None)
-                if not value:
+                group_id = str(group.get("group_id") or "").strip()
+                if not group_id:
                     continue
-                if isinstance(value, list):
-                    for entry in value:
-                        entry_text = str(entry).strip()
-                        if not entry_text:
-                            continue
-                        if field in {"style_preference", "terminology_preference", "formatting_constraints", "revision_preference", "response_granularity"} and not _looks_like_response_style_text(entry_text):
-                            continue
-                        item_id = f"profile:{field}:{_safe_slug(entry_text, 'item')}"
-                        display_entry = display_cache.get("profile", {}).get(item_id, {})
-                        items.append(
-                            {
-                                "id": item_id,
-                                "title": label,
-                                "description": entry_text,
-                                "display_title": _localized_field_label("profile", field, locale),
-                                "display_description": _display_text(
-                                    display_entry.get("description"),
-                                    locale,
-                                    entry_text,
-                                ),
-                                "selected": False,
-                            }
-                        )
-                else:
-                    item_id = f"profile:{field}"
-                    display_entry = display_cache.get("profile", {}).get(item_id, {})
-                    items.append(
-                        {
-                            "id": item_id,
-                            "title": label,
-                            "description": str(value)[:80],
-                            "display_title": _localized_field_label("profile", field, locale),
-                            "display_description": _display_text(
-                                display_entry.get("description"),
-                                locale,
-                                str(value)[:80],
-                            ),
-                            "selected": False,
-                        }
-                    )
+                title = _taxonomy_title(group, locale)
+                items.append(
+                    {
+                        "id": f"profile:group:{group_id}",
+                        "title": title,
+                        "description": description,
+                        "display_title": title,
+                        "display_description": description,
+                        "source_fields": active_fields,
+                        "status": group.get("status", "active"),
+                        "selected": False,
+                    }
+                )
             return items
         return []
 
@@ -4034,68 +4313,35 @@ def memory_items_for_category(settings: dict[str, Any], category: str, locale: s
         prefs_payload = prefs.model_dump(mode="json") if prefs else _preferences_payload_fallback(settings)
         if prefs_payload:
             items = []
-            labels = FIELD_LABELS["preferences"]["zh"]
-            for field, label in labels.items():
-                if field == "primary_task_types":
-                    value = prefs_payload.get(field)
-                    if not value:
-                        profile = wiki.load_profile()
-                        value = getattr(profile, "primary_task_types", None) if profile else None
-                else:
-                    value = prefs_payload.get(field)
-                if not value:
+            episodes = wiki.list_episodes()
+            projects = _valid_projects(wiki)
+            for group in _base_display_taxonomy("preferences"):
+                description, active_fields = _taxonomy_group_description(
+                    category="preferences",
+                    payload=prefs_payload,
+                    group=group,
+                    locale=locale,
+                    episodes=episodes,
+                    projects=projects,
+                )
+                if not description:
                     continue
-                if isinstance(value, list):
-                    parent_display_entry = display_cache.get("preferences", {}).get(f"preferences:{field}", {})
-                    parent_localized_parts = _split_display_list_text(
-                        _display_text(parent_display_entry.get("description"), locale, "")
-                    )
-                    for index, entry in enumerate(value):
-                        entry_text = str(entry).strip()
-                        if not entry_text:
-                            continue
-                        if field in {"style_preference", "terminology_preference", "formatting_constraints", "revision_preference", "response_granularity"} and not _looks_like_response_style_text(entry_text):
-                            continue
-                        item_id = f"preferences:{field}:{_safe_slug(entry_text, 'item')}"
-                        display_entry = display_cache.get("preferences", {}).get(item_id, {})
-                        localized_fallback = (
-                            parent_localized_parts[index]
-                            if index < len(parent_localized_parts)
-                            else entry_text
-                        )
-                        items.append(
-                            {
-                                "id": item_id,
-                                "title": label,
-                                "description": entry_text,
-                                "display_title": _localized_field_label("preferences", field, locale),
-                                "display_description": _display_text(
-                                    display_entry.get("description"),
-                                    locale,
-                                    localized_fallback,
-                                ),
-                                "selected": False,
-                            }
-                        )
-                else:
-                    description = str(value)
-                    if field in {"style_preference", "terminology_preference", "formatting_constraints", "revision_preference", "response_granularity"} and not _looks_like_response_style_text(description):
-                        continue
-                    item_id = f"preferences:{field}"
-                    items.append(
-                        {
-                            "id": item_id,
-                            "title": label,
-                            "description": description[:80],
-                            "display_title": _localized_field_label("preferences", field, locale),
-                            "display_description": _display_text(
-                                display_cache.get("preferences", {}).get(item_id, {}).get("description"),
-                                locale,
-                                description[:80],
-                            )[:80],
-                            "selected": False,
-                        }
-                    )
+                group_id = str(group.get("group_id") or "").strip()
+                if not group_id:
+                    continue
+                title = _taxonomy_title(group, locale)
+                items.append(
+                    {
+                        "id": f"preferences:group:{group_id}",
+                        "title": title,
+                        "description": description,
+                        "display_title": title,
+                        "display_description": description,
+                        "source_fields": active_fields,
+                        "status": group.get("status", "active"),
+                        "selected": False,
+                    }
+                )
             return items
         return []
 
@@ -4446,6 +4692,10 @@ def parse_selected_ids(selected_ids: list[str]) -> dict[str, set[str]]:
         prefix, _, suffix = item_id.partition(":")
         if prefix == "profile":
             if suffix and suffix != "default":
+                if suffix.startswith("group:"):
+                    group_id = suffix.split(":", 1)[1]
+                    selected["profile_fields"].update(_taxonomy_group_source_fields("profile", group_id))
+                    continue
                 parts = suffix.split(":", 1)
                 if len(parts) == 2:
                     selected["profile_values"].add(suffix)
@@ -4456,6 +4706,10 @@ def parse_selected_ids(selected_ids: list[str]) -> dict[str, set[str]]:
                 selected["profile_fields"].add("*")
         elif prefix == "preferences":
             if suffix and suffix != "default":
+                if suffix.startswith("group:"):
+                    group_id = suffix.split(":", 1)[1]
+                    selected["preferences_fields"].update(_taxonomy_group_source_fields("preferences", group_id))
+                    continue
                 parts = suffix.split(":", 1)
                 if len(parts) == 2:
                     selected["preferences_values"].add(suffix)
@@ -6159,13 +6413,14 @@ def rebuild_persistent_memory(
     prefs = builder._build_preferences(prefs_data, l1_text, earliest_ts, pref_ep_ids, ep_by_id)
     profile, prefs = _merge_l1_claims_into_profile_preferences(settings, profile, prefs)
     if profile.primary_task_types:
-        merged_task_types = _dedupe_primary_task_types(
-            (prefs.primary_task_types or []) + list(profile.primary_task_types),
-            [],
-            max_items=3,
-        )
-        prefs.primary_task_types = merged_task_types
         profile.primary_task_types = []
+        wiki.save_profile(profile)
+    prefs.primary_task_types = _stable_primary_task_types(
+        list(prefs.primary_task_types or []),
+        episodes,
+        [],
+        l1_text,
+    )
     wiki.save_preferences(prefs)
 
     stage("正在整理项目记忆...", 3)
@@ -6214,20 +6469,13 @@ def rebuild_persistent_memory(
     wiki.save_workflows(workflows)
     save_workflow_asset_library(settings, workflows)
 
-    inferred_task_types = _infer_primary_task_types(
-        builder.llm,
+    prefs.primary_task_types = _stable_primary_task_types(
+        list(prefs.primary_task_types or []),
         episodes,
         projects,
-        workflows,
-        existing=list(prefs.primary_task_types or []),
+        l1_text,
     )
-    if inferred_task_types:
-        prefs.primary_task_types = _dedupe_primary_task_types(
-            list(prefs.primary_task_types or []) + inferred_task_types,
-            projects,
-            max_items=3,
-        )
-        wiki.save_preferences(prefs)
+    wiki.save_preferences(prefs)
 
     builder.maintain_episode_connections(
         episodes,

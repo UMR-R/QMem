@@ -53,6 +53,18 @@ Type boundaries:
 - daily_note: reusable non-project daily context, personal choice context, taste, lifestyle, or small useful facts.
 - skill: only when evidence explicitly says the user saved, created, selected, recommended, or wants to reuse a Skill asset.
 
+Display taxonomy boundary:
+- Do not output frontend display groups as persistent memory items.
+- Profile display groups are identity, knowledge_background, and long_term_focus.
+- Preference display groups are language, expression_style, and main_task_types.
+- common_languages can support language handling, but it is not knowledge_background.
+- New display groups must be suggested through a display-taxonomy proposal flow, not stored as profile/preference/skill items.
+
+Workflow and skill relationship:
+- A workflow may reference a saved or recommended skill as one step, but the workflow must remain understandable without that skill.
+- A skill is a reusable capability asset. A workflow is a reusable procedure that may call one or more skills.
+- Do not invent skill names. If the evidence only shows a procedure and no reusable asset boundary, store workflow rather than skill.
+
 Example policy:
 - Examples are illustrative context, not a fixed taxonomy and not phrases to copy.
 - A parent effort, a distinct subarea, and a delivery/application direction may become separate topic items only when evidence supports distinct retrieval intents.

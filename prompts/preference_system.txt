@@ -38,6 +38,12 @@ Field guidance:
 - revision_preference: stable revision habits, such as asking for structure before rewrite.
 - response_granularity: one of `"concise"`, `"detailed"`, `"step-by-step"`, or `""`.
 
+Display grouping boundary:
+- `language` displays language_preference and terminology_preference. Keep the display concise, e.g. "中文为主".
+- `expression_style` displays style_preference, formatting_constraints, forbidden_expressions, revision_preference, and response_granularity.
+- `main_task_types` displays primary_task_types only after policy validation.
+- For primary_task_types, consider both absolute support and small-sample proportion. A task type can be stable in a small corpus if it covers a meaningful proportion of available episodes and is not a concrete one-off object.
+
 Exclusion rules:
 - Do NOT put identity/background facts into preferences.
 - Do NOT put project names, research topics, model strategies, or domain content into style/formatting fields.

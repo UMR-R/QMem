@@ -128,3 +128,49 @@
     - 避免模型在测试样本或早期讨论上 overfit。
     - 让 profile、preferences、projects、workflows、daily_notes 的分类和命名根据真实证据、已有记忆和用户编辑状态自适应生成。
     - 保留 examples 的边界说明价值，但明确它们不是 taxonomy，也不是要复制的文案。
+
+- 🏠 收紧 preference policy 并修正前端展示适配
+  - 改了什么：
+    - 在 `backend_service/app.py` 中新增稳定任务类型过滤，只保留明确长期表达或跨 episode 稳定支持的 `primary_task_types`。
+    - 停止把 profile 或单次 organize 推断出的临时任务类型直接合并成 preference checkbox。
+    - 将前端实际读取的 Profile / Preferences items 改成字段级高层关键词展示，细节进入 description。
+    - 将 `zh`、`en`、`response_granularity` 等内部值转成自然展示文案，例如“中文为主”“回答以中文为主”。
+    - 将 Daily Notes 的前端标题从整段摘要改成短语标题，description 保留简要说明。
+  - 为了什么：
+    - 避免“搭配建议”“口味推荐”“技术调研”这类单次任务标签污染稳定偏好。
+    - 让前端可见节点符合“Profile / Preferences 是高层 checkbox，Projects / Workflows / Daily Notes 是短语加简介”的产品要求。
+    - 降低旧 display cache 中不自然文案对前端展示的影响。
+
+- 🏠 落地前端展示基础 taxonomy
+  - 改了什么：
+    - 在 `backend_service/app.py` 中新增 `BASE_DISPLAY_TAXONOMY`，让后端明确知道前端高层 checkbox 与底层 memory fields 的映射。
+    - Profile 基础组调整为“身份”“知识背景”“长期关注方向”。
+    - Preferences 基础组调整为“语言”“表达风格”“主要任务类型”。
+    - `memory_items_for_category()` 改为按 taxonomy group 聚合输出，例如 `profile:group:knowledge_background`、`preferences:group:language`。
+    - `parse_selected_ids()` 支持解析 group id，并映射回具体字段，保证前端勾选高层组后导出/注入仍能拿到对应 memory。
+  - 为了什么：
+    - 保持前端 checkbox 简洁稳定，同时让后端保留可扩展字段映射。
+    - 为后续模型提出动态展示组预留 registry 机制，但当前只启用人工确认过的 base taxonomy。
+
+- 🏠 修正知识背景与任务类型稳定性规则
+  - 改了什么：
+    - 将 Profile 的“知识背景”来源收窄为 `domain_background`，不再把 `common_languages` 放入知识背景。
+    - 保留语言相关信息在 Preferences 的“语言”组中展示。
+    - 调整 `primary_task_types` 稳定性过滤，让规则同时考虑绝对支持数和小样本比例。
+    - 改进中文短标签匹配，让“搭配建议”“推荐列表”“研究规划”这类标签可以通过首尾动作词和 episode 文本进行匹配。
+  - 为了什么：
+    - 避免“中文为主”误显示成用户知识储备。
+    - 在样本数量较少时，允许占比明显的任务类型进入前端 checkbox，而不是只依赖固定绝对次数阈值。
+
+- 🏠 同步 display taxonomy 与节点 prompt
+  - 改了什么：
+    - 新增 `memory_transferor/memory_export/display_taxonomy.py`，把前端 base taxonomy 从 backend 局部常量抽成共享模块。
+    - backend 改为复用 `memory_transferor` 的 display taxonomy，避免两套映射漂移。
+    - `MemoryDisplayBuilder` 默认使用 base taxonomy，同时仍支持外部传入 group hints。
+    - 新增 `prompts/skills_system.txt`，补齐 skill persistent node 的抽取边界。
+    - 新增 `prompts/display_taxonomy_proposal.txt`，规定模型只能提出 `suggested` 展示分组，由用户确认后才可激活。
+    - 更新 `schema.txt`、`profile_system.txt`、`preference_system.txt`、`workflows_system.txt`，补充 base taxonomy、各节点 display 边界，以及 workflow 与 skill 的关系。
+    - 更新旧路径和新路径的 prompt loader，确保 profile、preferences、projects、workflows、daily_notes、skills 和 display taxonomy proposal 都有可加载 prompt。
+  - 为了什么：
+    - 让 backend、`memory_transferor` 和 prompts 对同一套节点定义与前端展示结构达成一致。
+    - 支持后续“模型建议新增展示组，用户确认是否添加”的扩展机制。

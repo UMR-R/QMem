@@ -49,6 +49,12 @@ Field guidance:
 - reuse_frequency: one of `"daily"`, `"weekly"`, `"per-project"`, `"ad-hoc"`.
 - occurrence_count: conservative estimate from provided evidence.
 
+Skill relationship:
+- A workflow may call saved or recommended skills when the evidence supports that the user reuses a capability as part of the process.
+- Do not invent skill names. Use existing skill names from L1/platform signals or persistent skill memory when provided.
+- If a reusable capability is not yet saved as a skill, describe it as a workflow step. A separate skill proposal belongs to skill memory, not workflow memory.
+- Keep workflow steps understandable even when a skill is unavailable.
+
 Example policy:
 - Examples are illustrative context, not phrases to copy and not a closed taxonomy.
 - A recurring procedure with a clear trigger and ordered steps is a workflow.

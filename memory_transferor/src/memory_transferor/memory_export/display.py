@@ -7,6 +7,7 @@ from typing import Iterable
 from pydantic import BaseModel, Field
 
 from memory_transferor.memory_models import PersistentMemoryItem
+from memory_transferor.memory_export.display_taxonomy import base_display_taxonomy
 
 
 class DisplayGroupHint(BaseModel):
@@ -86,10 +87,13 @@ class MemoryDisplayBuilder:
         self,
         language: str = "auto",
         keyword_group_hints: Iterable[DisplayGroupHint] | None = None,
+        use_base_taxonomy: bool = True,
         similarity_threshold: float = 0.18,
     ) -> None:
         self.language = language
-        self.keyword_group_hints = list(keyword_group_hints or [])
+        hints = self._base_taxonomy_hints() if use_base_taxonomy else []
+        hints.extend(keyword_group_hints or [])
+        self.keyword_group_hints = hints
         self.similarity_threshold = similarity_threshold
 
     def build(self, items: Iterable[PersistentMemoryItem]) -> MemoryDisplayPayload:
@@ -121,6 +125,30 @@ class MemoryDisplayBuilder:
         if "中文" in joined or "chinese" in lowered or _cjk_count(joined) >= 8:
             return "zh"
         return "en"
+
+    def _base_taxonomy_hints(self) -> list[DisplayGroupHint]:
+        hints: list[DisplayGroupHint] = []
+        for category, item_type in [("profile", "profile"), ("preferences", "preference")]:
+            for group in base_display_taxonomy(category):
+                title = group.get("title", {})
+                label = title.get("zh") if isinstance(title, dict) else str(title or "")
+                hints.append(
+                    DisplayGroupHint(
+                        group_id=str(group.get("group_id") or ""),
+                        item_type=item_type,
+                        label=str(label or group.get("group_id") or ""),
+                        description="",
+                        match_terms=[
+                            str(term)
+                            for term in [
+                                *(group.get("source_fields", []) or []),
+                                *(group.get("match_terms", []) or []),
+                            ]
+                            if str(term).strip()
+                        ],
+                    )
+                )
+        return hints
 
     def _build_keyword_items(
         self,

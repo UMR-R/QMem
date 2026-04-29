@@ -123,6 +123,46 @@ L3 defines how memory is validated, linked, merged, split, exported, and indexed
 | `daily_note` | Reusable non-project daily context, personal choice context, taste, lifestyle, or small useful facts |
 | `skill` | Saved or recommended Skill asset that the user explicitly wants to keep or reuse |
 
+## Persistent Node Requirements
+
+Each persistent node type has its own extraction or maintenance prompt:
+
+- `profile_system.txt` maintains profile memory.
+- `preference_system.txt` maintains preference memory.
+- `projects_system.txt` maintains project memory.
+- `workflows_system.txt` maintains workflow memory.
+- `persistent_node_distill_bg.txt` maintains daily_notes.
+- `skills_system.txt` maintains saved/recommended skill memory.
+- `display_taxonomy_proposal.txt` may suggest new frontend display groups, but it must not directly create active groups.
+
+## Frontend Display Taxonomy
+
+The frontend does not display raw model fields directly. It displays stable high-level groups derived from a backend taxonomy registry.
+
+Base profile groups:
+
+| group_id | title | source fields |
+|---|---|---|
+| `identity` | 身份 | `name_or_alias`, `role_identity`, `organization_or_affiliation` |
+| `knowledge_background` | 知识背景 | `domain_background` |
+| `long_term_focus` | 长期关注方向 | `long_term_research_or_work_focus` |
+
+Base preference groups:
+
+| group_id | title | source fields |
+|---|---|---|
+| `language` | 语言 | `language_preference`, `terminology_preference` |
+| `expression_style` | 表达风格 | `style_preference`, `formatting_constraints`, `forbidden_expressions`, `revision_preference`, `response_granularity` |
+| `main_task_types` | 主要任务类型 | `primary_task_types` |
+
+Display rules:
+
+- Profile and Preferences are shown as checkbox-oriented groups.
+- Projects, Workflows, Daily Notes, and Skills are shown as phrase plus short description cards.
+- `common_languages` is not part of the Profile `knowledge_background` display group. It can help language handling, but it should not be presented as knowledge background.
+- `primary_task_types` should pass policy validation before display. Use both absolute support and small-sample proportion when deciding whether a task type is stable enough.
+- New display groups must be proposed as `suggested`, reviewed by policy, and accepted by the user before they become active.
+
 ## Confidence Rules
 
 | supporting evidence | confidence |

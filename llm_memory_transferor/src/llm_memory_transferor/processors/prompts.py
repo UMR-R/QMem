@@ -16,8 +16,10 @@ PROMPT_FILES = {
     "preference_system": "preference_system.txt",
     "projects_system": "projects_system.txt",
     "workflows_system": "workflows_system.txt",
+    "skills_system": "skills_system.txt",
     "episode_system": "episode_system.txt",
     "delta_system": "delta_system.txt",
+    "display_taxonomy_proposal": "display_taxonomy_proposal.txt",
 }
 
 
@@ -48,8 +50,10 @@ _PROFILE_SYSTEM = get_processor_prompt("profile_system")
 _PREFERENCE_SYSTEM = get_processor_prompt("preference_system")
 _PROJECTS_SYSTEM = get_processor_prompt("projects_system")
 _WORKFLOWS_SYSTEM = get_processor_prompt("workflows_system")
+_SKILLS_SYSTEM = get_processor_prompt("skills_system")
 _EPISODE_SYSTEM = get_processor_prompt("episode_system")
 _DELTA_SYSTEM = get_processor_prompt("delta_system")
+_DISPLAY_TAXONOMY_PROPOSAL = get_processor_prompt("display_taxonomy_proposal")
 
 
 __all__ = [
@@ -61,6 +65,8 @@ __all__ = [
     "_PREFERENCE_SYSTEM",
     "_PROJECTS_SYSTEM",
     "_WORKFLOWS_SYSTEM",
+    "_SKILLS_SYSTEM",
     "_EPISODE_SYSTEM",
     "_DELTA_SYSTEM",
+    "_DISPLAY_TAXONOMY_PROPOSAL",
 ]
