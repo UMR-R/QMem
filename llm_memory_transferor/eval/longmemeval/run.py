@@ -12,7 +12,9 @@ Usage:
 import click
 
 from .generation_runner import run_generation
+from .chroma_retrieval_runner import run_chroma_retrieval
 from .retrieval_runner import run_retrieval
+from .sample_episodic_cases import sample_episodic_cases
 
 
 @click.group()
@@ -21,14 +23,16 @@ def cli() -> None:
 
 
 cli.add_command(run_retrieval, name="retrieve")
+cli.add_command(run_chroma_retrieval, name="retrieve-chroma")
 cli.add_command(run_generation, name="generate")
+cli.add_command(sample_episodic_cases, name="sample-episodic")
 
 
 @cli.command("full-eval")
 @click.option("--data", required=True, type=click.Path(exists=True))
 @click.option("--output-dir", required=True, type=click.Path())
 @click.option("--mode", default="retrieval-augmented",
-              type=click.Choice(["retrieval-augmented", "full-history", "memory-wiki"]))
+              type=click.Choice(["retrieval-augmented", "full-history", "episodic-memory", "memory-wiki", "popup-organize", "popup-organize-persistent", "popup-organize-episodic"]))
 @click.option("--top-k", default=5)
 @click.option("--model", default="claude-haiku-4-5-20251001")
 @click.option("--limit", default=None, type=int)

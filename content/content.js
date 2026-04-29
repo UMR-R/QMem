@@ -484,6 +484,11 @@ function runtimeSendMessage(message) {
   });
 }
 
+function isExtensionContextInvalidated(error) {
+  const message = String(error?.message || error || "");
+  return message.includes("Extension context invalidated");
+}
+
 function storageGet(key) {
   return new Promise(resolve => chrome.storage.local.get(key, resolve));
 }
@@ -1047,7 +1052,7 @@ async function _onRoundComplete(config) {
   console.log("[MemAssist] 发送 ROUND_CAPTURED，chatId:", chatId, "，用户消息前50字:", userText.slice(0, 50));
 
   try {
-    await chrome.runtime.sendMessage({
+    await runtimeSendMessage({
       type: "ROUND_CAPTURED",
       chatId,
       platform: config.name,
@@ -1057,6 +1062,11 @@ async function _onRoundComplete(config) {
       timestamp: new Date().toISOString(),
     });
   } catch (err) {
+    if (isExtensionContextInvalidated(err)) {
+      console.warn("[MemAssist] 扩展上下文已失效，停止当前页面捕获。请刷新页面或重新打开扩展后重试。");
+      stopCapture();
+      return;
+    }
     console.warn("[MemAssist] ROUND_CAPTURED 发送失败:", err?.message ?? err);
   }
 }

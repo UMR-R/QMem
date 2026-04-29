@@ -1,5 +1,5 @@
 from .base import EvidenceLink, MemoryBase
-from .episode import EpisodicMemory
+from .episode import EpisodeConnection, EpisodeDisplayText, EpisodicMemory
 from .platform_mapping import BUILT_IN_MAPPINGS, FieldMapping, PlatformMappingMemory
 from .preference import PreferenceMemory
 from .profile import ProfileMemory
@@ -14,6 +14,8 @@ __all__ = [
     "ProjectMemory",
     "ProjectEntry",
     "WorkflowMemory",
+    "EpisodeConnection",
+    "EpisodeDisplayText",
     "EpisodicMemory",
     "PlatformMappingMemory",
     "FieldMapping",

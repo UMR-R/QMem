@@ -453,6 +453,10 @@ button {
   font-weight: var(--font-caption-weight);
 }
 
+.helper-text-centered {
+  text-align: center;
+}
+
 .mid-primary-btn {
   width: 100%;
   min-width: 0;
@@ -716,6 +720,20 @@ button {
   margin-top: 14px;
 }
 
+.contact-link {
+  display: block;
+  margin-top: 14px;
+  text-align: center;
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.contact-link:hover {
+  text-decoration: underline;
+}
+
 .skill-bottom-actions {
   grid-template-columns: 1fr 1fr 1.18fr;
 }
@@ -886,10 +904,10 @@ button {
 .field-label {
   display: block;
   margin: 6px 0 5px;
-  font-size: var(--font-caption-size);
-  font-weight: var(--font-caption-weight);
-  line-height: var(--font-caption-line);
-  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--text);
 }
 
 .field-row {
@@ -994,8 +1012,7 @@ button {
 
 .settings-action-row small,
 #apiKeyStatus,
-.toggle-row em,
-.field-label {
+.toggle-row em {
   color: var(--muted);
   font-size: var(--font-caption-size);
   font-weight: var(--font-caption-weight);
@@ -1009,6 +1026,75 @@ button {
 .settings-note {
   margin-top: 14px;
   font-size: var(--font-caption-size);
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: rgba(9, 14, 25, 0.58);
+  backdrop-filter: blur(8px);
+}
+
+.modal-card {
+  width: min(100%, 360px);
+  border-radius: 22px;
+  padding: 18px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(244, 247, 252, 0.98));
+  box-shadow: 0 22px 48px rgba(20, 32, 54, 0.24);
+  border: 1px solid rgba(94, 124, 168, 0.18);
+}
+
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.modal-head h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ink-strong);
+}
+
+.modal-close-btn {
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 999px;
+  background: rgba(221, 229, 242, 0.9);
+  color: var(--ink-strong);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.modal-copy {
+  margin: 14px 0 10px;
+  color: var(--ink-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.modal-command {
+  margin: 0;
+  padding: 14px;
+  border-radius: 16px;
+  background: rgba(15, 23, 42, 0.96);
+  color: #f8fafc;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+  -webkit-user-select: text;
+  overflow: auto;
 }
 
 .toast {

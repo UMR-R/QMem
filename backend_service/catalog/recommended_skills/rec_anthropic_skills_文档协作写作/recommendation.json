@@ -1,0 +1,31 @@
+{
+  "id": "rec:anthropic_skills:文档协作写作",
+  "icon": "文",
+  "tags": [
+    "general"
+  ],
+  "keywords": [
+    "provides",
+    "structured",
+    "workflow",
+    "guiding",
+    "through",
+    "collaborative",
+    "document",
+    "creation",
+    "act",
+    "active",
+    "guide",
+    "walking"
+  ],
+  "persona_signals": [
+    "provides",
+    "structured",
+    "workflow",
+    "guiding",
+    "through",
+    "collaborative"
+  ],
+  "usage_score": 0.96,
+  "source": "anthropic_skills:doc-coauthoring"
+}

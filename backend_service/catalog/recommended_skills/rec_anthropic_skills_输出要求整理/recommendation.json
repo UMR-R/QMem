@@ -1,0 +1,31 @@
+{
+  "id": "rec:anthropic_skills:输出要求整理",
+  "icon": "输",
+  "tags": [
+    "general"
+  ],
+  "keywords": [
+    "may",
+    "ask",
+    "create",
+    "edit",
+    "analyze",
+    "contents",
+    "xlsx",
+    "file",
+    "have",
+    "different",
+    "tools",
+    "workflows"
+  ],
+  "persona_signals": [
+    "may",
+    "ask",
+    "create",
+    "edit",
+    "analyze",
+    "contents"
+  ],
+  "usage_score": 0.96,
+  "source": "anthropic_skills:xlsx"
+}

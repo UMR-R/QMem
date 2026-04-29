@@ -1,0 +1,23 @@
+{
+  "id": "rec:anthropic_skills:PPT_演示文稿处理",
+  "icon": "P",
+  "tags": [
+    "general"
+  ],
+  "keywords": [
+    "ppt",
+    "read",
+    "editing",
+    "full",
+    "details"
+  ],
+  "persona_signals": [
+    "ppt",
+    "read",
+    "editing",
+    "full",
+    "details"
+  ],
+  "usage_score": 0.96,
+  "source": "anthropic_skills:pptx"
+}

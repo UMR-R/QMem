@@ -316,15 +316,12 @@ description 描述规律本身，而非触发该规律的具体事件。`,
 }; // end CONFIG
 
 // ── Prompt loader ──────────────────────────────────────────────────────────────
-// Fetches each prompt from prompts/*.txt and overwrites the corresponding field.
+// Fetches each used prompt from prompts/*.txt and overwrites the corresponding field.
 // Call once on popup init; falls back to the hardcoded strings above if a file
 // cannot be fetched.
 CONFIG.loadPrompts = async function () {
   const base = chrome.runtime.getURL("prompts/");
   const files = [
-    ["schema",                    s => { CONFIG.skills.architecture     = s; }],
-    ["episode_extract",           s => { CONFIG.skills.episodicTag       = s; }],
-    ["persistent_node_distill",   s => { CONFIG.skills.persistentDistill = s; }],
     ["cold_start",                s => { CONFIG.load                    = s; }],
     ["platform_memory_collect",   s => { CONFIG.platformMemoryCollect    = s; }],
   ];

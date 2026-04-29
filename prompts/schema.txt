@@ -1,57 +1,135 @@
-# 可迁移个人记忆层 — 架构定义 v1.0
+# 可迁移个人记忆层 - 架构定义 v1.2
 
 ## 核心概念
 
 本系统将个人记忆分为两层：
 
 ### Episodic（情节记忆）
-单次对话的完整导出，保留具体的对话细节、时间背景和上下文。
-- 不进行跨会话归纳，只描述"本次对话发生了什么"
+
+单次对话的结构化记录，保留具体上下文、讨论内容、结论以及时间信息。
+
+- 不做跨会话归纳，只描述“这次对话发生了什么”
 - 作为 Persistent 层的原始证据来源
-- 每条 episodic 有唯一 ID，格式：ep_XXXX
+- 必须保留该次对话的时间信息
+- 每条 episodic 有唯一 ID，格式为 `ep_XXXX`
 
 ### Persistent（持久记忆）
-从多条 Episodic 中提炼的跨会话稳定规律。
-- 代表用户的长期稳定特征，而非某次对话的具体内容
-- 有置信度（confidence）和证据链（episode_refs）
-- 每条 persistent 有唯一 ID，格式：pn_XXXX
+
+从多条 Episodic 中提炼出的跨会话稳定规律。
+
+- 表示用户长期稳定的偏好、背景、工作流和主题
+- 必须带有证据链 `episode_refs`
+- 必须带有置信度 `confidence`
+- 必须带有更新时间戳 `updated_at`
+- 每条 persistent 节点有唯一 ID，格式为 `pn_XXXX`
+
+## Episodic 记忆 Schema
+
+```json
+{
+  "episode_id": "ep_0001",
+  "title": "本次对话标题",
+  "topics_covered": ["主题1", "主题2"],
+  "summary": "本次对话的摘要",
+  "key_decisions": ["决策1"],
+  "open_issues": ["待解决问题1"],
+  "relates_to_profile": true,
+  "relates_to_preferences": false,
+  "relates_to_projects": ["项目A"],
+  "relates_to_workflows": ["工作流A"],
+  "time_range_start": "日期字符串，例如 2026-04-24",
+  "time_range_end": "日期字符串，例如 2026-04-24",
+  "created_at": "日期字符串，例如 2026-04-24",
+  "updated_at": "日期字符串，例如 2026-04-24"
+}
+```
+
+## Episodic 时间字段说明
+
+| 字段 | 含义 |
+|---|---|
+| `time_range_start` | 该次对话开始时间，优先使用原始会话时间 |
+| `time_range_end` | 该次对话结束时间，优先使用原始会话时间 |
+| `created_at` | 该 episodic 对应的原始会话起始时间，不是整理时间 |
+| `updated_at` | 该 episodic 对应的原始会话结束时间；如果没有结束时间，则退回开始时间 |
+
+## Episodic 时间规则
+
+- `time_range_start` 和 `time_range_end` 应尽量保留原始对话时间
+- `created_at` 和 `updated_at` 应反映原始会话发生时间，而不是后处理或整理记忆的时间
+- 如果只有单一时间点，则：
+  - `time_range_start = time_range_end`
+  - `created_at = updated_at`
+- 时间格式统一到日期级，使用 `YYYY-MM-DD`，例如：
+  - `2026-04-24`
 
 ## Persistent 节点 Schema
 
 ```json
 {
-  "type":            "preference | profile | workflow | topic",
-  "key":             "snake_case，全局唯一",
-  "description":     "一句中文规律描述，≤30字",
-  "episode_refs":    ["ep_0001", "ep_0002"],
-  "confidence":      "low | medium | high",
+  "type": "preference | profile | workflow | topic",
+  "key": "snake_case，全局唯一",
+  "description": "一句中文规律描述，不超过 50 字",
+  "episode_refs": ["ep_0001", "ep_0002"],
+  "confidence": "low | medium | high",
   "export_priority": "low | medium | high",
-  "platform":        ["来源平台"]
+  "platform": ["来源平台"],
+  "updated_at": "日期字符串，例如 2026-04-24"
 }
 ```
 
+## Persistent 字段说明
+
+| 字段 | 含义 |
+|---|---|
+| `type` | 节点类型 |
+| `key` | 节点的稳定唯一标识，必须使用 `snake_case` |
+| `description` | 对规律本身的概括，不写成具体事件 |
+| `episode_refs` | 支撑该节点的 episodic 证据 ID 列表 |
+| `confidence` | 节点置信度，必须与 `episode_refs` 数量一致 |
+| `export_priority` | 导出到别的平台时的优先级 |
+| `platform` | 该节点证据涉及的平台来源 |
+| `updated_at` | 该节点最近一次被创建、更新或合并的时间戳 |
+
 ## Type 说明
 
-| type       | 含义                                |
-|------------|-------------------------------------|
-| preference | 用户稳定的偏好与约束（格式/风格/禁止项）|
-| profile    | 用户身份与背景（角色/领域/技能）        |
-| workflow   | 用户反复使用的工作流程或操作模式        |
-| topic      | 涉及的主题/项目/任务类型               |
+| type | 含义 |
+|---|---|
+| `preference` | 用户稳定的偏好与约束，例如格式、风格、禁忌表达 |
+| `profile` | 用户身份与背景，例如角色、领域、语言背景 |
+| `workflow` | 用户反复使用的工作流、步骤模板或操作模式 |
+| `topic` | 用户长期关注的主题、项目方向或任务类型 |
 
 ## Confidence 规则
 
-| episode_refs 数量 | confidence |
-|-------------------|------------|
-| 1 条              | low        |
-| 2–3 条            | medium     |
-| ≥4 条             | high       |
+| `episode_refs` 数量 | `confidence` |
+|---|---|
+| 1 | `low` |
+| 2-3 | `medium` |
+| 4 及以上 | `high` |
 
-confidence 必须随 episode_refs 增长而升级，不能手动越级设为 high。
+`confidence` 必须随着 `episode_refs` 增长而升级，不能手动越级设为 `high`。
+
+## Persistent updated_at 规则
+
+- `updated_at` 是每个 persistent 节点的必填字段
+- 创建新节点时，`updated_at` 设为当前时间
+- 节点被新证据更新时，`updated_at` 必须刷新为当前时间
+- 节点发生合并时，保留节点的 `updated_at` 也必须刷新为当前时间
+- 时间格式统一到日期级，使用 `YYYY-MM-DD`，例如：
+  - `2026-04-24`
 
 ## Description 质量标准
 
-✓ 正确（规律描述）："用户写作时不使用破折号"
-✗ 错误（事件描述）："用户在4月修改论文时提到不用破折号"
+正确示例：
 
-description 描述规律本身，而非触发该规律的具体事件。
+- 用户写作时不使用破折号
+- 用户偏好简洁直接的回答
+- 用户在论文修改任务中偏好先给结论再给修改建议
+
+错误示例：
+
+- 用户在 3 月修改论文时提到不要用破折号
+- 用户刚才问了一个关于实验设计的问题
+
+`description` 应描述稳定规律，而不是某次具体事件。

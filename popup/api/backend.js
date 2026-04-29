@@ -1,22 +1,69 @@
 (() => {
   function normalizeBaseUrl(raw) {
-    return (raw || "http://127.0.0.1:8765").replace(/\/$/, "");
+    const value = String(raw || "").trim();
+    const normalized = value
+      ? (value.includes("://") ? value : `http://${value}`)
+      : "http://127.0.0.1:8765";
+    return normalized.replace(/\/$/, "");
+  }
+
+  function extractErrorMessage(payload, fallback) {
+    if (typeof payload === "string" && payload.trim()) {
+      return payload.trim();
+    }
+    if (Array.isArray(payload)) {
+      const parts = payload
+        .map(item => extractErrorMessage(item, ""))
+        .filter(Boolean);
+      return parts.length ? parts.join("；") : fallback;
+    }
+    if (payload && typeof payload === "object") {
+      if (typeof payload.detail === "string" && payload.detail.trim()) {
+        return payload.detail.trim();
+      }
+      if (payload.detail !== undefined) {
+        return extractErrorMessage(payload.detail, fallback);
+      }
+      if (typeof payload.message === "string" && payload.message.trim()) {
+        return payload.message.trim();
+      }
+      if (Array.isArray(payload.loc) && typeof payload.msg === "string") {
+        const location = payload.loc
+          .map(part => String(part))
+          .filter(Boolean)
+          .join(".");
+        return location ? `${location}: ${payload.msg}` : payload.msg;
+      }
+      try {
+        return JSON.stringify(payload);
+      } catch {
+        return fallback;
+      }
+    }
+    return fallback;
   }
 
   async function request(baseUrl, path, options = {}) {
-    const response = await fetch(`${normalizeBaseUrl(baseUrl)}${path}`, {
-      ...options,
-      headers: {
-        ...(options.headers || {}),
-      },
-    });
+    let response;
+    try {
+      response = await fetch(`${normalizeBaseUrl(baseUrl)}${path}`, {
+        ...options,
+        headers: {
+          ...(options.headers || {}),
+        },
+      });
+    } catch (error) {
+      if (error instanceof TypeError) {
+        throw new Error("无法连接到本地后端");
+      }
+      throw error;
+    }
 
     if (!response.ok) {
       let message = `HTTP ${response.status}`;
       try {
         const errorPayload = await response.json();
-        if (errorPayload?.detail) message = errorPayload.detail;
-        else if (errorPayload?.message) message = errorPayload.message;
+        message = extractErrorMessage(errorPayload, message);
       } catch {
         // Keep the generic HTTP message if the body is not JSON.
       }

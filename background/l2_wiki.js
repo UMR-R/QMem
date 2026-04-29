@@ -29,6 +29,10 @@ function _safeName(name) {
   return String(name).toLowerCase().replace(/[\s/]/g, "_").slice(0, 64);
 }
 
+function _safeEpisodeContainerName(name) {
+  return String(name || "unknown_conversation").replace(/\//g, "_").slice(0, 160);
+}
+
 async function _readJson(dirHandle, filename) {
   try {
     const fh = await dirHandle.getFileHandle(filename);
@@ -44,6 +48,12 @@ async function _writeJson(dirHandle, filename, data) {
   const writable = await fh.createWritable();
   await writable.write(JSON.stringify(data, null, 2));
   await writable.close();
+}
+
+function _episodeRecords(data) {
+  if (data && Array.isArray(data.episodes)) return data.episodes.filter(Boolean);
+  if (data && data.episode_id) return [data];
+  return [];
 }
 
 async function _getSubDir(name) {
@@ -240,7 +250,22 @@ export async function listProjects() {
 
 export async function saveEpisode(ep) {
   const epDir = await _getSubDir("episodes");
-  await _writeJson(epDir, `${ep.episode_id}.json`, ep);
+  const convId = ep.conv_id || ep.episode_id || "unknown_conversation";
+  const filename = `${_safeEpisodeContainerName(convId)}.json`;
+  const existing = _episodeRecords(await _readJson(epDir, filename))
+    .filter(item => item.episode_id !== ep.episode_id);
+  existing.push(ep);
+  existing.sort((a, b) => {
+    const aTurn = Number(String(a.turn_refs?.[0] || "").split(":turn:").pop());
+    const bTurn = Number(String(b.turn_refs?.[0] || "").split(":turn:").pop());
+    if (Number.isFinite(aTurn) && Number.isFinite(bTurn) && aTurn !== bTurn) return aTurn - bTurn;
+    return String(a.created_at || "").localeCompare(String(b.created_at || ""));
+  });
+  await _writeJson(epDir, filename, {
+    conversation_id: convId,
+    episode_count: existing.length,
+    episodes: existing,
+  });
   await _logChange("episode", "create", ep.episode_id);
 }
 
@@ -252,7 +277,7 @@ export async function listEpisodes() {
       if (handle.kind === "file" && name.endsWith(".json")) {
         const file = await handle.getFile();
         try {
-          results.push(JSON.parse(await file.text()));
+          results.push(..._episodeRecords(JSON.parse(await file.text())));
         } catch { /* skip malformed */ }
       }
     }

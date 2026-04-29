@@ -1,0 +1,21 @@
+{
+  "id": "rec:anthropic_skills:MCP_服务开发",
+  "title": "MCP 服务开发",
+  "description": "触发：需要处理与MCP 服务开发相关的任务时 | 目标：Create MCP (Model Context Protocol) servers that enable LLMs | 步骤：Creating a high-quality MCP server involves four main phases:；Specification overview and architecture；Transport mechanisms (streamable HTTP, stdio) | 产出：结构化结果",
+  "kind": "skill",
+  "trigger": "需要处理与MCP 服务开发相关的任务时",
+  "goal": "Create MCP (Model Context Protocol) servers that enable LLMs",
+  "steps": [
+    "Creating a high-quality MCP server involves four main phases:",
+    "Specification overview and architecture",
+    "Transport mechanisms (streamable HTTP, stdio)",
+    "Tool, resource, and prompt definitions"
+  ],
+  "output_format": "结构化结果",
+  "guardrails": [],
+  "source_types": [
+    "recommended_catalog"
+  ],
+  "confidence": "medium",
+  "selected": false
+}

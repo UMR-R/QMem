@@ -1,0 +1,32 @@
+{
+  "id": "rec:anthropic_skills:PDF_文档处理",
+  "icon": "P",
+  "tags": [
+    "research",
+    "coding"
+  ],
+  "keywords": [
+    "pdf",
+    "guide",
+    "covers",
+    "essential",
+    "processing",
+    "operations",
+    "python",
+    "libraries",
+    "command-line",
+    "tools",
+    "advanced",
+    "features"
+  ],
+  "persona_signals": [
+    "pdf",
+    "guide",
+    "covers",
+    "essential",
+    "processing",
+    "operations"
+  ],
+  "usage_score": 0.96,
+  "source": "anthropic_skills:pdf"
+}

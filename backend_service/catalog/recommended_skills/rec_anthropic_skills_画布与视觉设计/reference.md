@@ -1,0 +1,7 @@
+# Reference
+
+## Summary
+触发：需要处理与画布与视觉设计相关的任务时 | 目标：These are instructions for creating design philosophies - ae | 步骤：IMPORTANT**: The user ALREADY said "It isn't perfect enough. It must be pristine, a masterpiece if craftsmanship, as if it were about to be displayed in a museum."；CRITICAL**: To refine the work, avoid adding more graphics; instead refine what has been created and make it extremely crisp, respecting the design philosophy and the principles of minimalism entirely. Rather than adding a fun filter or refactoring a font, consider how to make the existing composition more cohesive with the art. If the instinct is to call a new function or draw a new shape, STOP and instead ask: "How can I make what's already here more of a piece of art?"；Take a second pass. Go back to the code and refine/polish further to make this a philosophically designed masterpiece. | 产出：结构化结果
+
+## Sources
+- recommended_catalog

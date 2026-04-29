@@ -35,15 +35,15 @@
                 <path d="M20 9A8 8 0 0 0 6.2 6.1L4 9" />
                 <path d="M4 15a8 8 0 0 0 13.8 2.9L20 15" />
               </svg>
-              <strong>同步</strong>
+              <strong>同步对话</strong>
             </button>
           </div>
           <div class="sync-meta">
             <div class="sync-status-line">
               <span id="syncDot" class="status-dot"></span>
-              <span id="syncStatusText">同步已暂停</span>
+              <span id="syncStatusText">同步对话已暂停</span>
             </div>
-            <p id="syncHintText">点击开启后，持续记录你与大模型的对话</p>
+            <p id="syncHintText">点击开启后，持续记录你与大模型的对话到本地</p>
           </div>
         </div>
 
@@ -87,6 +87,15 @@
             <strong id="memoryCountValue">0 条</strong>
           </div>
         </div>
+
+        <a
+          class="contact-link"
+          href="https://github.com/UMR-R/memory_assistant"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          联系我们
+        </a>
       </section>
 
       <section id="migrateView" class="view">
@@ -196,34 +205,29 @@
           <h3>API 配置</h3>
           <label class="field-label" for="backendUrlInput">本地后端地址</label>
           <div class="field-row">
-            <input id="backendUrlInput" class="text-input" type="text" placeholder="http://127.0.0.1:8765">
+            <input id="backendUrlInput" class="text-input" type="text" placeholder="请输入本地后端地址">
             <button id="saveSettingsBtn" class="outline-mini-btn" type="button">保存</button>
           </div>
+          <p class="helper-text">可选地址：http://127.0.0.1:8765</p>
           <label class="field-label" for="apiKeyInput">API Key</label>
           <div class="field-row">
             <input id="apiKeyInput" class="text-input" type="password" placeholder="请输入 API Key" autocomplete="off">
             <button id="testConnectionBtn" class="outline-mini-btn" type="button">测试连接</button>
           </div>
-          <p id="apiKeyStatus" class="helper-text">API 可调用：待配置</p>
+          <p id="apiKeyStatus" class="helper-text">API 调用：待配置</p>
         </div>
 
         <div class="settings-card">
           <h3>本地目录</h3>
           <div class="field-row">
-            <input id="storageDirInput" class="text-input" type="text" placeholder="请输入或选择本地存储目录">
-            <button id="selectDirBtn" class="outline-mini-btn" type="button">选择目录</button>
+            <input id="storageDirInput" class="text-input" type="text" placeholder="请输入本地 backend 可用的绝对路径">
+            <button id="selectDirBtn" class="outline-mini-btn" type="button">保存</button>
           </div>
+          <p class="helper-text">用于设置本地 backend 保存对话和记忆文件的目录。请填写当前操作系统可用的绝对路径。</p>
         </div>
 
         <div class="settings-card">
           <h3>同步策略</h3>
-          <label class="toggle-row">
-            <span>
-              <strong>同步对话</strong>
-              <em>持续记录对话到本地</em>
-            </span>
-            <input id="keepUpdatedToggle" class="toggle-input" type="checkbox">
-          </label>
           <label class="toggle-row">
             <span>
               <strong>同步记忆</strong>
@@ -234,10 +238,25 @@
         </div>
 
         <div class="settings-card">
+          <h3>注入策略</h3>
+          <label class="toggle-row">
+            <span>
+              <strong>详细注入</strong>
+              <em>对细节保留更高</em>
+            </span>
+            <input id="detailedInjectionToggle" class="toggle-input" type="checkbox">
+          </label>
+        </div>
+
+        <div class="settings-card">
           <h3>数据管理</h3>
           <button id="importHistoryBtn" class="settings-action-row" type="button">
             <span>导入对话</span>
             <small>支持 txt/md/json 的原始对话</small>
+          </button>
+          <button id="clearAllMemoryBtn" class="settings-action-row danger-row" type="button">
+            <span>清理所有记忆</span>
+            <small>删除已保存的对话和记忆文件，但保留当前设置</small>
           </button>
           <button id="clearCacheBtn" class="settings-action-row danger-row" type="button">
             <span>清理缓存</span>
@@ -246,6 +265,16 @@
         </div>
       </section>
 
+      <div id="commandModal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="commandModalTitle">
+        <div class="modal-card">
+          <div class="modal-head">
+            <h3 id="commandModalTitle">启动本地后端</h3>
+            <button id="closeCommandModalBtn" class="modal-close-btn" type="button" aria-label="关闭弹窗">×</button>
+          </div>
+          <p class="modal-copy">请打开Terminal，执行以下命令启动本地后端：</p>
+          <pre id="commandModalText" class="modal-command" tabindex="0"></pre>
+        </div>
+      </div>
       <div id="toast" class="toast hidden"></div>
       <input id="importFileInput" type="file" accept=".json,.jsonl,.md,.txt" hidden>
     </main>

@@ -1,0 +1,31 @@
+{
+  "id": "rec:anthropic_skills:算法艺术创作",
+  "icon": "算",
+  "tags": [
+    "coding"
+  ],
+  "keywords": [
+    "algorithmic",
+    "philosophies",
+    "are",
+    "computational",
+    "aesthetic",
+    "movements",
+    "then",
+    "expressed",
+    "through",
+    "code",
+    "output",
+    "files"
+  ],
+  "persona_signals": [
+    "algorithmic",
+    "philosophies",
+    "are",
+    "computational",
+    "aesthetic",
+    "movements"
+  ],
+  "usage_score": 0.96,
+  "source": "anthropic_skills:algorithmic-art"
+}

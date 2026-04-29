@@ -1,0 +1,23 @@
+{
+  "id": "rec:anthropic_skills:技能设计",
+  "icon": "技",
+  "tags": [
+    "general"
+  ],
+  "keywords": [
+    "creating",
+    "new",
+    "iteratively",
+    "improving",
+    "them"
+  ],
+  "persona_signals": [
+    "creating",
+    "new",
+    "iteratively",
+    "improving",
+    "them"
+  ],
+  "usage_score": 0.96,
+  "source": "anthropic_skills:skill-creator"
+}

@@ -8,45 +8,15 @@ const STORAGE_KEYS = {
   apiBaseUrl: "api_base_url",
   apiModel: "api_model",
   backendUrl: "backend_url",
+  storagePath: "storage_path",
   keepUpdated: "keepUpdated",
   keepUpdatedStrategy: "keepUpdatedStrategy",
   realtimeUpdate: "realtimeUpdate",
+  detailedInjection: "detailedInjection",
   lastSyncAt: "last_sync_at",
   savedSkills: "saved_skill_ids",
+  organizeJobState: "organize_job_state",
 };
-
-const recommendedSkills = [
-  {
-    id: "rec:pdf_reader",
-    icon: "PDF",
-    title: "从 PDF 提取结构化要点",
-    description: "触发：需要快速读懂 PDF 或论文时 · 目标：提取结构、结论与证据 · 步骤：识别结构 / 提取重点 / 输出摘要",
-    trigger: "需要快速读懂 PDF 或论文时",
-    goal: "提取结构、结论与关键证据",
-    steps: ["识别文档结构", "提取关键结论与数据点", "输出结构化摘要"],
-    output_format: "摘要 / 要点清单",
-  },
-  {
-    id: "rec:paper_summary",
-    icon: "研",
-    title: "按问题-方法-结果总结论文",
-    description: "触发：需要沉淀论文内容时 · 目标：按问题、方法、结果、局限整理 · 步骤：定位问题 / 提取方法 / 总结结果与局限",
-    trigger: "需要沉淀论文内容时",
-    goal: "按问题、方法、结果、局限整理论文",
-    steps: ["定位研究问题", "提取方法与实验设计", "总结结果、贡献与局限"],
-    output_format: "结构化文献摘要",
-  },
-  {
-    id: "rec:project_plan",
-    icon: "计",
-    title: "把目标拆成项目计划",
-    description: "触发：需要把模糊目标变成计划时 · 目标：拆解任务和优先级 · 步骤：澄清目标 / 排序任务 / 输出行动计划",
-    trigger: "需要把模糊目标变成项目计划时",
-    goal: "拆解任务、确定优先级并输出行动计划",
-    steps: ["澄清目标和边界", "拆解任务并排序优先级", "输出阶段计划与下一步"],
-    output_format: "行动计划 / Roadmap",
-  },
-];
 
 const SUPPORTED_HOSTS = new Set([
   "chatgpt.com",
@@ -69,14 +39,14 @@ const CATEGORY_LABELS = IS_ZH_UI
       preferences: "偏好设置",
       projects: "项目记忆",
       workflows: "工作流 / SOP",
-      persistent: "兴趣发现",
+      daily_notes: "日常记忆",
     }
   : {
       profile: "Profile",
       preferences: "Preferences",
       projects: "Projects",
       workflows: "Workflows / SOP",
-      persistent: "Topics & Habits",
+      daily_notes: "Daily Notes",
     };
 
 const state = {
@@ -86,12 +56,16 @@ const state = {
   apiProvider: "openai_compat",
   apiBaseUrl: "https://api.deepseek.com/v1",
   apiModel: "deepseek-chat",
-  backendUrl: "http://127.0.0.1:8765",
+  backendUrl: "",
   keepUpdated: true,
   syncEnabled: false,
   realtimeUpdate: false,
+  detailedInjection: false,
   lastSyncAt: null,
   apiConnectionStatus: "",
+  pendingBackendCheckOnModalClose: false,
+  organizeJobState: null,
+  organizePollTimer: null,
   currentView: "home",
   currentSkillTab: "my",
   selectedSkillIds: new Set(),
@@ -99,18 +73,94 @@ const state = {
   selectedMemoryIds: new Set(),
   expandedCategories: new Set(),
   memoryItemsByCategory: {},
+  recommendedSkillItems: [],
   storagePath: "",
   categories: {
     profile: 0,
     preferences: 0,
     projects: 0,
     workflows: 0,
-    persistent: 0,
+    daily_notes: 0,
   },
   categoryLabels: { ...CATEGORY_LABELS },
   selectionListScrollTop: 0,
   selectionChipScrollLefts: {},
 };
+
+const DEFAULT_BACKEND_URL = "http://127.0.0.1:8765";
+
+function logPopupError(scope, error, extra = {}) {
+  const normalized = normalizeError(error, scope);
+  console.error(`[popup] ${scope}`, {
+    error: normalized,
+    message: normalized.message,
+    stack: normalized.stack || null,
+    rawError: error,
+    ...extra,
+  });
+}
+
+function normalizeError(error, fallback = "操作失败") {
+  if (error instanceof Error) return error;
+  if (typeof error === "string" && error.trim()) return new Error(error.trim());
+  if (Array.isArray(error)) {
+    const parts = error
+      .map(item => normalizeError(item, "").message)
+      .filter(Boolean);
+    return new Error(parts.length ? parts.join("；") : fallback);
+  }
+  if (error && typeof error === "object") {
+    if (typeof error.message === "string" && error.message.trim()) {
+      return new Error(error.message.trim());
+    }
+    if (typeof error.detail === "string" && error.detail.trim()) {
+      return new Error(error.detail.trim());
+    }
+    if (error.detail !== undefined) {
+      return normalizeError(error.detail, fallback);
+    }
+    if (Array.isArray(error.loc) && typeof error.msg === "string") {
+      const location = error.loc.map(part => String(part)).filter(Boolean).join(".");
+      return new Error(location ? `${location}: ${error.msg}` : error.msg);
+    }
+    try {
+      return new Error(JSON.stringify(error));
+    } catch {
+      return new Error(fallback);
+    }
+  }
+  return new Error(fallback);
+}
+
+function errorMessage(error, fallback = "操作失败") {
+  return normalizeError(error, fallback).message;
+}
+
+function isExpectedSettingsFailure(error) {
+  const message = errorMessage(error, "").trim();
+  if (!message) return false;
+  return (
+    message.includes("无法连接到本地后端") ||
+    message.includes("Failed to fetch") ||
+    message.includes("HTTP 4") ||
+    message.includes("HTTP 5") ||
+    message.includes("body.") ||
+    message.includes("api_key") ||
+    message.includes("backend_url")
+  );
+}
+
+window.addEventListener("error", event => {
+  logPopupError("Unhandled error", event.error || event.message, {
+    filename: event.filename,
+    lineno: event.lineno,
+    colno: event.colno,
+  });
+});
+
+window.addEventListener("unhandledrejection", event => {
+  logPopupError("Unhandled promise rejection", event.reason);
+});
 
 function openDB() {
   return new Promise((resolve, reject) => {
@@ -230,9 +280,14 @@ async function ensureDirPermission() {
 }
 
 async function pickDirectory() {
+  const previousDirName = state.dirHandle?.name || "";
   const handle = await window.showDirectoryPicker({ mode: "readwrite" });
   await dbSet(DIR_KEY, handle);
   state.dirHandle = handle;
+  const currentInput = document.getElementById("storageDirInput")?.value.trim() || "";
+  if (!state.storagePath || currentInput === previousDirName) {
+    state.storagePath = handle.name || "";
+  }
   renderDirectory();
   toast(`目录已设置：${handle.name}`);
 }
@@ -300,6 +355,56 @@ function toast(message, isError = false) {
   toastEl._timer = setTimeout(() => toastEl.classList.add("hidden"), 3200);
 }
 
+function buildBackendStartCommand(rawBackendUrl = "") {
+  let host = "127.0.0.1";
+  let port = "8765";
+  const value = String(rawBackendUrl || "").trim();
+  if (value) {
+    try {
+      const normalized = value.includes("://") ? value : `http://${value}`;
+      const url = new URL(normalized);
+      host = url.hostname || host;
+      if (url.port) {
+        port = url.port;
+      } else if (url.protocol === "https:") {
+        port = "443";
+      } else if (url.protocol === "http:") {
+        port = "80";
+      }
+    } catch {
+      // Keep fallback host/port when user input is not a parseable URL.
+    }
+  }
+  return [
+    "pip install -r backend_service/requirements.txt",
+    `uvicorn backend_service.app:app --host ${host} --port ${port} --reload`,
+  ].join("\n");
+}
+
+function showCommandModal(command = buildBackendStartCommand(state.backendUrl), options = {}) {
+  const modal = document.getElementById("commandModal");
+  const commandEl = document.getElementById("commandModalText");
+  commandEl.textContent = command;
+  state.pendingBackendCheckOnModalClose = !!options.checkBackendOnClose;
+  modal.classList.remove("hidden");
+  commandEl.focus();
+}
+
+async function closeCommandModal() {
+  document.getElementById("commandModal").classList.add("hidden");
+  if (!state.pendingBackendCheckOnModalClose) return;
+  state.pendingBackendCheckOnModalClose = false;
+  try {
+    await backendApi().getHealth(state.backendUrl);
+    toast("本地后端已在线");
+  } catch (err) {
+    toast("无法连接到本地后端", true);
+    logPopupError("Backend still offline after command modal close", err, {
+      backendUrl: state.backendUrl || DEFAULT_BACKEND_URL,
+    });
+  }
+}
+
 function setView(viewName) {
   state.currentView = viewName;
   for (const view of document.querySelectorAll(".view")) {
@@ -312,18 +417,18 @@ function renderSync() {
   const syncBtn = document.getElementById("syncBtn");
   const dot = document.getElementById("syncDot");
 
-  let statusText = "同步已暂停";
-  let hintText = "点击开启后，持续记录你与大模型的对话";
+  let statusText = "同步对话已暂停";
+  let hintText = "点击开启后，持续记录你与大模型的对话到本地";
 
   if (state.syncEnabled) {
     if (state.apiKeyConfigured && state.realtimeUpdate && state.keepUpdated) {
-      statusText = "同步中";
+      statusText = "同步对话中";
       hintText = "正在记录对话，并自动提取记忆";
     } else if (state.apiKeyConfigured) {
-      statusText = "记录中";
+      statusText = "同步对话中";
       hintText = "正在记录原始对话，可稍后在迁移页整理记忆";
     } else {
-      statusText = "记录中";
+      statusText = "同步对话中";
       hintText = "正在记录原始对话，尚未开启记忆提取";
     }
   }
@@ -352,8 +457,8 @@ function renderSettings() {
   const apiKeyStatus = document.getElementById("apiKeyStatus");
   apiKeyInput.value = state.apiKey;
   document.getElementById("backendUrlInput").value = state.backendUrl;
-  document.getElementById("keepUpdatedToggle").checked = state.keepUpdated;
   document.getElementById("realtimeUpdateToggle").checked = state.realtimeUpdate;
+  document.getElementById("detailedInjectionToggle").checked = state.detailedInjection;
   if (state.apiKey) {
     apiKeyInput.placeholder = "请输入 API Key";
   } else if (state.apiKeyConfigured) {
@@ -362,11 +467,11 @@ function renderSettings() {
     apiKeyInput.placeholder = "请输入 API Key";
   }
   if (!state.apiKey && !state.apiKeyConfigured) {
-    apiKeyStatus.textContent = "API 可调用：待配置";
+    apiKeyStatus.textContent = "API 调用：待配置";
   } else if (state.apiConnectionStatus) {
     apiKeyStatus.textContent = state.apiConnectionStatus;
   } else {
-    apiKeyStatus.textContent = "API 可调用：待验证";
+    apiKeyStatus.textContent = "API 调用：待验证";
   }
 }
 
@@ -397,7 +502,7 @@ function truncateText(text, maxLength = 56) {
 function localizeMemoryDescription(categoryId, description) {
   const raw = String(description || "").trim();
   if (!raw) return "";
-  if (categoryId === "persistent") {
+  if (categoryId === "daily_notes" || categoryId === "persistent") {
     return "";
   }
   return raw;
@@ -406,10 +511,10 @@ function localizeMemoryDescription(categoryId, description) {
 function buildSelectionPreview(categoryId, item) {
   const displayTitle = item?.display_title || item?.title || "";
   const displayDescription = item?.display_description ?? item?.description ?? "";
-  const title = truncateText(displayTitle, categoryId === "persistent" ? 44 : 30);
+  const title = truncateText(displayTitle, categoryId === "daily_notes" || categoryId === "persistent" ? 44 : 30);
   const description = truncateText(
     localizeMemoryDescription(categoryId, displayDescription),
-    categoryId === "persistent" ? 20 : 42
+    categoryId === "daily_notes" || categoryId === "persistent" ? 20 : 42
   );
   return { title, description };
 }
@@ -495,7 +600,7 @@ function renderSelectionList() {
     { id: "preferences", label: state.categoryLabels.preferences || CATEGORY_LABELS.preferences, count: state.categories.preferences },
     { id: "projects", label: state.categoryLabels.projects || CATEGORY_LABELS.projects, count: state.categories.projects },
     { id: "workflows", label: state.categoryLabels.workflows || CATEGORY_LABELS.workflows, count: state.categories.workflows },
-    { id: "persistent", label: state.categoryLabels.persistent || CATEGORY_LABELS.persistent, count: state.categories.persistent },
+    { id: "daily_notes", label: state.categoryLabels.daily_notes || CATEGORY_LABELS.daily_notes, count: state.categories.daily_notes },
   ];
 
   listEl.innerHTML = "";
@@ -630,7 +735,7 @@ function deriveMySkills(allData, pnData) {
       id: `persistent:${id}`,
       icon: "忆",
       title: node.description || node.key || id,
-      description: `${node.type || "memory"} · 由长期对话稳定提炼出的习惯与能力。`,
+      description: "由长期对话稳定提炼出的习惯与能力。",
     });
   });
 
@@ -639,7 +744,7 @@ function deriveMySkills(allData, pnData) {
       id: "skill:empty",
       icon: "空",
       title: "还没有提取出 Skill",
-      description: "我的 Skill 会从已整理的 memory 中自动提取。先开启同步或整理记忆，系统会逐步生成可复用的 Skill。",
+      description: "我的 Skill 会从已整理的记忆中自动提取。先开启同步或整理记忆，系统会逐步生成可复用的 Skill。",
       selectable: false,
     });
   }
@@ -660,7 +765,7 @@ function buildEmptySkillCard() {
     id: "skill:empty",
     icon: "空",
     title: "还没有提取出 Skill",
-    description: "我的 Skill 会从已整理的 memory 中自动提取。先开启同步或整理记忆，系统会逐步生成可复用的 Skill。",
+    description: "我的 Skill 会从已整理的记忆中自动提取。先开启同步或整理记忆，系统会逐步生成可复用的 Skill。",
     selectable: false,
   };
 }
@@ -861,6 +966,7 @@ function syncSkillSelection(skillId, checked) {
 }
 
 function renderRecommendedSkillItems(items, meta = null) {
+  state.recommendedSkillItems = Array.isArray(items) ? [...items] : [];
   renderRecommendedSkillMeta(meta);
   renderSkillList((items || []).slice(0, 3), state.selectedRecommendedIds, { showDelete: false });
   renderSkillActions();
@@ -879,13 +985,15 @@ async function refreshSummary() {
     state.categories.preferences = categories.categories.find(item => item.id === "preferences")?.count ?? 0;
     state.categories.projects = categories.categories.find(item => item.id === "projects")?.count ?? 0;
     state.categories.workflows = categories.categories.find(item => item.id === "workflows")?.count ?? 0;
-    state.categories.persistent = categories.categories.find(item => item.id === "persistent")?.count ?? 0;
+    const dailyNotesCategory = categories.categories.find(item => item.id === "daily_notes")
+      || categories.categories.find(item => item.id === "persistent");
+    state.categories.daily_notes = dailyNotesCategory?.count ?? 0;
     state.categoryLabels.profile = categories.categories.find(item => item.id === "profile")?.label || CATEGORY_LABELS.profile;
     state.categoryLabels.preferences = categories.categories.find(item => item.id === "preferences")?.label || CATEGORY_LABELS.preferences;
     state.categoryLabels.projects = categories.categories.find(item => item.id === "projects")?.label || CATEGORY_LABELS.projects;
     state.categoryLabels.workflows = categories.categories.find(item => item.id === "workflows")?.label || CATEGORY_LABELS.workflows;
-    state.categoryLabels.persistent = categories.categories.find(item => item.id === "persistent")?.label || CATEGORY_LABELS.persistent;
-    await Promise.all(["profile", "preferences", "projects", "workflows", "persistent"].map(category => ensureCategoryItems(category)));
+    state.categoryLabels.daily_notes = dailyNotesCategory?.label || CATEGORY_LABELS.daily_notes;
+    await Promise.all(["profile", "preferences", "projects", "workflows", "daily_notes"].map(category => ensureCategoryItems(category)));
     if (state.selectedMemoryIds.size === 0) {
       await initializeDefaultMemorySelection();
     }
@@ -920,7 +1028,7 @@ async function refreshSummary() {
   state.categories.preferences = allData["mw:preferences"] ? 1 : 0;
   state.categories.projects = projects.length;
   state.categories.workflows = workflows.length;
-  state.categories.persistent = Object.keys(pnData.nodes ?? {}).length;
+  state.categories.daily_notes = Object.keys(pnData.nodes ?? {}).length;
   renderSelectionList();
 
   const summary = {
@@ -931,7 +1039,7 @@ async function refreshSummary() {
       state.categories.preferences +
       state.categories.projects +
       state.categories.workflows +
-      state.categories.persistent +
+      state.categories.daily_notes +
       episodes.length,
   };
 
@@ -941,36 +1049,50 @@ async function refreshSummary() {
 }
 
 async function saveSettings(showToast = true) {
-  state.apiKey = document.getElementById("apiKeyInput").value.trim();
-  state.backendUrl = document.getElementById("backendUrlInput").value.trim() || "http://127.0.0.1:8765";
-  state.storagePath = document.getElementById("storageDirInput").value.trim();
-  await storageSet({
-    [STORAGE_KEYS.apiProvider]: state.apiProvider,
-    [STORAGE_KEYS.apiKey]: state.apiKey,
-    [STORAGE_KEYS.apiBaseUrl]: state.apiBaseUrl,
-    [STORAGE_KEYS.apiModel]: state.apiModel,
-    [STORAGE_KEYS.backendUrl]: state.backendUrl,
-  });
-  const backendSettings = await backendApi().saveSettings(state.backendUrl, {
-    api_provider: state.apiProvider,
-    api_key: state.apiKey,
-    api_base_url: state.apiBaseUrl,
-    api_model: state.apiModel,
-    storage_path: state.storagePath,
-    keep_updated: state.syncEnabled,
-    realtime_update: state.realtimeUpdate,
-    backend_url: state.backendUrl,
-  });
-  state.apiKeyConfigured = backendSettings.api_key_configured;
-  state.apiProvider = backendSettings.api_provider || state.apiProvider;
-  state.apiBaseUrl = backendSettings.api_base_url || state.apiBaseUrl;
-  state.apiModel = backendSettings.api_model || state.apiModel;
-  state.storagePath = backendSettings.storage_path || state.storagePath;
-  renderSettings();
-  renderSync();
-  renderActionAvailability();
-  if (showToast) {
-    toast("设置已保存到本地后端");
+  try {
+    const backendUrlInput = document.getElementById("backendUrlInput");
+    const rawBackendUrl = backendUrlInput.value.trim();
+    state.apiKey = document.getElementById("apiKeyInput").value.trim();
+    state.backendUrl = rawBackendUrl;
+    state.storagePath = document.getElementById("storageDirInput").value.trim();
+    await storageSet({
+      [STORAGE_KEYS.apiProvider]: state.apiProvider,
+      [STORAGE_KEYS.apiKey]: state.apiKey,
+      [STORAGE_KEYS.apiBaseUrl]: state.apiBaseUrl,
+      [STORAGE_KEYS.apiModel]: state.apiModel,
+      [STORAGE_KEYS.backendUrl]: state.backendUrl,
+      [STORAGE_KEYS.storagePath]: state.storagePath,
+      [STORAGE_KEYS.detailedInjection]: state.detailedInjection,
+    });
+    const backendSettings = await backendApi().saveSettings(state.backendUrl, {
+      api_provider: state.apiProvider,
+      api_key: state.apiKey,
+      api_base_url: state.apiBaseUrl,
+      api_model: state.apiModel,
+      storage_path: state.storagePath,
+      keep_updated: state.syncEnabled,
+      realtime_update: state.realtimeUpdate,
+      detailed_injection: state.detailedInjection,
+      backend_url: state.backendUrl,
+    });
+    state.apiKeyConfigured = backendSettings.api_key_configured;
+    state.apiProvider = backendSettings.api_provider || state.apiProvider;
+    state.apiBaseUrl = backendSettings.api_base_url || state.apiBaseUrl;
+    state.apiModel = backendSettings.api_model || state.apiModel;
+    state.storagePath = backendSettings.storage_path || state.storagePath;
+    state.detailedInjection = !!backendSettings.detailed_injection;
+    renderDirectory();
+    renderSettings();
+    renderSync();
+    renderActionAvailability();
+    if (showToast) {
+      toast("设置已保存到本地后端");
+    }
+    if (showToast) {
+      showCommandModal(buildBackendStartCommand(state.backendUrl));
+    }
+  } catch (error) {
+    throw normalizeError(error, "保存设置失败");
   }
 }
 
@@ -990,14 +1112,14 @@ async function testConnection() {
     if (!result.ok) {
       throw new Error(result.message || "当前默认配置不匹配这把 key");
     }
-    state.apiConnectionStatus = "API 可调用";
+    state.apiConnectionStatus = "API 调用：可用";
     await saveSettings(false);
     renderSettings();
-    toast("API 可调用，设置已保存");
+    toast("API 调用可用，设置已保存");
   } catch (err) {
     try {
       await backendApi().getHealth(state.backendUrl);
-      state.apiConnectionStatus = `API 不可调用：${err.message}`;
+      state.apiConnectionStatus = `API 调用：不可用（${err.message}）`;
       renderSettings();
       toast(`本地后端在线，但 ${err.message}`, true);
     } catch {
@@ -1030,19 +1152,15 @@ async function toggleSync() {
   await refreshSummary();
   if (state.syncEnabled) {
     if (state.apiKeyConfigured && state.realtimeUpdate && state.keepUpdated) {
-      toast("同步已开启，将自动增量更新记忆");
+      toast("同步对话已开启，将自动增量更新记忆");
     } else if (state.apiKeyConfigured) {
       toast("记录已开启，可稍后在迁移页整理记忆");
     } else {
       toast("记录已开启，当前仅保存原始对话");
     }
   } else {
-    toast("同步已暂停");
+      toast("同步对话已暂停");
   }
-}
-
-function syncPolicyHint() {
-  toast("同步策略已更新。已打开的会话页可能需要刷新，或重新开启同步后生效。");
 }
 
 async function runOrganize() {
@@ -1057,46 +1175,142 @@ async function runOrganize() {
   setOrganizeStatus(true, "正在整理记忆...", "准备开始");
 
   try {
-    toast("正在整理记忆...");
+    if (state.organizeJobState?.status === "running") {
+      toast("整理任务已在后台进行中");
+      startOrganizeStatePolling();
+      return;
+    }
+    toast("已开始整理记忆，后台会继续运行");
     const response = await backendApi().organizeMemory(state.backendUrl);
-    const jobId = response.job_id;
-    if (jobId) {
-      let job;
-      while (true) {
-        job = await backendApi().getJob(state.backendUrl, jobId);
-        const progress = job.progress || {};
-        setOrganizeStatus(
-          true,
-          progress.message || "正在整理记忆...",
-          typeof progress.current === "number" && typeof progress.total === "number"
-            ? `${progress.current} / ${progress.total}`
-            : "处理中"
-        );
-        if (job.status === "completed") break;
-        if (job.status === "failed") throw new Error(job.error || "整理失败");
-        await sleep(900);
-      }
-      const built = job.result?.episodes ?? 0;
-      const updatedEpisodes = job.result?.updated_episodes ?? 0;
-      const projects = job.result?.projects ?? 0;
-      const workflows = job.result?.workflows ?? 0;
-      const memorySummary = [`episodes ${built}`, `updated ${updatedEpisodes}`, `projects ${projects}`, `workflows ${workflows}`]
-        .join(" · ");
-      toast(`整理完成：${memorySummary}`);
+    if (response.job_id) {
+      state.organizeJobState = {
+        jobId: response.job_id,
+        status: "running",
+        message: "正在整理记忆...",
+        current: null,
+        total: null,
+        error: "",
+        acknowledgedAt: "",
+        updatedAt: new Date().toISOString(),
+      };
+      await storageSet({ [STORAGE_KEYS.organizeJobState]: state.organizeJobState });
+      await applyOrganizeState();
+      startOrganizeStatePolling();
     } else {
       toast("整理完成，记忆已更新");
+      setOrganizeStatus(false);
+      organizeBtn.disabled = false;
+      organizeBtn.style.opacity = "";
     }
-    state.lastSyncAt = new Date().toISOString();
-    state.memoryItemsByCategory = {};
-    await storageSet({ [STORAGE_KEYS.lastSyncAt]: state.lastSyncAt });
-    await refreshSummary();
   } catch (err) {
+    logPopupError("Organize memory failed", err, {
+      backendUrl: state.backendUrl,
+    });
     toast(`整理失败：${err.message}`, true);
-  } finally {
     setOrganizeStatus(false);
     organizeBtn.disabled = false;
     organizeBtn.style.opacity = "";
   }
+}
+
+async function syncOrganizeStateFromStorage() {
+  const stored = await storageGet(STORAGE_KEYS.organizeJobState);
+  state.organizeJobState = stored[STORAGE_KEYS.organizeJobState] || null;
+  return state.organizeJobState;
+}
+
+function stopOrganizeStatePolling() {
+  if (!state.organizePollTimer) return;
+  clearInterval(state.organizePollTimer);
+  state.organizePollTimer = null;
+}
+
+async function applyOrganizeState() {
+  const organizeBtn = document.getElementById("organizeBtn");
+  const jobState = state.organizeJobState;
+  if (!jobState || !jobState.jobId) {
+    setOrganizeStatus(false);
+    if (organizeBtn) {
+      organizeBtn.disabled = false;
+      organizeBtn.style.opacity = "";
+    }
+    stopOrganizeStatePolling();
+    return;
+  }
+
+  if (jobState.status === "running") {
+    setOrganizeStatus(
+      true,
+      jobState.message || "正在整理记忆...",
+      typeof jobState.current === "number" && typeof jobState.total === "number"
+        ? `${jobState.current} / ${jobState.total}`
+        : "处理中"
+    );
+    if (organizeBtn) {
+      organizeBtn.disabled = true;
+      organizeBtn.style.opacity = "0.65";
+    }
+    return;
+  }
+
+  stopOrganizeStatePolling();
+  setOrganizeStatus(false);
+  if (organizeBtn) {
+    organizeBtn.disabled = false;
+    organizeBtn.style.opacity = "";
+  }
+
+  if (jobState.status === "completed" && !jobState.acknowledgedAt) {
+    const built = jobState.result?.episodes ?? 0;
+    const updatedEpisodes = jobState.result?.updated_episodes ?? 0;
+    const projects = jobState.result?.projects ?? 0;
+    const workflows = jobState.result?.workflows ?? 0;
+    const memorySummary = [`episodes ${built}`, `updated ${updatedEpisodes}`, `projects ${projects}`, `workflows ${workflows}`]
+      .join(" · ");
+    toast(`整理完成：${memorySummary}`);
+    state.lastSyncAt = new Date().toISOString();
+    state.memoryItemsByCategory = {};
+    state.organizeJobState = { ...jobState, acknowledgedAt: new Date().toISOString() };
+    await storageSet({
+      [STORAGE_KEYS.lastSyncAt]: state.lastSyncAt,
+      [STORAGE_KEYS.organizeJobState]: state.organizeJobState,
+    });
+    await refreshSummary();
+    return;
+  }
+
+  if (jobState.status === "failed" && !jobState.acknowledgedAt) {
+    toast(`整理失败：${jobState.error || "整理失败"}`, true);
+    state.organizeJobState = { ...jobState, acknowledgedAt: new Date().toISOString() };
+    await storageSet({ [STORAGE_KEYS.organizeJobState]: state.organizeJobState });
+  }
+}
+
+function startOrganizeStatePolling() {
+  stopOrganizeStatePolling();
+  state.organizePollTimer = setInterval(() => {
+    backendApi().getJob(state.backendUrl, state.organizeJobState?.jobId || "")
+      .then(async job => {
+        state.organizeJobState = {
+          ...(state.organizeJobState || {}),
+          jobId: job.id,
+          status: job.status,
+          message: job.progress?.message || "正在整理记忆...",
+          current: typeof job.progress?.current === "number" ? job.progress.current : null,
+          total: typeof job.progress?.total === "number" ? job.progress.total : null,
+          error: job.error || "",
+          result: job.result || null,
+          updatedAt: new Date().toISOString(),
+        };
+        await storageSet({ [STORAGE_KEYS.organizeJobState]: state.organizeJobState });
+        await applyOrganizeState();
+      })
+      .catch(err => {
+        logPopupError("Sync organize job state failed", err, {
+          jobId: state.organizeJobState?.jobId,
+        });
+      });
+  }, 900);
 }
 
 async function syncStorageToFiles() {
@@ -1180,18 +1394,18 @@ async function buildMemoryPackage() {
   if (selectedPrefixes.has("workflow")) {
     packageData.data.workflows = allData["mw:workflows"] ?? [];
   }
-  if (selectedPrefixes.has("persistent")) {
+  if (selectedPrefixes.has("daily_notes") || selectedPrefixes.has("persistent")) {
     const pnData = await readPersistentNodes();
     const selectedNodeIds = new Set(
       selectedIds
-        .filter(id => id.startsWith("persistent:"))
+        .filter(id => id.startsWith("daily_notes:") || id.startsWith("persistent:"))
         .map(id => id.split(":").slice(1).join(":"))
     );
-    packageData.data.persistent = Object.entries(pnData.nodes ?? {})
+    packageData.data.daily_notes = Object.entries(pnData.nodes ?? {})
       .filter(([id]) => selectedNodeIds.size === 0 || selectedNodeIds.has(id))
       .map(([id, node]) => ({ id, ...node }));
 
-    const episodeIds = new Set(packageData.data.persistent.flatMap(node => node.episode_refs ?? []));
+    const episodeIds = new Set(packageData.data.daily_notes.flatMap(node => node.episode_refs ?? []));
     packageData.data.episodic_evidence = [];
     for (const epId of episodeIds) {
       const episode = await loadEpisodeById(epId);
@@ -1397,6 +1611,7 @@ async function injectPackage() {
     const result = await backendApi().injectPackage(state.backendUrl, {
       selected_ids: selectedIds,
       target_platform: "chatgpt",
+      detailed_injection: state.detailedInjection,
     });
     const injection = await injectTextIntoTab(result.text || "");
     if (injection?.fallback === "clipboard") {
@@ -1523,7 +1738,7 @@ async function exportSkills() {
       mySkills.forEach(skill => {
         if (state.selectedSkillIds.has(skill.id)) selected.push(skill);
       });
-      recommendedSkills.forEach(skill => {
+      state.recommendedSkillItems.forEach(skill => {
         if (state.selectedRecommendedIds.has(skill.id)) selected.push(skill);
       });
       if (selected.length === 0) throw new Error("请至少选择一个 Skill");
@@ -1575,7 +1790,7 @@ async function injectSkills() {
       mySkills.forEach(skill => {
         if (state.selectedSkillIds.has(skill.id)) selected.push(skill);
       });
-      recommendedSkills.forEach(skill => {
+      state.recommendedSkillItems.forEach(skill => {
         if (state.selectedRecommendedIds.has(skill.id)) selected.push(skill);
       });
 
@@ -1602,18 +1817,44 @@ async function clearCache() {
   toast("临时缓存已清理");
 }
 
-async function ensureSyncStartsPaused() {
-  state.syncEnabled = false;
-  await storageSet({ [STORAGE_KEYS.keepUpdated]: false });
-  try {
-    await backendApi().toggleSync(state.backendUrl, { enabled: false });
-  } catch {
-    // Keep local paused state when backend is temporarily unavailable.
+async function clearAllMemoryFiles() {
+  const confirmed = window.confirm(
+    "这会删除已保存的对话和记忆文件，但保留当前设置。确定继续吗？",
+  );
+  if (!confirmed) return;
+
+  await backendApi().clearCache(state.backendUrl, { scope: "all_memory" });
+
+  const allData = await storageGet(null);
+  const removableKeys = Object.keys(allData).filter(key => (
+    key.startsWith("mw:")
+    || key.startsWith("chat:")
+    || key === "_raw_progress"
+    || key === "_sw_keepalive"
+    || key === "pending_flush"
+  ));
+  if (removableKeys.length) {
+    await new Promise(resolve => chrome.storage.local.remove(removableKeys, resolve));
   }
-  await broadcastCaptureToggle(false);
+
+  state.selectedMemoryIds.clear();
+  state.expandedCategories.clear();
+  state.memoryItemsByCategory = {};
+  state.organizeJobState = null;
+  await storageSet({ [STORAGE_KEYS.organizeJobState]: null });
+  await refreshSummary();
+  renderSettings();
+  renderActionAvailability();
+  toast("所有记忆文件已清理");
 }
 
 function bindEvents() {
+  const clearCacheBtn = document.getElementById("clearCacheBtn");
+  const clearAllMemoryBtn = document.getElementById("clearAllMemoryBtn");
+  if (clearCacheBtn && clearAllMemoryBtn && clearCacheBtn.parentElement === clearAllMemoryBtn.parentElement) {
+    clearCacheBtn.insertAdjacentElement("afterend", clearAllMemoryBtn);
+  }
+
   document.getElementById("menuBtn").addEventListener("click", () => setView("settings"));
   document.getElementById("gotoMigrateBtn").addEventListener("click", () => setView("migrate"));
   document.getElementById("gotoSettingsBtn").addEventListener("click", () => setView("settings"));
@@ -1635,24 +1876,41 @@ function bindEvents() {
   });
 
   document.getElementById("syncBtn").addEventListener("click", toggleSync);
-  document.getElementById("selectDirBtn").addEventListener("click", async () => {
-    try {
-      await pickDirectory();
-    } catch (err) {
-      if (err.name !== "AbortError") toast(`选择目录失败：${err.message}`, true);
-    }
+  document.getElementById("selectDirBtn").addEventListener("click", () => {
+    saveSettings(false).then(() => {
+      toast("本地目录已保存");
+    }).catch(err => {
+      if (!isExpectedSettingsFailure(err)) {
+        logPopupError("Save storage path failed", err, { backendUrl: state.backendUrl || DEFAULT_BACKEND_URL });
+      }
+      toast(`保存失败：${errorMessage(err, "无法保存本地目录")}`, true);
+    });
   });
 
-  document.getElementById("saveSettingsBtn").addEventListener("click", saveSettings);
+  document.getElementById("saveSettingsBtn").addEventListener("click", () => {
+    saveSettings().catch(err => {
+      if (!isExpectedSettingsFailure(err)) {
+        logPopupError("Save settings failed", err, { backendUrl: state.backendUrl || DEFAULT_BACKEND_URL });
+      }
+      toast(`保存失败：${errorMessage(err, "无法连接本地后端")}`, true);
+      showCommandModal(buildBackendStartCommand(
+        document.getElementById("backendUrlInput")?.value.trim() || state.backendUrl,
+      ), { checkBackendOnClose: true });
+    });
+  });
   document.getElementById("testConnectionBtn").addEventListener("click", testConnection);
-
-  document.getElementById("keepUpdatedToggle").addEventListener("change", async event => {
-    state.keepUpdated = event.target.checked;
-    await storageSet({ [STORAGE_KEYS.keepUpdatedStrategy]: state.keepUpdated });
-    renderSettings();
-    renderSync();
-    renderActionAvailability();
-    syncPolicyHint();
+  document.getElementById("closeCommandModalBtn").addEventListener("click", () => {
+    closeCommandModal().catch(err => logPopupError("Close command modal failed", err));
+  });
+  document.getElementById("commandModal").addEventListener("click", event => {
+    if (event.target.id === "commandModal") {
+      closeCommandModal().catch(err => logPopupError("Close command modal failed", err));
+    }
+  });
+  document.addEventListener("keydown", event => {
+    if (event.key === "Escape") {
+      closeCommandModal().catch(err => logPopupError("Close command modal failed", err));
+    }
   });
 
   document.getElementById("realtimeUpdateToggle").addEventListener("change", async event => {
@@ -1667,11 +1925,13 @@ function bindEvents() {
         storage_path: state.storagePath,
         keep_updated: state.syncEnabled,
         realtime_update: state.realtimeUpdate,
+        detailed_injection: state.detailedInjection,
         backend_url: state.backendUrl,
       });
       state.apiKeyConfigured = backendSettings.api_key_configured;
       state.syncEnabled = backendSettings.keep_updated;
       state.realtimeUpdate = backendSettings.realtime_update;
+      state.detailedInjection = !!backendSettings.detailed_injection;
     } catch {
       // Keep local change when backend is offline.
     }
@@ -1685,6 +1945,32 @@ function bindEvents() {
     } else {
       toast("同步记忆已关闭。新对话可稍后手动整理。");
     }
+  });
+
+  document.getElementById("detailedInjectionToggle").addEventListener("change", async event => {
+    state.detailedInjection = event.target.checked;
+    await storageSet({ [STORAGE_KEYS.detailedInjection]: state.detailedInjection });
+    try {
+      const backendSettings = await backendApi().saveSettings(state.backendUrl, {
+        api_provider: state.apiProvider,
+        api_key: state.apiKey,
+        api_base_url: state.apiBaseUrl,
+        api_model: state.apiModel,
+        storage_path: state.storagePath,
+        keep_updated: state.syncEnabled,
+        realtime_update: state.realtimeUpdate,
+        detailed_injection: state.detailedInjection,
+        backend_url: state.backendUrl,
+      });
+      state.apiKeyConfigured = backendSettings.api_key_configured;
+      state.syncEnabled = backendSettings.keep_updated;
+      state.realtimeUpdate = backendSettings.realtime_update;
+      state.detailedInjection = !!backendSettings.detailed_injection;
+    } catch {
+      // Keep local change when backend is offline.
+    }
+    renderSettings();
+    toast(state.detailedInjection ? "详细注入已开启" : "详细注入已关闭");
   });
 
   document.getElementById("organizeBtn").addEventListener("click", runOrganize);
@@ -1718,8 +2004,10 @@ function bindEvents() {
       .then(result => {
         renderRecommendedSkillItems(result.items || [], result.meta || null);
       })
-      .catch(() => {
-        renderRecommendedSkillItems(recommendedSkills, null);
+      .catch(err => {
+        logPopupError("Load recommended skills failed", err, { backendUrl: state.backendUrl || DEFAULT_BACKEND_URL });
+        renderRecommendedSkillItems([], null);
+        toast(`加载推荐 Skill 失败：${errorMessage(err, "请检查本地后端")}`, true);
       });
   });
 
@@ -1753,6 +2041,11 @@ function bindEvents() {
   });
 
   document.getElementById("clearCacheBtn").addEventListener("click", clearCache);
+  document.getElementById("clearAllMemoryBtn").addEventListener("click", () => {
+    clearAllMemoryFiles().catch(err => {
+      toast(`清理失败：${errorMessage(err, "无法清理所有记忆文件")}`, true);
+    });
+  });
 }
 
 async function init() {
@@ -1767,8 +2060,10 @@ async function init() {
     STORAGE_KEYS.keepUpdated,
     STORAGE_KEYS.keepUpdatedStrategy,
     STORAGE_KEYS.realtimeUpdate,
+    STORAGE_KEYS.detailedInjection,
     STORAGE_KEYS.lastSyncAt,
     STORAGE_KEYS.savedSkills,
+    STORAGE_KEYS.organizeJobState,
   ]);
 
   state.apiProvider = settings[STORAGE_KEYS.apiProvider] || state.apiProvider;
@@ -1777,10 +2072,14 @@ async function init() {
   state.apiBaseUrl = settings[STORAGE_KEYS.apiBaseUrl] || state.apiBaseUrl;
   state.apiModel = settings[STORAGE_KEYS.apiModel] || state.apiModel;
   state.backendUrl = settings[STORAGE_KEYS.backendUrl] || state.backendUrl;
-  state.syncEnabled = !!settings[STORAGE_KEYS.keepUpdated];
-  state.keepUpdated = settings[STORAGE_KEYS.keepUpdatedStrategy] ?? true;
+  const hasStoredSyncPreference = typeof settings[STORAGE_KEYS.keepUpdated] === "boolean";
+  state.syncEnabled = hasStoredSyncPreference ? !!settings[STORAGE_KEYS.keepUpdated] : false;
+  state.keepUpdated = true;
   state.realtimeUpdate = !!settings[STORAGE_KEYS.realtimeUpdate];
+  state.detailedInjection = !!settings[STORAGE_KEYS.detailedInjection];
+  state.storagePath = settings[STORAGE_KEYS.storagePath] || state.storagePath;
   state.lastSyncAt = settings[STORAGE_KEYS.lastSyncAt] || null;
+  state.organizeJobState = settings[STORAGE_KEYS.organizeJobState] || null;
   state.dirHandle = await loadSavedDir();
   const savedSkillIds = settings[STORAGE_KEYS.savedSkills] || [];
   state.selectedSkillIds = new Set(savedSkillIds);
@@ -1788,7 +2087,6 @@ async function init() {
 
   try {
     const backendSettings = await backendApi().getSettings(state.backendUrl);
-    state.syncEnabled = backendSettings.keep_updated;
     state.realtimeUpdate = backendSettings.realtime_update;
     state.lastSyncAt = backendSettings.last_sync_at || state.lastSyncAt;
     state.storagePath = backendSettings.storage_path || state.storagePath;
@@ -1796,11 +2094,25 @@ async function init() {
     state.apiProvider = backendSettings.api_provider || state.apiProvider;
     state.apiBaseUrl = backendSettings.api_base_url || state.apiBaseUrl;
     state.apiModel = backendSettings.api_model || state.apiModel;
+    state.detailedInjection = !!backendSettings.detailed_injection;
   } catch {
     // Keep extension-local settings when backend is offline.
   }
 
-  await ensureSyncStartsPaused();
+  if (!hasStoredSyncPreference) {
+    state.syncEnabled = false;
+    await storageSet({ [STORAGE_KEYS.keepUpdated]: false });
+    try {
+      await backendApi().toggleSync(state.backendUrl, { enabled: false });
+    } catch {
+      // Ignore backend toggle failures during first-run initialization.
+    }
+    try {
+      await broadcastCaptureToggle(false);
+    } catch {
+      // Ignore content-script toggle failures during first-run initialization.
+    }
+  }
 
   bindEvents();
   renderDirectory();
@@ -1810,6 +2122,10 @@ async function init() {
   await refreshSummary();
   await initializeDefaultMemorySelection();
   renderSelectionList();
+  await applyOrganizeState();
+  if (state.organizeJobState?.status === "running") {
+    startOrganizeStatePolling();
+  }
 
   try {
     const result = await backendApi().getMySkills(state.backendUrl);
@@ -1823,6 +2139,6 @@ async function init() {
 }
 
 init().catch(err => {
-  console.error("[popup] init failed:", err);
+  logPopupError("Init failed", err);
   toast(`初始化失败：${err.message}`, true);
 });

@@ -1,0 +1,31 @@
+{
+  "id": "rec:anthropic_skills:Claude_应用开发",
+  "icon": "C",
+  "tags": [
+    "general"
+  ],
+  "keywords": [
+    "claude",
+    "helps",
+    "build",
+    "llm-powered",
+    "applications",
+    "choose",
+    "right",
+    "surface",
+    "based",
+    "needs",
+    "detect",
+    "project"
+  ],
+  "persona_signals": [
+    "claude",
+    "helps",
+    "build",
+    "llm-powered",
+    "applications",
+    "choose"
+  ],
+  "usage_score": 0.96,
+  "source": "anthropic_skills:claude-api"
+}

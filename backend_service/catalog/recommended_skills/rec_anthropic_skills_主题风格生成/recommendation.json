@@ -1,0 +1,30 @@
+{
+  "id": "rec:anthropic_skills:主题风格生成",
+  "icon": "主",
+  "tags": [
+    "general"
+  ],
+  "keywords": [
+    "apply",
+    "consistent",
+    "professional",
+    "styling",
+    "presentation",
+    "slide",
+    "decks",
+    "use",
+    "each",
+    "theme",
+    "includes"
+  ],
+  "persona_signals": [
+    "apply",
+    "consistent",
+    "professional",
+    "styling",
+    "presentation",
+    "slide"
+  ],
+  "usage_score": 0.96,
+  "source": "anthropic_skills:theme-factory"
+}
