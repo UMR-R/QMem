@@ -1,135 +1,143 @@
-# 可迁移个人记忆层 - 架构定义 v1.2
+# Portable Personal Memory Layer - Architecture Definition v1.3
 
-## 核心概念
+## Core Layers
 
-本系统将个人记忆分为两层：
+The system separates memory into evidence and persistent knowledge.
 
-### Episodic（情节记忆）
+### L0 Raw Conversations
 
-单次对话的结构化记录，保留具体上下文、讨论内容、结论以及时间信息。
+Raw conversations are the canonical source evidence captured from chat UIs or platform exports.
 
-- 不做跨会话归纳，只描述“这次对话发生了什么”
-- 作为 Persistent 层的原始证据来源
-- 必须保留该次对话的时间信息
-- 每条 episodic 有唯一 ID，格式为 `ep_XXXX`
+- `RawChatSession` groups turns from one conversation/session and usually maps to one JSON file.
+- `RawChatTurn` is the minimum raw evidence unit.
+- A turn contains one user side, one assistant side when available, and one shared timestamp.
+- If one side is missing, preserve the turn with a status marker instead of silently dropping it.
 
-### Persistent（持久记忆）
+### L1 Platform Memory Signals
 
-从多条 Episodic 中提炼出的跨会话稳定规律。
+Platform-provided memory or configuration signals, such as:
 
-- 表示用户长期稳定的偏好、背景、工作流和主题
-- 必须带有证据链 `episode_refs`
-- 必须带有置信度 `confidence`
-- 必须带有更新时间戳 `updated_at`
-- 每条 persistent 节点有唯一 ID，格式为 `pn_XXXX`
+- saved memory
+- custom instructions
+- agent/GPT config
+- platform skills
+- profile/preferences exposed by the platform
 
-## Episodic 记忆 Schema
+L1 is not the project's canonical persistent store. It is an input signal.
+
+### L2 Episodic Memory
+
+Episode memory is turn-level structured evidence distilled from L0.
+
+- One episode describes exactly one raw turn.
+- It preserves what happened in that turn: task, context, decisions, open issues, and relation flags.
+- It keeps source references back to raw session/turn ids.
+- Timestamps are maintained from source metadata by the system, not invented by the model.
+- Episodes can connect to neighboring turns and to other directly related episodes.
+
+### L2 Persistent Memory
+
+Persistent memory is stable knowledge distilled from episodes and L1 signals.
+
+- It represents user profile, preferences, projects, workflows, daily notes, and skills.
+- It must keep evidence links back to episodes or raw turns.
+- It must keep confidence and export priority.
+- It is the canonical memory store for export, display, and index generation.
+
+### L3 Policy / Governance
+
+L3 defines how memory is validated, linked, merged, split, exported, and indexed.
+
+- It governs cross-episode connection validation.
+- It prevents accidental mega-groups caused by weak transitive links.
+- It decides when a memory should remain episodic versus become persistent.
+- It controls derived external indexes such as ChromaDB.
+
+## Raw Turn Schema
+
+```json
+{
+  "turn_id": "conversation_id:turn:0",
+  "session_id": "conversation_id",
+  "timestamp": "2026-04-24T12:00:00Z",
+  "user_text": "",
+  "assistant_text": "",
+  "status": "complete | missing_user | missing_assistant"
+}
+```
+
+## Episode Schema
 
 ```json
 {
   "episode_id": "ep_0001",
-  "title": "本次对话标题",
-  "topics_covered": ["主题1", "主题2"],
-  "summary": "本次对话的摘要",
-  "key_decisions": ["决策1"],
-  "open_issues": ["待解决问题1"],
+  "session_id": "conversation_id",
+  "turn_refs": ["conversation_id:turn:0"],
+  "title": "episode title",
+  "topics_covered": ["topic"],
+  "summary": "turn-level summary",
+  "key_decisions": ["decision explicitly made in this turn"],
+  "open_issues": ["unresolved issue"],
   "relates_to_profile": true,
   "relates_to_preferences": false,
-  "relates_to_projects": ["项目A"],
-  "relates_to_workflows": ["工作流A"],
-  "time_range_start": "日期字符串，例如 2026-04-24",
-  "time_range_end": "日期字符串，例如 2026-04-24",
-  "created_at": "日期字符串，例如 2026-04-24",
-  "updated_at": "日期字符串，例如 2026-04-24"
+  "relates_to_projects": ["parent project"],
+  "relates_to_workflows": ["workflow"],
+  "time_range_start": "2026-04-24",
+  "time_range_end": "2026-04-24",
+  "created_at": "2026-04-24",
+  "updated_at": "2026-04-24"
 }
 ```
 
-## Episodic 时间字段说明
+## Episode Time Rules
 
-| 字段 | 含义 |
-|---|---|
-| `time_range_start` | 该次对话开始时间，优先使用原始会话时间 |
-| `time_range_end` | 该次对话结束时间，优先使用原始会话时间 |
-| `created_at` | 该 episodic 对应的原始会话起始时间，不是整理时间 |
-| `updated_at` | 该 episodic 对应的原始会话结束时间；如果没有结束时间，则退回开始时间 |
+- Episode time comes from the raw turn timestamp.
+- If only one timestamp exists, use it for start/end and created/updated.
+- Use event order when timestamps are missing.
+- The model should use time/order to understand "current", "previous", "before", "after", "latest", and "old", but the system writes the actual time fields.
 
-## Episodic 时间规则
-
-- `time_range_start` 和 `time_range_end` 应尽量保留原始对话时间
-- `created_at` 和 `updated_at` 应反映原始会话发生时间，而不是后处理或整理记忆的时间
-- 如果只有单一时间点，则：
-  - `time_range_start = time_range_end`
-  - `created_at = updated_at`
-- 时间格式统一到日期级，使用 `YYYY-MM-DD`，例如：
-  - `2026-04-24`
-
-## Persistent 节点 Schema
+## Persistent Node Schema
 
 ```json
 {
-  "type": "preference | profile | workflow | topic",
-  "key": "snake_case，全局唯一",
-  "description": "一句中文规律描述，不超过 50 字",
+  "type": "preference | profile | workflow | topic | daily_note | skill",
+  "key": "global_snake_case_key",
+  "description": "stable memory description",
   "episode_refs": ["ep_0001", "ep_0002"],
+  "turn_refs": ["conversation_id:turn:0"],
   "confidence": "low | medium | high",
   "export_priority": "low | medium | high",
-  "platform": ["来源平台"],
-  "updated_at": "日期字符串，例如 2026-04-24"
+  "platform": ["source platform"],
+  "updated_at": "2026-04-24"
 }
 ```
 
-## Persistent 字段说明
+## Persistent Type Boundaries
 
-| 字段 | 含义 |
+| type | Meaning |
 |---|---|
-| `type` | 节点类型 |
-| `key` | 节点的稳定唯一标识，必须使用 `snake_case` |
-| `description` | 对规律本身的概括，不写成具体事件 |
-| `episode_refs` | 支撑该节点的 episodic 证据 ID 列表 |
-| `confidence` | 节点置信度，必须与 `episode_refs` 数量一致 |
-| `export_priority` | 导出到别的平台时的优先级 |
-| `platform` | 该节点证据涉及的平台来源 |
-| `updated_at` | 该节点最近一次被创建、更新或合并的时间戳 |
+| `profile` | Stable identity, role, background, language mode, and long-term domain context |
+| `preference` | Stable response style, terminology, formatting, language, revision, and interaction preferences |
+| `topic` | Long-running project theme, research/product direction, or durable interest |
+| `workflow` | Reusable procedure with trigger and ordered steps |
+| `daily_note` | Reusable non-project daily context, personal choice context, taste, lifestyle, or small useful facts |
+| `skill` | Saved or recommended Skill asset that the user explicitly wants to keep or reuse |
 
-## Type 说明
+## Confidence Rules
 
-| type | 含义 |
+| supporting evidence | confidence |
 |---|---|
-| `preference` | 用户稳定的偏好与约束，例如格式、风格、禁忌表达 |
-| `profile` | 用户身份与背景，例如角色、领域、语言背景 |
-| `workflow` | 用户反复使用的工作流、步骤模板或操作模式 |
-| `topic` | 用户长期关注的主题、项目方向或任务类型 |
+| one weak/one-off signal | `low` |
+| two to three consistent signals | `medium` |
+| four or more consistent signals, or explicit platform saved memory | `high` |
 
-## Confidence 规则
+Confidence should match evidence strength and should not be inflated by assistant-only suggestions.
 
-| `episode_refs` 数量 | `confidence` |
-|---|---|
-| 1 | `low` |
-| 2-3 | `medium` |
-| 4 及以上 | `high` |
+## External Index Rule
 
-`confidence` 必须随着 `episode_refs` 增长而升级，不能手动越级设为 `high`。
+External databases such as ChromaDB are derived indexes.
 
-## Persistent updated_at 规则
-
-- `updated_at` 是每个 persistent 节点的必填字段
-- 创建新节点时，`updated_at` 设为当前时间
-- 节点被新证据更新时，`updated_at` 必须刷新为当前时间
-- 节点发生合并时，保留节点的 `updated_at` 也必须刷新为当前时间
-- 时间格式统一到日期级，使用 `YYYY-MM-DD`，例如：
-  - `2026-04-24`
-
-## Description 质量标准
-
-正确示例：
-
-- 用户写作时不使用破折号
-- 用户偏好简洁直接的回答
-- 用户在论文修改任务中偏好先给结论再给修改建议
-
-错误示例：
-
-- 用户在 3 月修改论文时提到不要用破折号
-- 用户刚才问了一个关于实验设计的问题
-
-`description` 应描述稳定规律，而不是某次具体事件。
+- They are built from canonical raw, episode, and persistent stores.
+- They are not the authority for memory content.
+- They may use different metadata fields for retrieval or benchmark settings.
+- They can be rebuilt from canonical storage at any time.

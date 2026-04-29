@@ -61,3 +61,17 @@
   - 为了什么：
     - 确保后续大改继续建立在最新主分支之上。
     - 避免 `xhu` 长期偏离 main，减少后续持续重构时的冲突成本。
+
+- 🏠 整理 memory prompt 语言策略和分类边界
+  - 改了什么：
+    - 重写 `prompts/episode_system.txt`、`delta_system.txt`、`profile_system.txt`、`preference_system.txt`、`projects_system.txt`、`workflows_system.txt`，统一为英文规则、明确中文输出策略。
+    - 将 prompt 中不必要的中英混杂和具体场景 special case 改成通用 instruction 与 in-context example。
+    - 补充时间规则：模型需要利用 timestamp / event order 处理 current、previous、before、after、latest、old 等关系，但不直接输出系统维护的时间字段。
+    - 更新 `prompts/schema.txt`，明确 L0 RawChatSession / RawChatTurn、L1 平台信号、L2 turn-level episodes、L2 persistent、L3 policy / governance 和外部索引边界。
+    - 重写 `prompts/persistent_node_distill_bg.txt`，把 daily_notes 边界、证据确认规则、连接证据使用规则整理成更通用的英文 prompt。
+    - 更新 `memory_transferor` 新主路径的 persistent 抽取 prompt，补充 language policy、type boundaries、atomicity 和 skill 生成限制。
+    - 测试结果：prompt 加载正常，Python 编译通过；最小样本流程可跑通。样本输出显示 profile/preference 基本可控，但 topic 拆分与 workflow final check 拆分仍存在不稳定，需要后续用 `memory_policy` 或 post-process 做确定性拆分/校验。
+  - 为了什么：
+    - 让 prompt 更像长期可维护的系统规则，而不是针对单个测试样本的答案。
+    - 支持“中文输入 + 英文术语更清晰”的混合表达方式。
+    - 为下一步把 prompt 判断迁移到 L3 policy / deterministic validation 打基础。
