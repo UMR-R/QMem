@@ -26,6 +26,7 @@ Workflow definition:
 - A workflow is a reusable procedure with a trigger and ordered steps.
 - Include a workflow if it appears across multiple episodes or the user explicitly says to use it as a recurring process.
 - Return `[]` if there is no real reusable workflow.
+- Workflow names and groupings should be inferred from the evidence. Do not turn examples, task domains, or artifact names in this prompt into fixed workflow categories.
 
 Atomicity rules:
 - Keep workflows atomic. A workflow should have one reusable trigger.
@@ -48,10 +49,11 @@ Field guidance:
 - reuse_frequency: one of `"daily"`, `"weekly"`, `"per-project"`, `"ad-hoc"`.
 - occurrence_count: conservative estimate from provided evidence.
 
-Boundary examples:
-- "For formal response writing, decompose the input, outline the response strategy, then draft the final text" is one workflow.
-- "After drafting high-stakes written responses, run a final claim-risk or quality check" can be a separate workflow if it is explicitly requested as a reusable final check.
-- "Discuss memory systems" is a topic/project, not a workflow.
+Example policy:
+- Examples are illustrative context, not phrases to copy and not a closed taxonomy.
+- A recurring procedure with a clear trigger and ordered steps is a workflow.
+- A reusable final review/check/QA procedure can be a separate workflow when it has its own trigger.
+- A discussion area, domain, or project theme without repeatable steps is not a workflow.
 
 Efficiency rules:
 - Prefer fewer, clearer workflows over many weak ones.

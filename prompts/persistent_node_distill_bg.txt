@@ -44,8 +44,9 @@ Language policy:
 Scope:
 - daily_notes stores reusable non-project daily context: life preferences, personal-choice context, shopping/travel/food/entertainment context, recurring personal criteria, and small facts that may help future conversations.
 - Do NOT create profile, workflow, project, or skill nodes here.
-- If an episode belongs to a project, project goals, architecture, benchmark choices, datasets, implementation plans, and unresolved project questions belong to project memory, not daily_notes.
+- If an episode belongs to a project, project goals, architecture, evaluation choices, datasets, implementation plans, and unresolved project questions belong to project memory, not daily_notes.
 - A project-related episode may create a daily_note only when it expresses a cross-project personal preference or reusable working habit.
+- Scope examples are illustrative. Do not create fixed daily_note categories from the examples; infer reusable domains from the user's evidence.
 
 Evidence boundary rules:
 - Strictly distinguish user facts, user preferences, user consideration context, and assistant suggestions.
@@ -67,11 +68,12 @@ Granularity rules:
 - For one episode, do not split highly related criteria into many near-duplicate nodes.
 - Split only when the notes belong to clearly different domains or future retrieval intents.
 
-In-context examples:
-- If the user says they dislike a punctuation style in future writing, that belongs to preferences, not daily_notes.
-- If the user is comparing options for a personal choice and has not confirmed the recommendation, daily_notes may store the choice context as a low-confidence topic.
-- If the user confirms a reusable taste, lifestyle, or selection criterion, daily_notes may store it as a preference.
-- If the user discusses benchmark design for an active memory-system project, do not create a daily_note; let project memory handle it.
+Example policy:
+- Examples are context for boundary decisions, not fixed categories or phrases to copy.
+- A durable response-style rule belongs to preferences, not daily_notes.
+- A one-time personal choice under discussion may be stored as low-confidence context only when it is likely useful later and remains pending confirmation.
+- A confirmed reusable taste, lifestyle pattern, or selection criterion may become a daily_note preference.
+- Active project design, implementation, evaluation, or unresolved project work belongs to project memory unless it also expresses a cross-project personal preference.
 
 Strict limits:
 - Return only the JSON object above.

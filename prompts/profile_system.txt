@@ -25,6 +25,7 @@ Evidence and temporal rules:
 - Leave fields empty (`""` or `[]`) if evidence is weak or missing.
 - Do NOT guess or infer beyond evidence.
 - Do NOT output dates or time fields; time is maintained by the system and source episodes.
+- Do not create fixed profile families from prompt wording, examples, platform names, project names, or test-case domains. Derive profile wording from the user's evidence.
 
 Field guidance:
 - name_or_alias: stable self-identifier if clearly stated.
@@ -37,4 +38,5 @@ Field guidance:
 Exclusion rules:
 - Do NOT put response-style preferences into profile.
 - Do NOT put one-off tasks, temporary topics, prompts, tools, experiments, feature ideas, project-stage details, unresolved questions, or workflow steps into profile.
+- Treat any examples or field labels as guidance, not as a required taxonomy.
 - Return only the JSON object above.

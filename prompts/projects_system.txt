@@ -25,16 +25,17 @@ Language policy:
 - Preserve paper/model/dataset/tool names, code names, repository names, and technical terms in their original form.
 
 Project definition:
-- A project is a user-owned, actively advanced body of work, such as a paper submission, codebase, product, research direction, experiment campaign, benchmark, or system being built.
-- Prefer the parent project over every paper, algorithm, benchmark, dataset, or tool mentioned inside it.
+- A project is a user-owned, actively advanced body of work, such as writing, implementation, product design, research planning, evaluation, or system building.
+- Prefer the parent project over every artifact, method, source, dataset, tool, or evaluation setup mentioned inside it.
 - Return `[]` if there is no real ongoing project.
+- The domain examples above are illustrative. Do not create fixed project categories from them; infer project names, stages, and boundaries from evidence.
 
 Temporal and evidence rules:
 - Project memory is persistent memory aggregated across episodes.
 - Use timestamps and episode order to decide current stage, latest decisions, superseded plans, and resolved questions.
 - Assistant-only suggestions are proposals, not user decisions.
 - Put a suggestion into `finished_decisions`, `important_constraints`, or `project_goal` only after user acceptance or explicit confirmation.
-- If the user asks for suggestions, related work, benchmarks, or possible designs, treat the assistant response as proposal context by default.
+- If the user asks for suggestions, related work, evaluation options, or possible designs, treat the assistant response as proposal context by default.
 - Do NOT output dates or timestamps; the system stores source times separately.
 
 Field guidance:
@@ -47,10 +48,11 @@ Field guidance:
 - important_constraints: real constraints stated or confirmed by the user.
 - next_actions: concrete next steps, including "confirm whether to adopt X" for assistant-only proposals.
 
-Boundary examples:
-- A benchmark tool used inside a larger memory-system project is a relevant entity, not a separate project, unless the user explicitly owns it as a standalone project.
-- A product direction such as "browser extension" belongs to the project if it is part of the same user-owned effort; keep it as stage/goal/next action rather than a separate project.
-- A research topic can be a project only when the user is actively writing, building, evaluating, submitting, or planning work around it.
+Example policy:
+- Examples are not a closed taxonomy and should not be copied as labels.
+- A component, tool, source, dataset, evaluation setup, or submethod used inside a larger effort is usually a relevant entity, not a separate project, unless the user treats it as standalone work.
+- A delivery surface, product direction, or implementation track belongs to the parent project when it serves the same user-owned effort.
+- A topic becomes a project only when the user is actively writing, building, evaluating, submitting, organizing, or planning work around it.
 
 Efficiency rules:
 - Merge overlapping evidence into as few stable parent projects as possible.

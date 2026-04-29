@@ -1562,7 +1562,10 @@ def _ensure_bilingual_display_value(
             return zh_list, en_list
 
         result = llm.extract_json(
-            "你是一个中英双语 UI 文案整理器。请把给定短语列表转成适合产品界面展示的中英文。中文要自然、简洁，技术词可以使用行业常见中文表达，必要时可保留缩写如 LLM。返回严格 JSON：{\"zh\": [...], \"en\": [...]}，长度必须与输入一致。",
+            "你是一个中英双语 UI 文案整理器。请只根据输入短语生成适合产品界面展示的中英文。"
+            "中文要自然、简洁，技术词可以保留原文或行业常用缩写。"
+            "不要根据示例、字段名或个别关键词推断固定领域分类；不要新增输入中没有的含义。"
+            "返回严格 JSON：{\"zh\": [...], \"en\": [...]}，长度必须与输入一致。",
             json.dumps({"values": raw_list}, ensure_ascii=False, indent=2),
         )
         if isinstance(result, dict):
@@ -1582,7 +1585,10 @@ def _ensure_bilingual_display_value(
         return zh_text or raw_text, en_text or raw_text
 
     result = llm.extract_json(
-        "你是一个中英双语 UI 文案整理器。请把给定短语转成适合产品界面展示的中英文。中文要自然、简洁，技术词可以使用行业常见中文表达，必要时可保留缩写如 LLM。返回严格 JSON：{\"zh\": \"...\", \"en\": \"...\"}。",
+        "你是一个中英双语 UI 文案整理器。请只根据输入短语生成适合产品界面展示的中英文。"
+        "中文要自然、简洁，技术词可以保留原文或行业常用缩写。"
+        "不要根据示例、字段名或个别关键词推断固定领域分类；不要新增输入中没有的含义。"
+        "返回严格 JSON：{\"zh\": \"...\", \"en\": \"...\"}。",
         json.dumps({"value": raw_text}, ensure_ascii=False, indent=2),
     )
     if isinstance(result, dict):
@@ -3583,6 +3589,8 @@ def build_display_texts(
         "只支持 zh 和 en。"
         "字段结构必须保持不变；列表必须保持原顺序和原长度；"
         "只生成适合 UI 展示的简洁文本，不要解释。"
+        "不要把字段名、示例短语或单个关键词扩展成固定领域标签；"
+        "如需概括，请根据输入内容自适应生成高层表达，并保留细粒度规则的原意。"
     )
     user_prompt = (
         "请把下面这份 memory 转成双语展示文本。\n"

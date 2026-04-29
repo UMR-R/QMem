@@ -43,6 +43,7 @@ Core rules:
 - Prefer recall usefulness over compression. Do not hide distinct reusable facts inside one broad description when they would be retrieved separately later.
 - EPISODE_GROUPS are pre-persistent connection groups. Use them as grouping hints, not as proof that every episode in the group supports every item.
 - Prefer evidence_episode_ids that directly support the item. Do not include a whole group by default.
+- Do not hard-code or copy category labels from this prompt, examples, test cases, project names, tools, or evaluation artifact names. Infer names and groupings from evidence, existing memory, and user-confirmed edits.
 
 Type boundaries:
 - profile: identity, background, language mode, role, domain context, or durable communication context.
@@ -52,16 +53,17 @@ Type boundaries:
 - daily_note: reusable non-project daily context, personal choice context, taste, lifestyle, or small useful facts.
 - skill: only when evidence explicitly says the user saved, created, selected, recommended, or wants to reuse a Skill asset.
 
-Atomicity examples:
-- A main project, its schema/design subarea, and its product/application direction must become separate topic items when each has distinct evidence.
-- A final review/check procedure must become a separate workflow when the evidence presents it as a reusable final step or independently requested quality/risk check. Do not only bury that check inside the larger production workflow.
+Example policy:
+- Examples are illustrative context, not a fixed taxonomy and not phrases to copy.
+- A parent effort, a distinct subarea, and a delivery/application direction may become separate topic items only when evidence supports distinct retrieval intents.
+- A final review/check procedure may become a separate workflow when evidence presents it as a reusable final step or independently requested quality/risk check.
 - A preferred explanation style is a preference/profile signal, not a skill, unless the user explicitly saves it as a Skill asset.
 - Assistant-only suggestions are not user decisions or preferences unless the user accepts or repeats them.
 
 Classification guardrails:
 - Habitual working language, discussion language, domain background, and communication context are profile.
 - Desired assistant output language for a task type is preference.
-- Active research, writing, product, benchmark, or implementation work is topic/project memory, not profile.
+- Active user-owned work is topic/project memory, not profile, regardless of domain or artifact type.
 - If an item could be both profile and topic, use profile only for the user's durable background and topic for the active work.
 """
 

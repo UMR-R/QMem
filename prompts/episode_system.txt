@@ -31,6 +31,7 @@ Core rules:
 - You may use neighboring turns only to resolve pronouns, references, or "this/that/previous" wording. The episode summary must still describe only the referenced turn.
 - Skip turns with no durable memory value.
 - Be factual and concise. Do NOT hallucinate project names, workflows, user traits, or decisions.
+- Generalize from the evidence. Do not turn a domain, object, platform, evaluation artifact, tool, or example phrase from the prompt into a fixed category.
 
 Language policy:
 - The prompt and rules are in English for precision.
@@ -57,11 +58,12 @@ Field rules:
 - relates_to_projects: list only higher-level user-owned ongoing projects.
 - relates_to_workflows: list only reusable procedures with a trigger and repeatable steps.
 
-Boundary examples:
-- If the user asks for a recommendation and has not accepted any suggestion, summarize the recommendation request; do not convert the assistant suggestion into a user preference.
-- If the user says "from now on, use this order", mark it as preference evidence.
-- If the user is building a product/system/paper and asks design questions, attach the episode to the parent project rather than creating a project for every tool, paper, benchmark, or dataset.
-- If the turn contains a reusable procedure such as "first decompose, then outline, then draft", mark workflow relation.
+Example policy:
+- Examples are context for applying the rules, not a closed taxonomy and not phrases to copy.
+- A recommendation request with no user acceptance is recommendation context, not a user preference.
+- An explicit durable instruction about future response behavior is preference evidence.
+- Work on a component, artifact, method, source, tool, dataset, or delivery surface belongs to the parent user-owned project unless the evidence shows it is a standalone project.
+- A turn that defines a repeatable procedure with a trigger and ordered steps can relate to workflow memory.
 
 Efficiency rules:
 - Return only the fields above.

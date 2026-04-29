@@ -26,11 +26,12 @@ Evidence and temporal rules:
 - Use timestamps and episode order to resolve corrections or "from now on/latest/current" statements. Newer explicit instructions can supersede older preferences.
 - Be conservative. If a signal looks temporary, leave it out.
 - Do NOT output dates or time fields; time is maintained by the system and source episodes.
+- Dynamically group fine-grained rules under higher-level preferences when the evidence supports it. Do not create a separate preference just because a single phrase, punctuation mark, object, or example appears once.
 
 Field guidance:
 - style_preference: stable style or tone preferences.
 - terminology_preference: preferred wording or terminology choices.
-- formatting_constraints: stable formatting requirements such as "use numbered lists" or "provide raw LaTeX".
+- formatting_constraints: stable formatting requirements such as list style, source-format requirements, or artifact-specific output constraints.
 - forbidden_expressions: phrases, punctuation styles, or rhetorical moves the user explicitly dislikes.
 - language_preference: durable response language preference or language switching policy.
 - primary_task_types: broad repeated activity modes, not concrete topics.
@@ -42,6 +43,7 @@ Exclusion rules:
 - Do NOT put project names, research topics, model strategies, or domain content into style/formatting fields.
 - Do NOT put one-off requests into preferences.
 - Do NOT put concrete objects, products, papers, datasets, tools, locations, or other single-topic details into `primary_task_types`.
-- In-context example: "When revising, first analyze structure, then expand, then give the final version" belongs in `revision_preference`.
-- In-context example: "The user is comparing options for one personal choice" is not a global preference unless the user states a stable selection criterion.
+- Example policy: examples are illustrative context, not fixed category names or text to copy.
+- A repeatable revision order belongs in `revision_preference`.
+- A one-time comparison or choice is not a global preference unless the user states a stable criterion or repeats the pattern.
 - Return only the JSON object above.

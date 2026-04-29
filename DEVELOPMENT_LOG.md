@@ -116,3 +116,15 @@
     - 给后续前端 review 提供稳定的数据契约。
     - 把前端展示逻辑从 canonical persistent memory 中分离，避免为 UI 需要污染权威存储结构。
     - 让细粒度偏好可以被保留，但不会在用户界面里过度碎片化。
+
+- 🏠 清理 prompt 中的 hard-coded case 倾向
+  - 改了什么：
+    - 检查根目录 `prompts/`、`memory_transferor` 新主路径内嵌 prompt、`backend_service/app.py` 中的 UI 文案 prompt，并确认旧 `llm_memory_transferor` 非 eval 主路径会加载根目录 prompt。
+    - 将 `episode_system`、`profile_system`、`preference_system`、`projects_system`、`workflows_system`、`persistent_node_distill_bg`、`cold_start` 中的具体 boundary example 改成通用 `Example policy`。
+    - 删除或泛化容易被模型当成固定 case 的表达，例如具体格式示例、具体项目/评测对象、具体工作流短语。
+    - 更新 `memory_transferor` 的 persistent builder prompt，明确不能复制 prompt、测试样本、项目名、工具名或评测对象作为固定类别标签。
+    - 更新 backend 的双语 UI 文案 prompt，要求只根据输入生成展示文本，不根据字段名、示例或个别关键词推断固定领域分类。
+  - 为了什么：
+    - 避免模型在测试样本或早期讨论上 overfit。
+    - 让 profile、preferences、projects、workflows、daily_notes 的分类和命名根据真实证据、已有记忆和用户编辑状态自适应生成。
+    - 保留 examples 的边界说明价值，但明确它们不是 taxonomy，也不是要复制的文案。
