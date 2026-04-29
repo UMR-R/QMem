@@ -52,3 +52,12 @@
     - 把项目从旧的 conversation-level 临时构建方式推进到新的 turn-level canonical storage 主路径。
     - 先证明我们的存储格式可以接上 LLM 抽取和后续 ChromaDB 派生索引，而不是继续照搬外部 benchmark 的分块存储。
     - 暴露下一步需要单独处理的 persistent 聚合/拆分策略问题。
+
+- 🏠 将最新 main 合并回 xhu
+  - 改了什么：
+    - 先在 `xhu` 提交 memory_transferor 主路径改动。
+    - 切到 `main` 后拉取 `origin/main`，确认 main 已经是最新。
+    - 切回 `xhu` 并合并 `main`，合并过程无冲突。
+  - 为了什么：
+    - 确保后续大改继续建立在最新主分支之上。
+    - 避免 `xhu` 长期偏离 main，减少后续持续重构时的冲突成本。
