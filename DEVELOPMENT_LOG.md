@@ -102,3 +102,17 @@
     - 把 episode connection/grouping 从空骨架推进到可运行的 L3 基础设施。
     - 让 episode 先形成 connection group，再作为 persistent 抽取上下文，而不是完全依赖 prompt 自行判断。
     - 把容易不稳定的类型边界、workflow check 拆分和 topic 拆分从 prompt 中部分迁移到可测试的 deterministic policy。
+
+- 🏠 新增前端展示 payload 导出层
+  - 改了什么：
+    - 新增 `memory_transferor/src/memory_transferor/memory_export/display.py`，把 persistent memory 派生成前端可展示的 display payload。
+    - Profile / Preferences 展示为高层 checkbox 关键词，细粒度规则进入 `details` 和 `tooltip`。
+    - 删除具体领域 family 的 hard-coded 词表，改为支持 `DisplayGroupHint`，高层 display taxonomy 后续由 policy、LLM 聚类归纳或用户前端编辑状态提供；当前仅保留通用相似度 fallback。
+    - Projects / Workflows / Daily Notes / Skills 展示为短语加简要说明的 card payload。
+    - display builder 支持 `auto`、`zh`、`en` 语言模式，`auto` 会根据记忆内容推断主展示语言。
+    - 更新最小样本 runner，新增 `--display` 和 `--display-language`，可在 persistent build 后写出 `memory/display/payload.json`。
+    - 更新 `REFACTOR_PLAN.md` 和 `PROJECT_KNOWLEDGE_BASE.md`，补充 display payload 的定位和当前状态。
+  - 为了什么：
+    - 给后续前端 review 提供稳定的数据契约。
+    - 把前端展示逻辑从 canonical persistent memory 中分离，避免为 UI 需要污染权威存储结构。
+    - 让细粒度偏好可以被保留，但不会在用户界面里过度碎片化。

@@ -164,7 +164,7 @@ memory_assistant/
 - `episode_graph/`：episode connection 和 grouping 层，负责跨 turn、跨 conversation 的连接、分组和错链验证。
 - `prompt_loader/`：prompt 加载与渲染逻辑；prompt 文本仍保留在根目录 `prompts/`。
 - `external_memory_index/`：外部数据库索引层，例如 ChromaDB、BM25、SQLite FTS 或 hybrid retrieval。它只从 canonical storage 派生，不保存权威记忆。
-- `memory_export/`：导出包、注入 prompt 和目标平台映射。
+- `memory_export/`：前端展示 payload、导出包、注入 prompt 和目标平台映射。展示 payload 是从 persistent memory 派生出来的视图，不是新的权威存储；Profile / Preferences 先聚合成高层 checkbox 关键词，细粒度规则放入详情或 tooltip，Projects / Workflows / Daily Notes / Skills 则展示为短语加简要说明。具体 display taxonomy 不应在代码中写死领域 family，而应来自 policy、LLM 聚类归纳或用户在前端保存的编辑状态。
 
 目前已经初步落地的是 `memory_transferor/` 的骨架，以及 `RawChatSession` / `RawChatTurn`、turn-level `Episode`、第一版 `PersistentMemoryItem`、基础 store、基础 builder 和 `external_memory_index/documents.py`。这证明新主路径可以跑通最小样本中的 `raw -> episodes -> persistent` 流程，但还没有完全替换旧 pipeline。
 
@@ -228,6 +228,9 @@ memory_root/
 - 实现 `RawChatSession` / `RawChatTurn`，确认 turn 是最小 raw evidence 单元，只保留一个 timestamp。
 - 实现第一版 turn-level episode builder 和 persistent builder。
 - 实现基础 `memory_store/`，可把 raw、episodes、profile、preferences、projects、workflows、daily_notes、skills 分目录落盘。
+- 实现第一版 `episode_graph/`，可生成 conversation context connection、semantic connection 和受限制的 connection groups。
+- 实现第一版 `memory_policy/`，对 persistent memory 做类型边界、拆分、置信度和导出优先级后处理。
+- 实现第一版 `memory_export/display.py`，可把 persistent memory 转成前端展示 payload，并支持由外部 taxonomy hint 控制高层关键词分组。
 - 整理 prompt：统一语言策略、时间规则、类型边界，去掉明显 hard-coded special case。
 - 明确 `external_memory_index/` 是派生索引，不是权威存储。
 - 用最小样本跑通过 `raw -> episodes -> persistent` 流程。
@@ -237,12 +240,12 @@ memory_root/
 - 旧的 `llm_memory_transferor/`、`backend_service/` 和 `popup/` 还没有全面迁移到新结构。
 - `platform_memory/` 的新主路径 store 和 L1 ingestion 还没有完整落地。
 - `skills/` 虽然已纳入 persistent 设计，但“推荐 Skill -> 用户保存 -> persistent skills -> workflow 调用 skills”的链路还没接上新主路径。
-- `memory_policy/` 还没有承担确定性拆分和校验职责；目前很多边界仍依赖 prompt。
-- `episode_graph/` 还只是骨架，尚未实现统一 connection/grouping。
+- `memory_policy/` 和 `episode_graph/` 还只是第一版，需要更多测试样本和前端 review 后继续收敛。
+- `memory_export/display.py` 尚未接入正式 backend / popup UI，只在 sample runner 和本地验证中可用。
 
 ## 下一步优先级
 
-下一步优先做 **episode_graph + memory_policy**，暂时不碰 eval 和 ChromaDB。
+下一步优先把 **episode_graph + memory_policy + display payload** 接到更真实的样本和前端 review 流程中，暂时不碰 eval 和 ChromaDB。
 
 ### P0：episode_graph
 

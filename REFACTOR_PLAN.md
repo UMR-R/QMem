@@ -290,12 +290,15 @@ external_memory_index/
 ```text
 memory_export/
 ├── __init__.py
+├── display.py
 ├── package_exporter.py
 └── bootstrap_generator.py
 ```
 
 职责：
 
+- 生成前端展示 payload。Profile / Preferences 先聚合成高层 checkbox 关键词，细粒度规则放进 details 或 tooltip；Projects / Workflows / Daily Notes / Skills 输出为短语加简要说明。
+- display taxonomy 不应在代码里写死具体领域 family。具体高层关键词应来自 policy、LLM 聚类归纳或用户在前端保存的编辑状态；导出层只负责按 taxonomy 聚合、排序、合并证据和生成 fallback。
 - 生成迁移包。
 - 生成目标平台 bootstrap prompt。
 - 根据 platform mapping 控制字段转换。

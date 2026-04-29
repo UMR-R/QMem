@@ -12,6 +12,7 @@ sys.path.insert(0, str(SRC))
 
 from memory_transferor.memory_builders import EpisodeBuilder, PersistentBuilder
 from memory_transferor.episode_graph import EpisodeGraphBuilder
+from memory_transferor.memory_export import MemoryDisplayBuilder
 from memory_transferor.memory_models import RawChatSession, RawChatTurn
 from memory_transferor.memory_store import MemoryWorkspace
 from memory_transferor.runtime import LLMClient, parse_timestamp
@@ -100,6 +101,8 @@ def main() -> None:
     parser.add_argument("--base-url", default="https://api.deepseek.com/v1")
     parser.add_argument("--model", default="deepseek-chat")
     parser.add_argument("--graph-only", action="store_true", help="Stop after raw -> episodes -> episode graph.")
+    parser.add_argument("--display", action="store_true", help="Write frontend display payload after persistent build.")
+    parser.add_argument("--display-language", default="auto", help="Display language: auto, zh, or en.")
     args = parser.parse_args()
 
     sessions, expected = load_sample_sessions(args.sample)
@@ -134,6 +137,15 @@ def main() -> None:
     llm = LLMClient(api_key=args.api_key, base_url=args.base_url, model=args.model)
     persistent_items = PersistentBuilder(llm).build(episodes, episode_graph.groups)
     workspace.persistent.save_items(persistent_items)
+    display_payload = None
+    if args.display:
+        display_payload = MemoryDisplayBuilder(language=args.display_language).build(persistent_items)
+        display_dir = output / "memory" / "display"
+        display_dir.mkdir(parents=True, exist_ok=True)
+        (display_dir / "payload.json").write_text(
+            json.dumps(display_payload.model_dump(mode="json"), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
 
     actual_types: dict[str, int] = {}
     for item in persistent_items:
@@ -142,6 +154,9 @@ def main() -> None:
     print(f"PERSISTENT_ITEMS={len(persistent_items)}")
     print("ACTUAL_TYPES=" + json.dumps(actual_types, ensure_ascii=False, sort_keys=True))
     print("EXPECTED_TYPES=" + json.dumps(expected, ensure_ascii=False, sort_keys=True))
+    if display_payload is not None:
+        print("DISPLAY_PAYLOAD=")
+        print(json.dumps(display_payload.model_dump(mode="json"), ensure_ascii=False, indent=2))
     print("ITEMS=")
     print(json.dumps([item.model_dump(mode="json") for item in persistent_items], ensure_ascii=False, indent=2))
 
