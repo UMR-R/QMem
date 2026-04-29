@@ -75,3 +75,15 @@
     - 让 prompt 更像长期可维护的系统规则，而不是针对单个测试样本的答案。
     - 支持“中文输入 + 英文术语更清晰”的混合表达方式。
     - 为下一步把 prompt 判断迁移到 L3 policy / deterministic validation 打基础。
+
+- 🏠 更新项目知识库文档以对齐重构规划
+  - 改了什么：
+    - 更新 `PROJECT_KNOWLEDGE_BASE.md` 的当前工程实现描述，明确 `memory_transferor/` 是后续重构主路径。
+    - 补充 canonical workspace 目录语义，包括 `raw/`、`platform_memory/`、`episodes/`、persistent memory 各目录、`metadata/` 和 `logs/`。
+    - 明确 `external_memory_index/` 与 ChromaDB 目前只作为未来派生索引方向，暂不作为当前实现重点。
+    - 明确 `llm_memory_transferor/eval/` 暂时不处理，等 canonical storage、episode graph 和 memory policy 稳定后再接评测路径。
+    - 补充当前完成状态、尚未完成内容，并把 `episode_graph + memory_policy` 标为下一步 P0。
+  - 为了什么：
+    - 让项目知识库文档和当前重构规划保持一致。
+    - 避免后续继续混淆 canonical memory storage、外部索引和 eval benchmark 的边界。
+    - 为下一阶段实现 episode connection/grouping 与 L3 policy 做上下文铺垫。
