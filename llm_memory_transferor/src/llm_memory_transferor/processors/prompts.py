@@ -12,14 +12,15 @@ from pathlib import Path
 PROMPTS_DIR = Path(__file__).resolve().parents[4] / "prompts"
 
 PROMPT_FILES = {
-    "profile_system": "profile_system.txt",
-    "preference_system": "preference_system.txt",
-    "projects_system": "projects_system.txt",
-    "workflows_system": "workflows_system.txt",
-    "skills_system": "skills_system.txt",
-    "episode_system": "episode_system.txt",
-    "delta_system": "delta_system.txt",
-    "display_taxonomy_proposal": "display_taxonomy_proposal.txt",
+    "profile_system": "nodes/profile_system.txt",
+    "preference_system": "nodes/preferences_system.txt",
+    "projects_system": "nodes/projects_system.txt",
+    "workflows_system": "nodes/workflows_system.txt",
+    "skills_system": "nodes/skills_system.txt",
+    "daily_notes_system": "nodes/daily_notes_system.txt",
+    "episode_system": "episodes/episode_system.txt",
+    "delta_system": "episodes/delta_system.txt",
+    "display_taxonomy_proposal": "display/display_taxonomy_proposal.txt",
 }
 
 
@@ -51,6 +52,7 @@ _PREFERENCE_SYSTEM = get_processor_prompt("preference_system")
 _PROJECTS_SYSTEM = get_processor_prompt("projects_system")
 _WORKFLOWS_SYSTEM = get_processor_prompt("workflows_system")
 _SKILLS_SYSTEM = get_processor_prompt("skills_system")
+_DAILY_NOTES_SYSTEM = get_processor_prompt("daily_notes_system")
 _EPISODE_SYSTEM = get_processor_prompt("episode_system")
 _DELTA_SYSTEM = get_processor_prompt("delta_system")
 _DISPLAY_TAXONOMY_PROPOSAL = get_processor_prompt("display_taxonomy_proposal")
@@ -66,6 +68,7 @@ __all__ = [
     "_PROJECTS_SYSTEM",
     "_WORKFLOWS_SYSTEM",
     "_SKILLS_SYSTEM",
+    "_DAILY_NOTES_SYSTEM",
     "_EPISODE_SYSTEM",
     "_DELTA_SYSTEM",
     "_DISPLAY_TAXONOMY_PROPOSAL",

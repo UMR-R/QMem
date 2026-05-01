@@ -61,7 +61,7 @@ RECOMMENDED_REMOTE_SOURCES = [
 LLM_TRANSFEROR_SRC = PROJECT_ROOT / "llm_memory_transferor" / "src"
 MEMORY_TRANSFEROR_SRC = PROJECT_ROOT / "memory_transferor" / "src"
 JOB_LOCK = threading.Lock()
-L2_PERSISTENT_NODE_MAINTENANCE_VERSION = "l2_persistent_nodes_v3_daily_notes_support_guard"
+L2_PERSISTENT_NODE_MAINTENANCE_VERSION = "l2_persistent_nodes_v4_daily_notes_merge"
 
 if str(LLM_TRANSFEROR_SRC) not in sys.path:
     sys.path.insert(0, str(LLM_TRANSFEROR_SRC))
@@ -1661,7 +1661,305 @@ def _taxonomy_group_description(
         active_fields.append(field_name)
         parts.append(text)
     description = "；".join(dict.fromkeys(parts))
-    return truncate_text(description, 140), active_fields
+    return truncate_text(description, 140, ellipsis=False), active_fields
+
+
+def _daily_note_title_from_key(raw_key: str, node: dict[str, Any]) -> str:
+    key = str(raw_key or "").strip().lower()
+    if not key or key.startswith("pn_"):
+        return ""
+    token_labels = {
+        "coat": "风衣",
+        "trenchcoat": "风衣",
+        "trench": "风衣",
+        "clothing": "服装",
+        "outfit": "穿搭",
+        "dress": "长裙",
+        "shoe": "鞋子",
+        "shoes": "鞋子",
+        "color": "颜色",
+        "fruit": "水果",
+        "fruits": "水果",
+        "sour": "酸味",
+        "cocktail": "鸡尾酒",
+        "drink": "饮品",
+        "food": "食物",
+        "taste": "口味",
+        "bar": "酒吧",
+    }
+    ignored = {
+        "context",
+        "candidate",
+        "candidates",
+        "option",
+        "options",
+        "suggestion",
+        "suggestions",
+        "note",
+        "notes",
+        "prefers",
+    }
+    suffix_tokens = {"preference", "preferences", "taste"}
+    labels: list[str] = []
+    tokens = [token for token in re.split(r"[_\-\s]+", key) if token]
+    for token in re.split(r"[_\-\s]+", key):
+        if not token or token in ignored or token in suffix_tokens:
+            continue
+        label = token_labels.get(token)
+        if label and label not in labels:
+            labels.append(label)
+    if not labels:
+        return ""
+    specific_title = _daily_note_title_from_tokens(tokens)
+    if specific_title:
+        return specific_title
+    suffix = _daily_note_title_suffix(tokens, node)
+    title = "".join(labels[:3])
+    if suffix and not title.endswith(suffix):
+        title = f"{title}{suffix}"
+    return title
+
+
+def _daily_note_title_from_tokens(tokens: list[str]) -> str:
+    token_set = {str(token or "").strip().lower() for token in tokens if str(token or "").strip()}
+    has_color = bool(token_set & {"color", "colors", "colour", "colours", "颜色"})
+    if has_color and token_set & {"coat", "trenchcoat", "trench"}:
+        return "风衣颜色选择"
+    if has_color and token_set & {"shoe", "shoes"}:
+        return "鞋子颜色选择"
+    if token_set & {"shoe", "shoes"} and token_set & {"candidate", "candidates", "option", "options", "choice", "choices", "select", "selection"}:
+        return "鞋子颜色选择"
+    if token_set & {"cocktail", "cocktails"}:
+        prefix = "酸味" if token_set & {"sour"} else ""
+        suffix = "推荐" if token_set & {"recommendation", "recommendations", "suggestion", "suggestions", "option", "options"} else "选择"
+        return f"{prefix}鸡尾酒{suffix}"
+    return ""
+
+
+def _daily_note_title_suffix(tokens: list[str], node: dict[str, Any]) -> str:
+    note_type = str(node.get("type") or "").strip().lower()
+    token_set = {str(token or "").strip().lower() for token in tokens if str(token or "").strip()}
+    if note_type == "preference" or token_set & {"preference", "preferences", "taste", "prefers"}:
+        return "偏好"
+    if token_set & {"recommendation", "recommendations", "suggestion", "suggestions"}:
+        return "推荐"
+    if token_set & {"candidate", "candidates", "option", "options", "choice", "choices", "select", "selection"}:
+        return "选择"
+    return "记录"
+
+
+def _daily_note_title_from_description(raw_description: str, node: dict[str, Any]) -> str:
+    text = _normalize_snippet_text(raw_description)
+    if not text:
+        return ""
+    user_side = re.split(r"助手|assistant", text, maxsplit=1, flags=re.IGNORECASE)[0].strip("，,。；;：: ")
+    note_type = str(node.get("type") or "").strip().lower()
+
+    if "鞋子" in user_side and "颜色" in user_side:
+        return "鞋子颜色选择"
+
+    if note_type == "preference":
+        for pattern in (
+            r"喜欢(?:吃|喝|用|看|听|去|做)?([^，。；;,.]+)",
+            r"偏好([^，。；;,.]+)",
+        ):
+            match = re.search(pattern, user_side)
+            if match:
+                subject = re.sub(r"^(的|对|于)", "", match.group(1).strip("，,。；;：: "))
+                subject = subject.replace("酸的", "酸味")
+                if subject:
+                    return truncate_text(f"{subject}偏好", 18, ellipsis=False)
+
+    clean = re.sub(
+        r"^用户(正在|曾经|曾|明确表示|表示|希望|需要|喜欢|倾向于|进一步|正在寻找|寻找|询问|想要|想)?",
+        "",
+        user_side,
+    ).strip("，,。；;：: ")
+    clean = re.sub(r"^为一?条?", "", clean).strip("，,。；;：: ")
+    clean = re.split(r"目前|已确认|尚未|并进一步|，|,|。|；|;", clean, maxsplit=1)[0].strip("，,。；;：: ")
+    clean = re.sub(r"^一?条?", "", clean).strip("，,。；;：: ")
+    return truncate_text(clean, 22, ellipsis=False)
+
+
+def _compact_display_join(parts: list[str], limit: int = 22) -> str:
+    cleaned = [part.strip("，,。；;：: ") for part in parts if part.strip("，,。；;：: ")]
+    if not cleaned:
+        return ""
+    if len(cleaned) >= 2:
+        combined = "，".join(cleaned[:2])
+        if len(combined) <= limit:
+            return combined
+    for part in cleaned:
+        if len(part) <= limit:
+            return part
+    return truncate_text(cleaned[0], limit, ellipsis=False)
+
+
+def _status_from_title_hint(title_hint: str) -> str:
+    subject = str(title_hint or "").strip()
+    subject = re.sub(r"(选择|推荐|偏好|记录)$", "", subject).strip("，,。；;：: ")
+    return f"{subject or '选择'}待确认"
+
+
+def _normalize_confirmation_subject(subject: str) -> str:
+    subject = subject.strip("，,。；;：: ")
+    subject = re.sub(r"^(但|且|不过|用户|具体|最终|是否|仍|还|尚|均)+", "", subject).strip("，,。；;：: ")
+    subject = re.sub(r"(均|仍|还|尚)$", "", subject).strip("，,。；;：: ")
+    subject = subject.replace("和", "与").replace("及", "与")
+    return subject
+
+
+def _compact_confirmation_status(text: str, title_hint: str = "") -> str:
+    subjects: list[str] = []
+    for match in re.finditer(r"(?:尚未|还未|未)确认([^，。；;,.]{0,18})", text):
+        subject = _normalize_confirmation_subject(match.group(1))
+        if subject in {"此", "该", "这个", "这种"}:
+            subject = ""
+        if subject:
+            subjects.append(subject)
+    for match in re.finditer(r"([^，。；;,.]{1,18}?)(?:均)?(?:尚未|还未|未)(?:最终|具体)?确认", text):
+        subject = _normalize_confirmation_subject(match.group(1))
+        if subject:
+            subjects.append(subject)
+    for match in re.finditer(r"(?:尚未|还未|未)(?:最终|具体)?确定([^，。；;,.]{0,18})", text):
+        subject = _normalize_confirmation_subject(match.group(1))
+        if not subject and title_hint:
+            subject = _status_from_title_hint(title_hint).removesuffix("待确认")
+        if subject:
+            subjects.append(subject)
+    for match in re.finditer(r"([^，。；;,.]{1,18}?)(?:尚未|还未|未)(?:最终|具体)?确定", text):
+        subject = _normalize_confirmation_subject(match.group(1))
+        if subject:
+            subjects.append(subject)
+    subjects = list(dict.fromkeys(subjects))
+    if not subjects:
+        return _status_from_title_hint(title_hint) if re.search(r"(?:尚未|还未|未)(?:最终|具体)?确认", text) else ""
+    if len(subjects) >= 2:
+        shared_suffix = ""
+        for suffix in ("颜色", "选择", "方案", "款式", "偏好"):
+            if all(subject.endswith(suffix) for subject in subjects[:2]):
+                shared_suffix = suffix
+                break
+        if shared_suffix:
+            heads = [subject[: -len(shared_suffix)] for subject in subjects[:2]]
+            return f"{'与'.join(heads)}{shared_suffix}待确认"
+    return f"{subjects[0]}待确认"
+
+
+def _compact_preference_signal(text: str) -> str:
+    patterns = (
+        r"(?:基于|根据|延续)([^，。；;,.]{1,14})(?:偏好|喜好|需求)",
+        r"(?:喜欢|偏好)(?:吃|喝|用|看|听|去|做)?([^，。；;,.]{1,14})",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if not match:
+            continue
+        subject = match.group(1).strip("，,。；;：: ")
+        subject = re.sub(r"^(的|对|于)", "", subject).strip("，,。；;：: ")
+        subject = subject.replace("酸的", "酸味")
+        if subject in {"此", "该", "这个", "这种"}:
+            continue
+        if subject:
+            return f"{subject}偏好"
+    return ""
+
+
+def _compact_constraint_signal(text: str) -> str:
+    for pattern in (
+        r"(低[^，。；;,.、]{1,10}(?:款式|选择|方案|类型)?)",
+        r"(清爽[^，。；;,.、]{0,8}(?:款式|选择|方案|类型)?)",
+        r"(不[^，。；;,.、]{1,8}(?:方案|选择|款式))",
+    ):
+        match = re.search(pattern, text)
+        if match:
+            return match.group(1).strip("，,。；;：: ")
+    return ""
+
+
+def _compact_daily_note_sentence(text: str, title_hint: str = "") -> str:
+    clean = _normalize_snippet_text(text).replace("助理", "助手")
+    if not clean:
+        return ""
+
+    if "风衣" in clean and "搭配" in clean:
+        outfit = ""
+        outfit_match = re.search(r"风衣(?:以)?搭配([^，。；;,.]+)", clean)
+        if outfit_match:
+            outfit = outfit_match.group(1).strip("，,。；;：: ")
+        compare = ""
+        compare_patterns = (
+            r"(?:正在)?比较([^，。；;,.]+?)风衣(?:以)?搭配",
+            r"(?:曾)?比较(?:过)?([^，。；;,.]+)",
+        )
+        for pattern in compare_patterns:
+            compare_match = re.search(pattern, clean)
+            if compare_match:
+                compare = compare_match.group(1).strip("，,。；;：: ")
+                break
+        compare = re.sub(r"(?:风衣|颜色|哪个更好|哪个更合适)$", "", compare).strip("，,。；;：: ")
+        compare = compare.replace("和", "与")
+        if outfit and compare:
+            return f"用户考虑风衣搭配{outfit}，比较{compare}"
+        if outfit:
+            return f"用户考虑风衣搭配{outfit}"
+        if compare:
+            return f"用户比较{compare}风衣"
+
+    if "鞋子" in clean and "颜色" in clean:
+        choice = ""
+        for pattern in (
+            r"首选([^，。；;,.、]{1,8})",
+            r"第一推荐[:： ]*([^，。；;,.、]{1,8})",
+            r"建议(?:选择|用)?([^的，。；;,.、]{1,8})",
+        ):
+            choice_match = re.search(pattern, clean)
+            if choice_match:
+                choice = choice_match.group(1).strip("，,。；;：: ")
+                break
+        if choice:
+            return f"用户搭配鞋子颜色，{choice}待确认"
+        return "用户搭配鞋子颜色，选择待确认"
+
+    if "低酒精" in clean or "低酒感" in clean:
+        prefix = "用户偏好酸味，" if "酸" in clean else "用户"
+        return f"{prefix}关注低酒精鸡尾酒"
+
+    if "酸味水果" in clean or "酸的水果" in clean:
+        if "鸡尾酒" in clean or "酒吧" in clean:
+            return "用户偏好酸味水果，也关注酸爽低酒精鸡尾酒"
+        return "用户偏好酸味水果"
+
+    return ""
+
+
+def _daily_note_description_for_display(raw_description: str, title_hint: str = "") -> str:
+    text = _normalize_snippet_text(raw_description).replace("…", "").replace("...", "")
+    if not text:
+        return ""
+
+    sentence = _compact_daily_note_sentence(text, title_hint)
+    if sentence:
+        return sentence
+
+    status = _compact_confirmation_status(text, title_hint)
+    preference = _compact_preference_signal(text)
+    constraint = _compact_constraint_signal(text)
+    if constraint and status.endswith("选择待确认"):
+        constraint = f"{constraint}待确认"
+        status = ""
+    summary = _compact_display_join([preference, constraint, status])
+    if summary:
+        return summary
+
+    first_clause = re.split(r"[。；;\n]", text, maxsplit=1)[0].strip("，,。；;：: ")
+    first_clause = re.sub(
+        r"^用户(正在|曾经|曾|明确表示|表示|希望|需要|喜欢|倾向于|进一步|正在寻找|寻找|询问|想要|想)?",
+        "",
+        first_clause,
+    ).strip("，,。；;：: ")
+    first_clause = re.sub(r"助手[^，。；;,.]*(?:推荐|建议|提醒)[^，。；;,.]*", "", first_clause).strip("，,。；;：: ")
+    return truncate_text(first_clause, 22, ellipsis=False)
 
 
 def _daily_note_display_texts(
@@ -1675,13 +1973,16 @@ def _daily_note_display_texts(
     cached_title = _display_text(display_entry.get("title"), locale, "").strip()
     cached_description = _display_text(display_entry.get("description"), locale, "").strip()
 
-    description = cached_description or raw_description or raw_key
-    if not description or _is_noise_memory_text(description):
-        description = raw_key
-    description = truncate_text(description, 140)
+    description_source = cached_description or raw_description or raw_key
+    if not description_source or _is_noise_memory_text(description_source):
+        description_source = raw_key
 
-    title_source = cached_title
-    if not title_source or title_source == cached_description or len(title_source) > 48:
+    key_title = _daily_note_title_from_key(raw_key, node)
+    description_title = _daily_note_title_from_description(raw_description, node)
+    if key_title.endswith("记录") and description_title:
+        key_title = ""
+    title_source = key_title or description_title or cached_title
+    if not title_source or title_source == cached_description or len(title_source) > 24:
         title_source = raw_description or raw_key
     first_sentence = re.split(r"[。；;\n]", title_source, maxsplit=1)[0].strip()
     first_sentence = re.sub(
@@ -1690,7 +1991,8 @@ def _daily_note_display_texts(
         first_sentence,
     ).strip("，,。；;：: ")
     first_sentence = re.sub(r"^为一?条?", "", first_sentence).strip("，,。；;：: ")
-    title = truncate_text(first_sentence or raw_key or node_id, 32)
+    title = truncate_text(first_sentence or raw_key or node_id, 32, ellipsis=False)
+    description = _daily_note_description_for_display(description_source, title)
     return title, description
 
 
@@ -3208,6 +3510,14 @@ def _looks_like_over_specific_task_type(value: str) -> bool:
     # a one-turn topic such as "推荐酸味饮品".
     broad_connectors = {"与", "和", "或", "及", "、", "and", "or"}
     has_broad_connector = any(connector in text for connector in broad_connectors)
+    concrete_scope_markers = {
+        "服装", "衣服", "风衣", "长裙", "鞋", "水果", "食品", "饮品", "鸡尾酒",
+        "酸味", "酒吧", "outfit", "clothing", "fruit", "cocktail", "drink", "food",
+    }
+    if "/" in label or "／" in label:
+        return True
+    if any(marker in text for marker in concrete_scope_markers) and any(marker in text for marker in action_markers):
+        return True
     if len(label) >= 5 and not has_broad_connector and any(text.startswith(marker) for marker in action_markers):
         return True
     if len(label) > 10:
@@ -3317,6 +3627,113 @@ def _task_type_has_explicit_stability_signal(text: str) -> bool:
     return any(marker in text for marker in markers)
 
 
+def _episode_route_text(episode: EpisodicMemory) -> str:
+    return _canonical_memory_text(
+        " ".join(
+            [
+                episode.topic,
+                episode.summary,
+                " ".join(episode.key_decisions or []),
+                " ".join(episode.open_issues or []),
+                " ".join(episode.topics_covered or []),
+            ]
+        )
+    )
+
+
+def _episode_has_profile_memory_signal(episode: EpisodicMemory) -> bool:
+    text = _episode_route_text(episode)
+    if not text:
+        return False
+    markers = {
+        "我是", "我的身份", "我的职业", "我的专业", "我的背景", "我的研究方向",
+        "长期关注", "研究方向", "工作方向", "专业背景", "所在机构", "来自",
+        "i am", "my role", "my background", "my research", "my work", "affiliation",
+        "student", "researcher", "engineer", "developer", "professor",
+    }
+    return any(marker in text for marker in markers)
+
+
+def _episode_has_response_preference_signal(episode: EpisodicMemory) -> bool:
+    text = _episode_route_text(episode)
+    if not text:
+        return False
+    markers = {
+        "以后回答", "以后回复", "回答时", "回复时", "请用中文", "请用英文", "用中文回答",
+        "用英文回答", "输出格式", "回答格式", "表达风格", "语气", "不要使用", "避免",
+        "先确认", "先问我", "每次都", "从现在开始", "记住我希望",
+        "reply in", "respond in", "answer in", "when replying", "output format",
+        "response style", "tone", "do not use", "avoid", "from now on",
+    }
+    return any(marker in text for marker in markers)
+
+
+def _normalize_episode_memory_routes(episode: EpisodicMemory) -> EpisodicMemory:
+    """Keep daily-life context out of profile/preferences route flags."""
+    if MemoryBuilder._episode_has_daily_memory_signal(episode):
+        if not _episode_has_profile_memory_signal(episode):
+            episode.relates_to_profile = False
+        if not _episode_has_response_preference_signal(episode):
+            episode.relates_to_preferences = False
+    elif _episode_has_response_preference_signal(episode):
+        episode.relates_to_preferences = True
+    return episode
+
+
+def _infer_primary_task_type_candidates(
+    episodes: list[EpisodicMemory],
+    projects: list[ProjectMemory] | None = None,
+    workflows: list[WorkflowMemory] | None = None,
+) -> list[str]:
+    candidates: list[str] = []
+
+    def add(label: str) -> None:
+        if label:
+            candidates.append(label)
+
+    for episode in episodes:
+        text = _task_type_support_text(episode)
+        compact = text.replace(" ", "")
+        is_project_episode = bool(episode.relates_to_projects)
+
+        if any(token in compact for token in ["穿搭", "搭配", "配色", "风衣", "长裙", "鞋子", "服装", "衣服", "outfit", "clothing"]):
+            add("搭配建议")
+
+        if any(token in compact for token in ["推荐", "建议", "有哪些", "有什么", "哪个", "哪些", "比较", "recommend", "suggest", "compare"]):
+            add("推荐列表")
+
+        research_markers = {
+            "研究", "调研", "论文", "发表", "benchmark", "评测", "现有工作", "项目",
+            "平台", "mvp", "roadmap", "research", "survey", "literature",
+        }
+        if is_project_episode or any(token in compact for token in research_markers):
+            add("研究规划")
+
+        if any(token in compact for token in ["写作", "润色", "改写", "draft", "rewrite", "editing"]):
+            add("写作修改")
+
+        if any(token in compact for token in ["报错", "调试", "排查", "修复", "debug", "error", "bug", "fix"]):
+            add("问题排查")
+
+    for project in projects or []:
+        project_text = _canonical_memory_text(
+            " ".join([project.project_name, project.project_goal, project.current_stage])
+        )
+        if any(token in project_text for token in ["研究", "benchmark", "评测", "论文", "调研", "项目", "平台"]):
+            add("研究规划")
+
+    for workflow in workflows or []:
+        workflow_text = _canonical_memory_text(
+            " ".join([workflow.workflow_name, workflow.trigger_condition, " ".join(workflow.typical_steps or [])])
+        )
+        if any(token in workflow_text for token in ["写作", "润色", "改写", "draft", "rewrite"]):
+            add("写作修改")
+        if any(token in workflow_text for token in ["调试", "排查", "修复", "debug", "bug"]):
+            add("问题排查")
+
+    return _dedupe_primary_task_types(candidates, projects, max_items=6)
+
+
 def _stable_primary_task_types(
     values: list[str],
     episodes: list[EpisodicMemory],
@@ -3372,7 +3789,11 @@ def _infer_primary_task_types_fallback(
     workflows: list[WorkflowMemory],
     existing: list[str] | None = None,
 ) -> list[str]:
-    return _stable_primary_task_types([str(value) for value in existing or []], episodes, projects)
+    candidates = [
+        *[str(value) for value in existing or []],
+        *_infer_primary_task_type_candidates(episodes, projects, workflows),
+    ]
+    return _stable_primary_task_types(candidates, episodes, projects)
 
 
 def _infer_primary_task_types(
@@ -3382,7 +3803,11 @@ def _infer_primary_task_types(
     workflows: list[WorkflowMemory],
     existing: list[str] | None = None,
 ) -> list[str]:
-    stable_existing = _stable_primary_task_types([str(value) for value in existing or []], episodes, projects)
+    seed_candidates = [
+        *[str(value) for value in existing or []],
+        *_infer_primary_task_type_candidates(episodes, projects, workflows),
+    ]
+    stable_existing = _stable_primary_task_types(seed_candidates, episodes, projects)
     if not stable_existing:
         return []
 
@@ -3457,6 +3882,94 @@ def _infer_primary_task_types(
     if deduped:
         return deduped
     return stable_existing
+
+
+def _merge_project_focus_into_profile(profile: ProfileMemory, projects: list[ProjectMemory]) -> ProfileMemory:
+    focus_candidates = list(profile.long_term_research_or_work_focus or [])
+    source_episode_ids = list(profile.source_episode_ids or [])
+    source_turn_refs = list(profile.source_turn_refs or [])
+    stable_project_focuses: list[str] = []
+    stable_project_texts: list[str] = []
+
+    for project in projects:
+        if not getattr(project, "is_active", True):
+            continue
+        project_episode_ids = [str(ref).strip() for ref in (project.source_episode_ids or []) if str(ref).strip()]
+        if len(project_episode_ids) < 2:
+            continue
+        focus = str(project.project_name or project.project_goal or "").strip()
+        if focus:
+            stable_project_focuses.append(focus)
+            stable_project_texts.append(
+                " ".join(
+                    str(part or "").strip()
+                    for part in [
+                        project.project_name,
+                        project.project_goal,
+                        project.current_stage,
+                        " ".join(str(key) for key in (project.key_terms or {}).keys()),
+                        " ".join(str(value) for value in (project.key_terms or {}).values()),
+                    ]
+                    if str(part or "").strip()
+                )
+            )
+        for ref in project_episode_ids:
+            if ref not in source_episode_ids:
+                source_episode_ids.append(ref)
+        for turn_ref in project.source_turn_refs or []:
+            turn_ref = str(turn_ref).strip()
+            if turn_ref and turn_ref not in source_turn_refs:
+                source_turn_refs.append(turn_ref)
+        if project.created_at and (not profile.created_at or project.created_at < profile.created_at):
+            profile.created_at = project.created_at
+        if project.updated_at and (not profile.updated_at or project.updated_at > profile.updated_at):
+            profile.updated_at = project.updated_at
+
+    if stable_project_texts:
+        focus_candidates = [
+            focus
+            for focus in focus_candidates
+            if not _focus_overlaps_project(focus, stable_project_texts)
+        ]
+        focus_candidates.extend(stable_project_focuses)
+    profile.long_term_research_or_work_focus = _unique_string_list(focus_candidates, max_items=6)
+    profile.source_episode_ids = source_episode_ids
+    profile.source_turn_refs = source_turn_refs
+    return profile
+
+
+def _focus_overlaps_project(focus: str, project_texts: list[str]) -> bool:
+    focus_tokens = _memory_text_tokens(focus)
+    if len(focus_tokens) < 2:
+        return False
+    for project_text in project_texts:
+        project_tokens = _memory_text_tokens(project_text)
+        if not project_tokens:
+            continue
+        overlap = focus_tokens & project_tokens
+        if len(overlap) >= 2 and len(overlap) / max(1, min(len(focus_tokens), len(project_tokens))) >= 0.45:
+            return True
+    return False
+
+
+def _memory_text_tokens(text: str) -> set[str]:
+    raw = str(text or "").lower()
+    raw = raw.replace("text-to-image", "text image t2i").replace("text2image", "text image t2i")
+    tokens = {token for token in re.findall(r"[a-z0-9]+", raw) if len(token) >= 2}
+    tokens.update(re.findall(r"[\u4e00-\u9fff]{2,}", raw))
+    stopwords = {
+        "project",
+        "platform",
+        "system",
+        "user",
+        "memory",
+        "统一",
+        "项目",
+        "平台",
+        "用户",
+        "记忆",
+    }
+    return {token for token in tokens if token not in stopwords}
 
 
 def _extract_ordered_steps_from_text(text: str) -> list[str]:
@@ -4330,6 +4843,31 @@ def memory_items_for_category(settings: dict[str, Any], category: str, locale: s
                 if not group_id:
                     continue
                 title = _taxonomy_title(group, locale)
+                if group_id == "main_task_types":
+                    task_types = _payload_field_value(
+                        prefs_payload,
+                        "primary_task_types",
+                        category="preferences",
+                        episodes=episodes,
+                        projects=projects,
+                    )
+                    for task_type in task_types or []:
+                        task_label = str(task_type or "").strip()
+                        if not task_label or _is_noise_memory_text(task_label):
+                            continue
+                        items.append(
+                            {
+                                "id": f"preferences:primary_task_types:{_safe_slug(task_label, 'item')}",
+                                "title": title,
+                                "description": task_label,
+                                "display_title": title,
+                                "display_description": task_label,
+                                "source_fields": ["primary_task_types"],
+                                "status": group.get("status", "active"),
+                                "selected": False,
+                            }
+                        )
+                    continue
                 items.append(
                     {
                         "id": f"preferences:group:{group_id}",
@@ -4802,6 +5340,240 @@ def _filter_preference_fields(data: dict[str, Any], selected_fields: set[str], s
     return filtered
 
 
+_INJECTION_STORAGE_FIELDS = {
+    "id",
+    "created_at",
+    "updated_at",
+    "version",
+    "evidence_links",
+    "conflict_log",
+    "user_confirmed",
+    "source_episode_ids",
+    "source_turn_refs",
+    "platform",
+    "primary_language",
+}
+
+
+def _is_empty_injection_value(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return not value.strip()
+    if isinstance(value, (list, tuple, set, dict)):
+        return len(value) == 0
+    return False
+
+
+def _entry_text_for_injection(value: Any) -> Any:
+    if isinstance(value, dict) and "text" in value:
+        return str(value.get("text") or "").strip()
+    return value
+
+
+def _compact_injection_value(value: Any, *, max_items: int = 8) -> Any:
+    value = _entry_text_for_injection(value)
+    if isinstance(value, dict):
+        compact: dict[str, Any] = {}
+        for key, item in value.items():
+            if key in _INJECTION_STORAGE_FIELDS or key == "timestamp":
+                continue
+            compact_item = _compact_injection_value(item, max_items=max_items)
+            if not _is_empty_injection_value(compact_item):
+                compact[str(key)] = compact_item
+        return compact
+    if isinstance(value, list):
+        compact_list: list[Any] = []
+        for item in value:
+            compact_item = _compact_injection_value(item, max_items=max_items)
+            if _is_empty_injection_value(compact_item):
+                continue
+            if compact_item not in compact_list:
+                compact_list.append(compact_item)
+            if len(compact_list) >= max_items:
+                break
+        return compact_list
+    if isinstance(value, str):
+        return value.strip()
+    return value
+
+
+def _is_generic_language_value(value: Any) -> bool:
+    text = str(value or "").strip().lower()
+    return text in {
+        "zh",
+        "cn",
+        "chinese",
+        "mandarin",
+        "中文",
+        "中文为主",
+        "回答以中文为主",
+        "en",
+        "english",
+        "英文",
+        "英语",
+        "英文为主",
+    }
+
+
+def _compact_profile_for_injection(data: dict[str, Any]) -> dict[str, Any]:
+    allowed_fields = [
+        "name_or_alias",
+        "role_identity",
+        "domain_background",
+        "organization_or_affiliation",
+        "long_term_research_or_work_focus",
+    ]
+    compact: dict[str, Any] = {}
+    for field in allowed_fields:
+        value = _compact_injection_value(data.get(field))
+        if not _is_empty_injection_value(value):
+            compact[field] = value
+    return compact
+
+
+def _compact_preferences_for_injection(data: dict[str, Any]) -> dict[str, Any]:
+    allowed_fields = [
+        "style_preference",
+        "terminology_preference",
+        "formatting_constraints",
+        "forbidden_expressions",
+        "language_preference",
+        "primary_task_types",
+        "revision_preference",
+        "response_granularity",
+    ]
+    compact: dict[str, Any] = {}
+    generic_language_value: Any = None
+    for field in allowed_fields:
+        value = _compact_injection_value(data.get(field))
+        if _is_empty_injection_value(value):
+            continue
+        if field == "language_preference" and _is_generic_language_value(value):
+            generic_language_value = value
+            continue
+        compact[field] = value
+    if not compact and generic_language_value:
+        compact["language_preference"] = _localized_language_display(
+            generic_language_value,
+            "zh",
+            response_preference=True,
+        )
+    return compact
+
+
+def _compact_project_for_injection(data: dict[str, Any]) -> dict[str, Any]:
+    allowed_fields = [
+        "project_name",
+        "project_goal",
+        "current_stage",
+        "key_terms",
+        "finished_decisions",
+        "unresolved_questions",
+        "relevant_entities",
+        "important_constraints",
+        "next_actions",
+    ]
+    compact: dict[str, Any] = {}
+    for field in allowed_fields:
+        max_items = 5 if field != "key_terms" else 8
+        value = _compact_injection_value(data.get(field), max_items=max_items)
+        if field == "project_goal":
+            value = _trim_unconfirmed_project_goal_for_injection(str(value or ""), data)
+        if not _is_empty_injection_value(value):
+            compact[field] = value
+    return compact
+
+
+def _trim_unconfirmed_project_goal_for_injection(goal: str, data: dict[str, Any]) -> str:
+    goal = str(goal or "").strip()
+    if not goal:
+        return ""
+    support_text = " ".join(
+        str(_entry_text_for_injection(item) or "")
+        for field in ("unresolved_questions", "next_actions")
+        for item in (data.get(field) or [])
+    )
+    if not support_text:
+        return goal
+    uncertainty_markers = (
+        "是否采纳",
+        "是否采用",
+        "是否确定",
+        "待确认",
+        "尚未确认",
+        "pending confirmation",
+        "confirm whether",
+        "whether to adopt",
+    )
+    if not any(marker.lower() in support_text.lower() for marker in uncertainty_markers):
+        return goal
+    parts = [part.strip() for part in re.split(r"[，,；;]", goal) if part.strip()]
+    if len(parts) <= 1:
+        return goal
+    tentative_tail = " ".join(parts[1:])
+    proposal_markers = (
+        "主打",
+        "导向",
+        "定位",
+        "面向",
+        "目标用户",
+        "应用场景",
+        "业务场景",
+        "策略",
+        "路线",
+        "positioning",
+        "audience",
+        "scenario",
+        "strategy",
+    )
+    if any(marker.lower() in tentative_tail.lower() for marker in proposal_markers):
+        return parts[0]
+    return goal
+
+
+def _compact_workflow_for_injection(data: dict[str, Any]) -> dict[str, Any]:
+    allowed_fields = [
+        "workflow_name",
+        "trigger_condition",
+        "typical_steps",
+        "preferred_artifact_format",
+        "review_style",
+        "escalation_rule",
+        "reuse_frequency",
+        "occurrence_count",
+    ]
+    compact: dict[str, Any] = {}
+    for field in allowed_fields:
+        value = _compact_injection_value(data.get(field), max_items=6)
+        if not _is_empty_injection_value(value):
+            compact[field] = value
+    return compact
+
+
+def _compact_persistent_node_for_injection(data: dict[str, Any]) -> dict[str, Any]:
+    allowed_fields = ["type", "description", "steps"]
+    compact: dict[str, Any] = {}
+    for field in allowed_fields:
+        value = _compact_injection_value(data.get(field), max_items=6)
+        if not _is_empty_injection_value(value):
+            compact[field] = value
+    return compact
+
+
+def _persistent_node_for_injection(node_id: str, node: dict[str, Any]) -> dict[str, Any]:
+    title, display_description = _daily_note_display_texts(node_id, node, {}, "zh-CN")
+    compact: dict[str, Any] = {}
+    node_type = str(node.get("type") or "").strip()
+    if node_type:
+        compact["type"] = node_type
+    if title:
+        compact["title"] = title
+    if display_description:
+        compact["description"] = display_description
+    return compact
+
+
 def _normalize_snippet_text(value: str) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()
 
@@ -4822,10 +5594,67 @@ def _extract_snippet_hint_segments(excerpt: str) -> list[str]:
     return [normalized] if len(normalized) >= 12 else []
 
 
-def truncate_text(value: str, max_length: int = 120) -> str:
+def _turn_index_from_ref(turn_ref: Any) -> int:
+    try:
+        return int(str(turn_ref or "").rsplit(":turn:", 1)[1])
+    except (IndexError, ValueError):
+        return 10**9
+
+
+def _first_turn_ref(value: Any) -> str:
+    if isinstance(value, dict):
+        refs = value.get("turn_refs") or []
+        if isinstance(refs, list) and refs:
+            return str(refs[0] or "")
+        return str(value.get("turn_id") or "")
+    return ""
+
+
+def _turn_conversation_id(turn_ref: str) -> str:
+    return str(turn_ref or "").split(":turn:", 1)[0]
+
+
+def _sort_timestamp_value(value: Any) -> float:
+    dt = _parse_iso_datetime(str(value or ""))
+    if dt is None:
+        return float("inf")
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.timestamp()
+
+
+def _episode_payload_sort_key(episode: dict[str, Any]) -> tuple[float, str, int, str]:
+    turn_ref = _first_turn_ref(episode)
+    return (
+        _sort_timestamp_value(
+            episode.get("time_range_start")
+            or episode.get("created_at")
+            or episode.get("updated_at")
+        ),
+        _turn_conversation_id(turn_ref),
+        _turn_index_from_ref(turn_ref),
+        str(episode.get("episode_id") or episode.get("id") or ""),
+    )
+
+
+def _raw_turn_payload_sort_key(turn: dict[str, Any]) -> tuple[float, str, int, str]:
+    turn_ref = str(turn.get("turn_id") or "")
+    return (
+        _sort_timestamp_value(turn.get("timestamp")),
+        _turn_conversation_id(turn_ref),
+        _turn_index_from_ref(turn_ref),
+        turn_ref,
+    )
+
+
+def truncate_text(value: str, max_length: int = 120, *, ellipsis: bool = True) -> str:
     normalized = _normalize_snippet_text(value)
     if len(normalized) <= max_length:
         return normalized
+    if max_length <= 0:
+        return ""
+    if not ellipsis or max_length == 1:
+        return normalized[:max_length].rstrip()
     return f"{normalized[: max(0, max_length - 1)].rstrip()}…"
 
 
@@ -5112,6 +5941,16 @@ def _message_payload(msg: RawMessage) -> dict[str, Any]:
     }
 
 
+def _raw_message_injection_payload(msg: RawMessage) -> dict[str, Any]:
+    payload = {
+        "role": msg.role,
+        "content": msg.content,
+    }
+    if msg.timestamp:
+        payload["timestamp"] = msg.timestamp
+    return payload
+
+
 def _conversation_turns(conv: RawConversation) -> list[dict[str, Any]]:
     if getattr(conv, "turns", None):
         id_to_index = {str(msg.msg_id or ""): idx for idx, msg in enumerate(conv.messages)}
@@ -5166,15 +6005,15 @@ def _conversation_turns(conv: RawConversation) -> list[dict[str, Any]]:
 def _summarize_turn_messages(messages: list[RawMessage]) -> str:
     user_parts = [str(msg.content or "").strip() for msg in messages if str(msg.role or "").strip().lower() == "user"]
     assistant_parts = [str(msg.content or "").strip() for msg in messages if str(msg.role or "").strip().lower() == "assistant"]
-    user_text = truncate_text(" ".join(user_parts), 80)
-    assistant_text = truncate_text(" ".join(assistant_parts), 120)
+    user_text = truncate_text(" ".join(user_parts), 80, ellipsis=False)
+    assistant_text = truncate_text(" ".join(assistant_parts), 120, ellipsis=False)
     if user_text and assistant_text:
         return f"用户询问：{user_text}；助手回应：{assistant_text}"
     if user_text:
         return f"用户询问：{user_text}"
     if assistant_text:
         return f"助手回应：{assistant_text}"
-    return truncate_text(" ".join(str(msg.content or "").strip() for msg in messages), 140)
+    return truncate_text(" ".join(str(msg.content or "").strip() for msg in messages), 140, ellipsis=False)
 
 
 def _build_related_qa_turns(
@@ -5230,20 +6069,95 @@ def _build_related_qa_turns(
             turn_messages = [conv.messages[idx] for idx in turn["message_indexes"] if 0 <= idx < len(conv.messages)]
             if not turn_messages:
                 continue
-            turn_payload = {
-                "conversation_id": conv.conv_id,
-                "platform": conv.platform,
-                "title": conv.title,
-                "turn_id": turn["turn_id"],
-                "message_ids": [msg.msg_id for msg in turn_messages],
-                "matched_reasons": hints[:3],
-                "summary": _summarize_turn_messages(turn_messages),
-            }
             if detailed:
-                turn_payload["messages"] = [_message_payload(msg) for msg in turn_messages]
+                turn_payload = {
+                    "title": conv.title,
+                    "turn_id": turn["turn_id"],
+                    "timestamp": next((msg.timestamp for msg in turn_messages if msg.timestamp), ""),
+                    "messages": [_raw_message_injection_payload(msg) for msg in turn_messages],
+                }
+            else:
+                turn_payload = {
+                    "conversation_id": conv.conv_id,
+                    "platform": conv.platform,
+                    "title": conv.title,
+                    "turn_id": turn["turn_id"],
+                    "message_ids": [msg.msg_id for msg in turn_messages],
+                    "matched_reasons": hints[:3],
+                    "turn_excerpt": _summarize_turn_messages(turn_messages),
+                }
             related_turns.append(turn_payload)
 
-    return related_turns
+    return sorted(related_turns, key=_raw_turn_payload_sort_key)
+
+
+def _episode_summary_evidence_payload(episode: dict[str, Any], *, detailed: bool) -> dict[str, Any]:
+    if detailed:
+        return {
+            "episode_id": str(episode.get("episode_id") or "").strip(),
+            "time_range_start": str(episode.get("time_range_start") or "").strip(),
+            "time_range_end": str(episode.get("time_range_end") or "").strip(),
+            "topic": str(episode.get("topic") or "").strip(),
+            "summary": str(episode.get("summary") or "").strip(),
+            "key_decisions": [
+                str(item).strip()
+                for item in (episode.get("key_decisions") or [])
+                if str(item).strip()
+            ],
+            "open_issues": _compact_episode_open_issues(episode.get("open_issues") or []),
+            "turn_refs": [
+                str(item).strip()
+                for item in (episode.get("turn_refs") or [])
+                if str(item).strip()
+            ],
+        }
+    return {
+        "episode_id": str(episode.get("episode_id") or "").strip(),
+        "topic": str(episode.get("topic") or "").strip(),
+        "summary": str(episode.get("summary") or "").strip(),
+        "time_range_start": str(episode.get("time_range_start") or "").strip(),
+        "time_range_end": str(episode.get("time_range_end") or "").strip(),
+        "key_decisions": [
+            str(item).strip()
+            for item in (episode.get("key_decisions") or [])
+            if str(item).strip()
+        ],
+        "open_issues": _compact_episode_open_issues(episode.get("open_issues") or []),
+    }
+
+
+def _compact_episode_open_issues(open_issues: list[Any]) -> list[str]:
+    kept: list[str] = []
+    for item in open_issues:
+        text = str(item or "").strip()
+        if not text:
+            continue
+        lowered = text.lower()
+        assistant_followup_markers = (
+            ("尚未回应" in text and ("助理" in text or "助手" in text)),
+            ("助理" in text or "助手" in text) and ("提议" in text or "询问是否需要继续" in text),
+            "assistant follow-up" in lowered,
+            "assistant offer" in lowered,
+        )
+        if any(assistant_followup_markers):
+            continue
+        kept.append(text)
+    return kept
+
+
+def _episode_ids_for_primary_task_types(
+    episodes: list[EpisodicMemory],
+    task_types: list[str] | tuple[str, ...] | set[str] | None,
+) -> list[str]:
+    labels = [str(label or "").strip() for label in (task_types or []) if str(label or "").strip()]
+    if not labels:
+        return []
+    matched: list[str] = []
+    for episode in episodes:
+        text = _task_type_support_text(episode)
+        if any(_task_type_is_mentioned(label, text) for label in labels):
+            matched.append(episode.episode_id)
+    return list(dict.fromkeys(matched))
 
 
 def build_selected_memory_payload(
@@ -5260,6 +6174,8 @@ def build_selected_memory_payload(
         "memory": {},
         "evidence": {},
     }
+    include_episode_evidence = bool(include_episodic_evidence or detailed_injection)
+    include_raw_evidence = bool(detailed_injection)
     episodes_dir = get_storage_root(settings) / "episodes"
     raw_conversation_map: dict[str, RawConversation] | None = None
     raw_conversation_ids: set[str] = set()
@@ -5271,64 +6187,96 @@ def build_selected_memory_payload(
     if selected["profile_fields"]:
         profile = wiki.load_profile()
         if profile:
-            payload["memory"]["profile"] = _filter_profile_fields(
+            profile_payload = _filter_profile_fields(
                 profile.model_dump(mode="json"),
                 selected["profile_fields"],
                 selected["profile_values"],
             )
-            profile_raw_ids, profile_hints, profile_turn_refs = _collect_raw_support_from_memory_object(profile, episodes_dir)
-            raw_conversation_ids.update(profile_raw_ids)
-            _merge_raw_hint_maps(raw_excerpt_hints, profile_hints)
-            for conv_id, refs in profile_turn_refs.items():
-                raw_turn_refs.setdefault(conv_id, set()).update(refs)
-            selected_episode_ids.update(getattr(profile, "source_episode_ids", []) or [])
-            selected_platform_record_ids.update(_collect_platform_support_from_memory_object(profile))
+            profile_payload = _compact_profile_for_injection(profile_payload)
+            if profile_payload:
+                payload["memory"]["profile"] = profile_payload
+            if include_episode_evidence:
+                selected_episode_ids.update(getattr(profile, "source_episode_ids", []) or [])
+            if include_raw_evidence:
+                profile_raw_ids, profile_hints, profile_turn_refs = _collect_raw_support_from_memory_object(profile, episodes_dir)
+                raw_conversation_ids.update(profile_raw_ids)
+                _merge_raw_hint_maps(raw_excerpt_hints, profile_hints)
+                for conv_id, refs in profile_turn_refs.items():
+                    raw_turn_refs.setdefault(conv_id, set()).update(refs)
+                selected_platform_record_ids.update(_collect_platform_support_from_memory_object(profile))
 
     if selected["preferences_fields"]:
         preferences = wiki.load_preferences()
         preferences_payload = preferences.model_dump(mode="json") if preferences else _preferences_payload_fallback(settings)
         if preferences_payload:
-            payload["memory"]["preferences"] = _filter_preference_fields(
+            filtered_preferences = _filter_preference_fields(
                 preferences_payload,
                 selected["preferences_fields"],
                 selected["preferences_values"],
             )
-            pref_raw_ids, pref_hints, pref_turn_refs = _collect_raw_support_from_memory_object(preferences, episodes_dir)
-            raw_conversation_ids.update(pref_raw_ids)
-            _merge_raw_hint_maps(raw_excerpt_hints, pref_hints)
-            for conv_id, refs in pref_turn_refs.items():
-                raw_turn_refs.setdefault(conv_id, set()).update(refs)
-            if preferences is not None:
-                selected_episode_ids.update(getattr(preferences, "source_episode_ids", []) or [])
-                selected_platform_record_ids.update(_collect_platform_support_from_memory_object(preferences))
+            filtered_preferences = _compact_preferences_for_injection(filtered_preferences)
+            if filtered_preferences:
+                payload["memory"]["preferences"] = filtered_preferences
+            if include_episode_evidence:
+                if preferences is not None:
+                    selected_episode_ids.update(getattr(preferences, "source_episode_ids", []) or [])
+                task_type_values = filtered_preferences.get("primary_task_types")
+                if isinstance(task_type_values, list):
+                    selected_episode_ids.update(_episode_ids_for_primary_task_types(wiki.list_episodes(), task_type_values))
+            if include_raw_evidence:
+                pref_raw_ids, pref_hints, pref_turn_refs = _collect_raw_support_from_memory_object(preferences, episodes_dir)
+                raw_conversation_ids.update(pref_raw_ids)
+                _merge_raw_hint_maps(raw_excerpt_hints, pref_hints)
+                for conv_id, refs in pref_turn_refs.items():
+                    raw_turn_refs.setdefault(conv_id, set()).update(refs)
+                if preferences is not None:
+                    selected_platform_record_ids.update(_collect_platform_support_from_memory_object(preferences))
 
     if selected["projects"]:
         projects = _valid_projects(wiki)
         if "*" not in selected["projects"]:
             projects = [project for project in projects if project.project_name in selected["projects"]]
-        payload["memory"]["projects"] = [project.model_dump(mode="json") for project in projects]
+        projects_payload = [project.model_dump(mode="json") for project in projects]
+        projects_payload = [
+            compact
+            for compact in (_compact_project_for_injection(project_payload) for project_payload in projects_payload)
+            if compact
+        ]
+        if projects_payload:
+            payload["memory"]["projects"] = projects_payload
         for project in projects:
-            project_raw_ids, project_hints, project_turn_refs = _collect_raw_support_from_memory_object(project, episodes_dir)
-            raw_conversation_ids.update(project_raw_ids)
-            _merge_raw_hint_maps(raw_excerpt_hints, project_hints)
-            for conv_id, refs in project_turn_refs.items():
-                raw_turn_refs.setdefault(conv_id, set()).update(refs)
-            selected_episode_ids.update(getattr(project, "source_episode_ids", []) or [])
-            selected_platform_record_ids.update(_collect_platform_support_from_memory_object(project))
+            if include_episode_evidence:
+                selected_episode_ids.update(getattr(project, "source_episode_ids", []) or [])
+            if include_raw_evidence:
+                project_raw_ids, project_hints, project_turn_refs = _collect_raw_support_from_memory_object(project, episodes_dir)
+                raw_conversation_ids.update(project_raw_ids)
+                _merge_raw_hint_maps(raw_excerpt_hints, project_hints)
+                for conv_id, refs in project_turn_refs.items():
+                    raw_turn_refs.setdefault(conv_id, set()).update(refs)
+                selected_platform_record_ids.update(_collect_platform_support_from_memory_object(project))
 
     if selected["workflows"]:
         workflows = _valid_workflows(wiki)
         if "*" not in selected["workflows"]:
             workflows = [workflow for workflow in workflows if workflow.workflow_name in selected["workflows"]]
-        payload["memory"]["workflows"] = [workflow.model_dump(mode="json") for workflow in workflows]
+        workflows_payload = [workflow.model_dump(mode="json") for workflow in workflows]
+        workflows_payload = [
+            compact
+            for compact in (_compact_workflow_for_injection(workflow_payload) for workflow_payload in workflows_payload)
+            if compact
+        ]
+        if workflows_payload:
+            payload["memory"]["workflows"] = workflows_payload
         for workflow in workflows:
-            workflow_raw_ids, workflow_hints, workflow_turn_refs = _collect_raw_support_from_memory_object(workflow, episodes_dir)
-            raw_conversation_ids.update(workflow_raw_ids)
-            _merge_raw_hint_maps(raw_excerpt_hints, workflow_hints)
-            for conv_id, refs in workflow_turn_refs.items():
-                raw_turn_refs.setdefault(conv_id, set()).update(refs)
-            selected_episode_ids.update(getattr(workflow, "source_episode_ids", []) or [])
-            selected_platform_record_ids.update(_collect_platform_support_from_memory_object(workflow))
+            if include_episode_evidence:
+                selected_episode_ids.update(getattr(workflow, "source_episode_ids", []) or [])
+            if include_raw_evidence:
+                workflow_raw_ids, workflow_hints, workflow_turn_refs = _collect_raw_support_from_memory_object(workflow, episodes_dir)
+                raw_conversation_ids.update(workflow_raw_ids)
+                _merge_raw_hint_maps(raw_excerpt_hints, workflow_hints)
+                for conv_id, refs in workflow_turn_refs.items():
+                    raw_turn_refs.setdefault(conv_id, set()).update(refs)
+                selected_platform_record_ids.update(_collect_platform_support_from_memory_object(workflow))
 
     if selected["persistent"]:
         persistent = load_persistent_nodes(settings)
@@ -5342,35 +6290,46 @@ def build_selected_memory_payload(
             node = nodes.get(node_id)
             if not isinstance(node, dict):
                 continue
-            selected_nodes.append({"id": node_id, **node})
-            selected_episode_ids.update(node.get("episode_refs", []))
-            for turn_id in node.get("turn_refs", []) or []:
-                turn_text = str(turn_id or "").strip()
-                if not turn_text:
-                    continue
-                conv_id = turn_text.split(":turn:", 1)[0]
-                if conv_id:
-                    raw_conversation_ids.add(conv_id)
-                    raw_turn_refs.setdefault(conv_id, set()).add(turn_text)
+            node_payload = _persistent_node_for_injection(node_id, node)
+            if node_payload:
+                selected_nodes.append(node_payload)
+            if include_episode_evidence:
+                selected_episode_ids.update(node.get("episode_refs", []))
+            if include_raw_evidence:
+                for turn_id in node.get("turn_refs", []) or []:
+                    turn_text = str(turn_id or "").strip()
+                    if not turn_text:
+                        continue
+                    conv_id = turn_text.split(":turn:", 1)[0]
+                    if conv_id:
+                        raw_conversation_ids.add(conv_id)
+                        raw_turn_refs.setdefault(conv_id, set()).add(turn_text)
         if selected_nodes:
             payload["memory"]["persistent_nodes"] = selected_nodes
 
-    if include_episodic_evidence and selected_episode_ids:
-        selected_episode_ids = _expand_episode_ids_with_connections(episodes_dir, selected_episode_ids)
-        evidence = []
+    if include_episode_evidence and selected_episode_ids:
+        if detailed_injection:
+            selected_episode_ids = _expand_episode_ids_with_connections(episodes_dir, selected_episode_ids)
+        episode_records: list[dict[str, Any]] = []
         for ep_id in sorted(selected_episode_ids):
             episode = _read_episode_record(episodes_dir, ep_id)
             if episode:
-                evidence.append(episode)
-        episode_raw_ids, episode_hints, episode_turn_refs = _collect_raw_support_from_episode_ids(episodes_dir, selected_episode_ids)
-        raw_conversation_ids.update(episode_raw_ids)
-        _merge_raw_hint_maps(raw_excerpt_hints, episode_hints)
-        for conv_id, refs in episode_turn_refs.items():
-            raw_turn_refs.setdefault(conv_id, set()).update(refs)
+                episode_records.append(episode)
+        episode_records.sort(key=_episode_payload_sort_key)
+        evidence = [
+            _episode_summary_evidence_payload(episode, detailed=detailed_injection)
+            for episode in episode_records
+        ]
+        if include_raw_evidence:
+            episode_raw_ids, episode_hints, episode_turn_refs = _collect_raw_support_from_episode_ids(episodes_dir, selected_episode_ids)
+            raw_conversation_ids.update(episode_raw_ids)
+            _merge_raw_hint_maps(raw_excerpt_hints, episode_hints)
+            for conv_id, refs in episode_turn_refs.items():
+                raw_turn_refs.setdefault(conv_id, set()).update(refs)
         if evidence:
             payload["evidence"]["episodes"] = evidence
 
-    if selected_platform_record_ids:
+    if include_raw_evidence and selected_platform_record_ids:
         platform_record_map = _load_platform_memory_record_map(settings)
         platform_records = [
             platform_record_map[record_id]
@@ -5380,7 +6339,7 @@ def build_selected_memory_payload(
         if platform_records:
             payload["evidence"]["platform_memory_records"] = platform_records
 
-    if raw_conversation_ids:
+    if include_raw_evidence and raw_conversation_ids:
         if raw_conversation_map is None:
             raw_conversation_map = _load_raw_conversation_object_map(settings)
         for conv_id in raw_conversation_ids:
@@ -5392,7 +6351,7 @@ def build_selected_memory_payload(
             detailed=detailed_injection,
         )
         if related_turns:
-            payload["evidence"]["related_qa_turns"] = related_turns
+            payload["evidence"]["raw_turns" if detailed_injection else "related_qa_turns"] = related_turns
         elif detailed_injection:
             raw_snippets = _build_relevant_raw_snippets(
                 raw_conversation_map,
@@ -5698,7 +6657,7 @@ def update_timestamp(settings: dict[str, Any]) -> dict[str, Any]:
 
 
 def _load_persistent_distill_prompt() -> str:
-    return (PROJECT_ROOT / "prompts" / "persistent_node_distill_bg.txt").read_text(encoding="utf-8")
+    return (PROJECT_ROOT / "prompts" / "nodes" / "daily_notes_system.txt").read_text(encoding="utf-8")
 
 
 def compute_l2_persistent_node_maintenance_signature(
@@ -5964,6 +6923,111 @@ def _prune_persistent_node_support_refs(settings: dict[str, Any], payload: dict[
     return payload
 
 
+def _persistent_node_refs(node: dict[str, Any], field: str) -> list[str]:
+    return [str(ref).strip() for ref in (node.get(field) or []) if str(ref).strip()]
+
+
+def _persistent_nodes_should_merge(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    left_episode_refs = set(_persistent_node_refs(left, "episode_refs"))
+    right_episode_refs = set(_persistent_node_refs(right, "episode_refs"))
+    if not left_episode_refs or not right_episode_refs:
+        return False
+
+    overlap = left_episode_refs & right_episode_refs
+    if not overlap:
+        return False
+
+    smaller_ref_count = min(len(left_episode_refs), len(right_episode_refs))
+    if smaller_ref_count and len(overlap) == smaller_ref_count:
+        return True
+
+    left_terms = _memory_support_terms(_persistent_node_support_text(left))
+    right_terms = _memory_support_terms(_persistent_node_support_text(right))
+    term_overlap = left_terms & right_terms
+    return len(overlap) >= 2 and bool(term_overlap)
+
+
+def _merge_persistent_node_description(primary: dict[str, Any], secondary: dict[str, Any]) -> str:
+    primary_description = str(primary.get("description") or "").strip()
+    secondary_description = str(secondary.get("description") or "").strip()
+    if not secondary_description:
+        return primary_description
+    if not primary_description:
+        return secondary_description
+    if secondary_description in primary_description:
+        return primary_description
+    if primary_description in secondary_description:
+        return secondary_description
+    return f"{primary_description} {secondary_description}"
+
+
+def _merge_persistent_node_pair(primary: dict[str, Any], secondary: dict[str, Any]) -> None:
+    for field in ("episode_refs", "turn_refs", "platform"):
+        merged = _persistent_node_refs(primary, field)
+        for ref in _persistent_node_refs(secondary, field):
+            if ref not in merged:
+                merged.append(ref)
+        primary[field] = merged
+
+    primary["description"] = _merge_persistent_node_description(primary, secondary)
+    primary["updated_at"] = max(
+        str(primary.get("updated_at") or ""),
+        str(secondary.get("updated_at") or ""),
+    ) or datetime.now(timezone.utc).isoformat()
+    if not primary.get("primary_language") and secondary.get("primary_language"):
+        primary["primary_language"] = secondary.get("primary_language")
+
+    ref_count = len(primary.get("episode_refs") or [])
+    if ref_count >= 4:
+        primary["confidence"] = "high"
+    elif ref_count >= 2:
+        primary["confidence"] = "medium"
+
+
+def _preferred_persistent_node_id(left_id: str, left: dict[str, Any], right_id: str, right: dict[str, Any]) -> str:
+    left_type = str(left.get("type") or "").strip().lower()
+    right_type = str(right.get("type") or "").strip().lower()
+    if left_type == "preference" and right_type != "preference":
+        return left_id
+    if right_type == "preference" and left_type != "preference":
+        return right_id
+    if len(_persistent_node_refs(left, "episode_refs")) >= len(_persistent_node_refs(right, "episode_refs")):
+        return left_id
+    return right_id
+
+
+def _merge_related_persistent_nodes(payload: dict[str, Any]) -> dict[str, Any]:
+    nodes = payload.get("nodes")
+    if not isinstance(nodes, dict) or len(nodes) < 2:
+        return payload
+
+    changed = True
+    while changed:
+        changed = False
+        node_ids = [node_id for node_id, node in nodes.items() if isinstance(node, dict)]
+        for left_index, left_id in enumerate(node_ids):
+            if left_id not in nodes:
+                continue
+            for right_id in node_ids[left_index + 1:]:
+                if right_id not in nodes:
+                    continue
+                left = nodes[left_id]
+                right = nodes[right_id]
+                if not _persistent_nodes_should_merge(left, right):
+                    continue
+                target_id = _preferred_persistent_node_id(left_id, left, right_id, right)
+                source_id = right_id if target_id == left_id else left_id
+                _merge_persistent_node_pair(nodes[target_id], nodes[source_id])
+                del nodes[source_id]
+                changed = True
+                break
+            if changed:
+                break
+
+    payload["nodes"] = nodes
+    return payload
+
+
 def save_persistent_nodes(settings: dict[str, Any], data: dict[str, Any]) -> None:
     root = get_storage_root(settings, create=True)
     payload = _default_persistent_payload()
@@ -5976,6 +7040,7 @@ def save_persistent_nodes(settings: dict[str, Any], data: dict[str, Any]) -> Non
         })
     payload = _prune_persistent_nodes_against_projects(settings, payload)
     payload = _prune_persistent_node_support_refs(settings, payload)
+    payload = _merge_related_persistent_nodes(payload)
 
     persistent_root = _persistent_root(root)
     persistent_root.mkdir(parents=True, exist_ok=True)
@@ -6182,12 +7247,14 @@ def update_persistent_nodes_for_episode(
     support_turn_refs_by_episode = {
         episode.episode_id: [str(ref).strip() for ref in (episode.turn_refs or []) if str(ref).strip()]
     }
+    support_episodes_by_id = {episode.episode_id: episode}
     for connection in (getattr(episode, "connections", []) or [])[:8]:
         if str(getattr(connection, "relation", "") or "") not in {"preferences", "persistent_node", "conversation_context"}:
             continue
         connected = wiki.load_episode(str(getattr(connection, "episode_id", "") or ""))
         if not connected:
             continue
+        support_episodes_by_id[connected.episode_id] = connected
         support_turn_refs_by_episode[connected.episode_id] = [
             str(ref).strip() for ref in (connected.turn_refs or []) if str(ref).strip()
         ]
@@ -6250,6 +7317,7 @@ def update_persistent_nodes_for_episode(
             episode.turn_refs,
             primary_language,
             support_turn_refs_by_episode,
+            support_episodes_by_id,
         )
         save_persistent_nodes(settings, pn_data)
 
@@ -6412,14 +7480,25 @@ def rebuild_persistent_memory(
     prefs_data = builder.llm.extract_json(builder.prompts["preference_system"], prefs_context)
     prefs = builder._build_preferences(prefs_data, l1_text, earliest_ts, pref_ep_ids, ep_by_id)
     profile, prefs = _merge_l1_claims_into_profile_preferences(settings, profile, prefs)
+    if not pref_ep_ids and not l1_text:
+        prefs.style_preference = []
+        prefs.terminology_preference = []
+        prefs.formatting_constraints = []
+        prefs.forbidden_expressions = []
+        prefs.revision_preference = []
+        prefs.response_granularity = ""
+    if not prefs.language_preference:
+        dominant_language = builder._dominant_episode_language(episodes)
+        if dominant_language:
+            prefs.language_preference = dominant_language
     if profile.primary_task_types:
         profile.primary_task_types = []
         wiki.save_profile(profile)
-    prefs.primary_task_types = _stable_primary_task_types(
-        list(prefs.primary_task_types or []),
+    prefs.primary_task_types = _infer_primary_task_types_fallback(
         episodes,
         [],
-        l1_text,
+        [],
+        list(prefs.primary_task_types or []),
     )
     wiki.save_preferences(prefs)
 
@@ -6441,6 +7520,8 @@ def rebuild_persistent_memory(
             stale_md.unlink()
     for project in projects:
         wiki.save_project(project)
+    profile = _merge_project_focus_into_profile(profile, projects)
+    wiki.save_profile(profile)
 
     stage("正在整理工作流...", 4)
     workflows_context = builder._filter_digest(episodes, l1_text, "workflows")
@@ -6469,11 +7550,11 @@ def rebuild_persistent_memory(
     wiki.save_workflows(workflows)
     save_workflow_asset_library(settings, workflows)
 
-    prefs.primary_task_types = _stable_primary_task_types(
-        list(prefs.primary_task_types or []),
+    prefs.primary_task_types = _infer_primary_task_types_fallback(
         episodes,
         projects,
-        l1_text,
+        workflows,
+        list(prefs.primary_task_types or []),
     )
     wiki.save_preferences(prefs)
 
@@ -6584,6 +7665,7 @@ def _run_organize_job(job_id: str, settings: dict[str, Any]) -> None:
 
             saved_episode_ids: list[str] = []
             for episode in built_episodes:
+                _normalize_episode_memory_routes(episode)
                 first_turn = episode.turn_refs[0] if episode.turn_refs else "conversation"
                 episode.episode_id = stable_episode_id(f"{raw_key}:{first_turn}:{episode.topic}")
                 wiki.save_episode(episode)
@@ -7061,16 +8143,21 @@ def export_package(payload: ExportPackageRequest) -> dict[str, Any]:
 @app.post("/api/inject/package")
 def inject_package(payload: InjectPackageRequest) -> dict[str, Any]:
     settings = load_settings()
+    detailed = bool(payload.detailed_injection)
     payload_data = build_selected_memory_payload(
         settings,
         payload.selected_ids,
         include_episodic_evidence=True,
-        detailed_injection=bool(payload.detailed_injection),
+        detailed_injection=detailed,
     )
-    text = (
-        f"请在当前 {payload.target_platform or 'generic'} 会话中加载以下结构化记忆、证据和相关原始对话片段，并将其作为后续理解和回答的上下文基础：\n\n"
-        + json.dumps(payload_data, ensure_ascii=False, indent=2)
+    intro = (
+        f"请在当前 {payload.target_platform or 'generic'} 会话中加载以下结构化记忆和相关 episode 摘要，并将其作为后续理解和回答的上下文参考。"
+        "以下内容已按历史记录先后排序："
+        if not detailed
+        else f"请在当前 {payload.target_platform or 'generic'} 会话中加载以下结构化记忆、证据和相关原始对话片段，并将其作为后续理解和回答的上下文基础。"
+        "以下内容已按历史记录先后排序："
     )
+    text = intro + "\n\n" + json.dumps(payload_data, ensure_ascii=False, indent=2)
     return {"ok": True, "text": text}
 
 

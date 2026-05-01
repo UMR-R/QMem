@@ -53,7 +53,10 @@ Evidence boundary rules:
 - Use `type: preference` only when the user explicitly states, confirms, chooses, or repeatedly demonstrates a stable preference or criterion.
 - If the user only asks for advice and the assistant recommends something, write a neutral `topic` such as "the user was comparing options for X; assistant suggested Y, pending confirmation".
 - Do NOT turn assistant-only recommendations into user preferences.
+- Do NOT include assistant-only follow-up offers, upsell questions, or suggested next topics in `description` unless the user explicitly asks for them, accepts them, or leaves them pending.
 - Use neutral keys such as `*_context`, `*_options`, or `*_candidate_suggestions` when evidence is not confirmed.
+- Do not copy assistant-generated category labels or marketing-style descriptions as if they were the user's own preference or life context.
+- `key` is an internal retrieval key. It may use neutral status words, but `description` should be natural user-facing prose and should not expose internal words like "context", "candidate", "node", or "memory" as labels.
 
 Temporal and connection rules:
 - Use timestamps, event order, and connected episode summaries to decide whether a new note updates, supersedes, or merely relates to an old note.
@@ -65,6 +68,9 @@ Temporal and connection rules:
 Granularity rules:
 - Create daily notes at a reusable level. Keep concrete details when they are likely useful later, but avoid one node per tiny subdetail.
 - Merge semantic duplicates and overly fine-grained siblings.
+- For one personal-choice thread, keep upstream context and downstream follow-up choices together unless they clearly support different future retrieval intents.
+- If one daily_note is an application or extension of another daily_note and their support episodes overlap, merge them into one node instead of keeping sibling cards.
+- When merging a preference-like node and a topic-like node with overlapping support, keep the user's underlying preference or criterion as the anchor and include the downstream choice context in the same description.
 - For one episode, do not split highly related criteria into many near-duplicate nodes.
 - Split only when the notes belong to clearly different domains or future retrieval intents.
 

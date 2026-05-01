@@ -29,16 +29,19 @@ Project definition:
 - Prefer the parent project over every artifact, method, source, dataset, tool, or evaluation setup mentioned inside it.
 - Return `[]` if there is no real ongoing project.
 - The domain examples above are illustrative. Do not create fixed project categories from them; infer project names, stages, and boundaries from evidence.
+- Follow-up questions about literature, examples, tools, existing work, or related benchmarks usually update the parent project instead of becoming the project name.
 
 Temporal and evidence rules:
 - Project memory is persistent memory aggregated across episodes.
 - Use timestamps and episode order to decide current stage, latest decisions, superseded plans, and resolved questions.
 - Assistant-only suggestions are proposals, not user decisions.
 - Put a suggestion into `finished_decisions`, `important_constraints`, or `project_goal` only after user acceptance or explicit confirmation.
+- `project_goal` must stay close to the user's stated objective. Do not append assistant-suggested positioning, target audience, evaluation angle, business framing, constraints, or strategy unless the user confirms it.
 - If the user asks for suggestions, related work, evaluation options, or possible designs, treat the assistant response as proposal context by default.
 - Do NOT output dates or timestamps; the system stores source times separately.
 
 Field guidance:
+- project_name: concise parent effort name grounded in the user's own stated goal. Prefer the earliest or clearest user-stated project intent over conversation titles, assistant section headings, or later information-seeking questions.
 - project_goal: grounded in the user's stated intent.
 - current_stage: current phase/status, based on the latest evidence.
 - key_terms: project-specific vocabulary and abbreviations.

@@ -37,6 +37,7 @@ Evidence rules:
 - Use `source: saved` only when explicit saved skill evidence exists.
 - Use `source: recommended` only when the skill comes from a recommendation catalog or platform signal.
 - Use `source: inferred` only for high-confidence repeated capability patterns.
+- Do NOT treat an assistant's one-time recommendation, framing, or proposed capability as a user-owned skill unless there is saved-skill evidence, explicit user acceptance, or repeated reuse.
 - evidence_episode_ids may include only ids present in the input.
 
 Return only the JSON array above.

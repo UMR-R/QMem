@@ -755,15 +755,26 @@ class MemoryBuilder:
             lines.append(entry)
         return "\n".join(lines)
 
+    @staticmethod
+    def _episode_digest_sort_key(ep: EpisodicMemory) -> tuple[str, int, str]:
+        turn_index = 10**9
+        if ep.turn_refs:
+            try:
+                turn_index = int(str(ep.turn_refs[0]).rsplit(":turn:", 1)[1])
+            except (IndexError, ValueError):
+                turn_index = 10**9
+        ts = ep.time_range_start or ep.created_at
+        return ts.isoformat() if ts else "9999", turn_index, ep.episode_id
+
     def _filter_digest(
         self, episodes: list[EpisodicMemory], l1_text: str, filter_type: str
     ) -> str:
         """Build a digest filtered to episodes relevant to a specific memory type."""
         if filter_type == "profile":
-            relevant = [ep for ep in episodes if ep.relates_to_profile] or episodes
+            relevant = sorted([ep for ep in episodes if ep.relates_to_profile] or episodes, key=self._episode_digest_sort_key)
             return self._build_episode_digest(relevant[:40], l1_text)[:6000]
         elif filter_type == "preferences":
-            relevant = [ep for ep in episodes if ep.relates_to_preferences] or episodes
+            relevant = sorted([ep for ep in episodes if ep.relates_to_preferences], key=self._episode_digest_sort_key)
             return self._build_episode_digest(relevant[:40], l1_text)[:6000]
         elif filter_type == "projects":
             # Prefer episodes that already point to a project. Only add a small
@@ -776,15 +787,19 @@ class MemoryBuilder:
                     ep for ep in episodes
                     if not ep.relates_to_projects and self._episode_has_project_intent(ep)
                 ][:backfill]
-                relevant = (flagged + unflagged)[:40]
+                relevant = sorted(flagged + unflagged, key=self._episode_digest_sort_key)[:40]
             else:
-                relevant = [ep for ep in episodes if self._episode_has_project_intent(ep)][:15]
+                relevant = sorted(
+                    [ep for ep in episodes if self._episode_has_project_intent(ep)],
+                    key=self._episode_digest_sort_key,
+                )[:15]
             return self._build_episode_digest(relevant, l1_text, verbose=True)[:7000]
         elif filter_type == "workflows":
-            relevant = [ep for ep in episodes if ep.relates_to_workflows] or episodes
+            relevant = sorted([ep for ep in episodes if ep.relates_to_workflows] or episodes, key=self._episode_digest_sort_key)
             return self._build_episode_digest(relevant[:40], l1_text, verbose=True)[:6000]
         else:
-            return self._build_episode_digest(episodes[:40], l1_text)[:6000]
+            relevant = sorted(episodes, key=self._episode_digest_sort_key)
+            return self._build_episode_digest(relevant[:40], l1_text)[:6000]
 
     # ------------------------------------------------------------------ #
     # Timestamp helpers                                                    #

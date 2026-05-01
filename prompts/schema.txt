@@ -127,13 +127,13 @@ L3 defines how memory is validated, linked, merged, split, exported, and indexed
 
 Each persistent node type has its own extraction or maintenance prompt:
 
-- `profile_system.txt` maintains profile memory.
-- `preference_system.txt` maintains preference memory.
-- `projects_system.txt` maintains project memory.
-- `workflows_system.txt` maintains workflow memory.
-- `persistent_node_distill_bg.txt` maintains daily_notes.
-- `skills_system.txt` maintains saved/recommended skill memory.
-- `display_taxonomy_proposal.txt` may suggest new frontend display groups, but it must not directly create active groups.
+- `nodes/profile_system.txt` maintains profile memory.
+- `nodes/preferences_system.txt` maintains preference memory.
+- `nodes/projects_system.txt` maintains project memory.
+- `nodes/workflows_system.txt` maintains workflow memory.
+- `nodes/daily_notes_system.txt` maintains daily_notes.
+- `nodes/skills_system.txt` maintains saved/recommended skill memory.
+- `display/display_taxonomy_proposal.txt` may suggest new frontend display groups, but it must not directly create active groups.
 
 ## Frontend Display Taxonomy
 

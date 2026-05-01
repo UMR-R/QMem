@@ -27,6 +27,7 @@ Evidence and temporal rules:
 - Be conservative. If a signal looks temporary, leave it out.
 - Do NOT output dates or time fields; time is maintained by the system and source episodes.
 - Dynamically group fine-grained rules under higher-level preferences when the evidence supports it. Do not create a separate preference just because a single phrase, punctuation mark, object, or example appears once.
+- Distinguish user preferences from assistant advice. Do not turn an assistant's recommended style, task framing, category name, or suggested wording into a user preference unless the user explicitly accepts it or repeats it as their own requirement.
 
 Field guidance:
 - style_preference: stable style or tone preferences.

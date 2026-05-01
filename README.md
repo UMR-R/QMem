@@ -176,14 +176,16 @@ Prompt files now live in `prompts/` and are used directly by the extension, back
 | File | Used by | Purpose |
 |---|---|---|
 | `prompts/cold_start.txt` | popup injection flow | bootstrap prompt for memory injection |
-| `prompts/platform_memory_collect.txt` | popup platform-memory flow | collect saved memory and agent configuration from the current platform |
-| `prompts/episode_system.txt` | `MemoryBuilder` | episode extraction during organize |
-| `prompts/profile_system.txt` | `MemoryBuilder` | profile rebuild |
-| `prompts/preference_system.txt` | `MemoryBuilder` | preference rebuild |
-| `prompts/projects_system.txt` | `MemoryBuilder` | project rebuild |
-| `prompts/workflows_system.txt` | `MemoryBuilder` | workflow rebuild |
-| `prompts/delta_system.txt` | `MemoryUpdater` and background engine | incremental memory update |
-| `prompts/persistent_node_distill_bg.txt` | backend and background engine | persistent-node distillation |
+| `prompts/platform/platform_memory_collect.txt` | popup platform-memory flow | collect saved memory and agent configuration from the current platform |
+| `prompts/episodes/episode_system.txt` | `MemoryBuilder` | episode extraction during organize |
+| `prompts/episodes/delta_system.txt` | `MemoryUpdater` and background engine | incremental memory update |
+| `prompts/nodes/profile_system.txt` | `MemoryBuilder` | profile rebuild |
+| `prompts/nodes/preferences_system.txt` | `MemoryBuilder` | preference rebuild |
+| `prompts/nodes/projects_system.txt` | `MemoryBuilder` | project rebuild |
+| `prompts/nodes/workflows_system.txt` | `MemoryBuilder` | workflow rebuild |
+| `prompts/nodes/daily_notes_system.txt` | backend and background engine | daily-note persistent-node distillation |
+| `prompts/nodes/skills_system.txt` | memory policy / future skill flow | saved and recommended skill memory |
+| `prompts/display/display_taxonomy_proposal.txt` | memory display policy | optional display taxonomy proposals |
 | `prompts/schema.txt` | backend/background persistent-node flow | schema context |
 
 ## Memory Store Layout

@@ -1,5 +1,63 @@
 # 开发日志
 
+## 2026-05-01
+
+- 🏠 压缩 Daily Notes 前端摘要
+  - 改了什么：
+    - 将 Daily Notes 的 `display_description` 改成约 20 字的短状态句。
+    - 优先保留偏好、约束和待确认状态，例如“酸味偏好，低酒精浓度款式待确认”。
+    - 保留后端完整 `description` 和注入证据，不用前端展示长度反向裁剪记忆内容。
+    - 修复 popup 选择列表中 Daily Notes 小字摘要被前端清空的问题，让 checkbox 下方继续显示短摘要。
+    - 新增 Daily Notes 证据重叠合并规则，将同一偏好延伸出的应用场景合并到同一节点，避免“酸味食物偏好”和“酸味鸡尾酒选择”拆成两张卡。
+    - 调整 Daily Notes 前端摘要生成，输出完整短句，不再机械截断成半句话。
+    - 精简精细注入 payload：memory 层只保留节点标题与短描述，episode 层只保留时间、topic、summary、open issues 和 turn refs，raw 层只保留每轮原始 user/assistant 消息。
+    - 移除精细注入里的后端分析字段和重复字段，包括 connections、display、evidence_links、matched_reasons、turn_excerpt、message_ids 等。
+    - 注入证据按历史记录先后排序；同一时间下按同一对话的 turn 顺序排列，并在注入 prompt 中明确说明这一点。
+    - 后端 persistent 分析输入也改为按 episode 时间和 turn 顺序排序，避免同一时间的多轮对话被乱序分析。
+  - 为了什么：
+    - 让前端卡片更紧凑，避免日常记忆描述占用过多空间。
+    - 保证用户查看时能快速扫到关键信息，同时不损失后续注入所需的完整上下文。
+    - 让同一条个人偏好及其后续选择上下文保持在一个节点里，减少重复和割裂感。
+    - 让精细注入保留完整原始回答过程，同时避免把同一证据在多个后端字段中反复注入。
+    - 让模型在处理 current、previous、before、after 等时间关系时看到稳定的历史顺序。
+
+- 🏠 复跑 raw 记忆整理并修正 Daily Notes 展示截断
+  - 改了什么：
+    - 将当前 `.state/wiki/raw` 复制到 `/tmp/memory_raw_eval_R6xBt3/wiki/raw`，用临时 wiki 跑完整 raw → episodes → persistent nodes → frontend display 流程。
+    - 验证结果为 4 个 raw conversations、10 个 episodes、1 个 project、0 个 workflows、4 个 persistent nodes。
+    - 抽查 compact 注入，确认普通注入不再携带 episode evidence 或 raw turn，只输出被选节点的有效字段。
+    - 修正 Daily Notes 前端展示：识别 `fruits` 为“水果”，并在描述过长时优先截到完整分句，避免出现半截词或省略号。
+  - 为了什么：
+    - 给用户 review 当前整理结果提供最新样本输出。
+    - 继续收紧前端显示的精炼度和可读性。
+    - 确认项目 goal 中未确认的助手建议不会作为 compact 注入里的已确认目标。
+
+- 🏠 泛化项目命名与 Daily Notes 展示规则
+  - 改了什么：
+    - 更新 `profile_system`，要求长期关注方向不要同时输出同一项目的项目名和描述性改写。
+    - 更新 `episode_system`，要求保留用户启动长期项目的 turn，即使助手回复主要是建议。
+    - 更新 `projects_system`，要求项目名优先来自用户明确提出的父项目，不被后续资料检索问题或会话标题覆盖。
+    - 更新 `daily_notes_system`，要求 internal key 可以保留证据状态，但自然语言 description 不暴露 `context/candidate/memory/node` 这类内部标签。
+    - 后端增加 project-aware focus 去重，把和稳定 project goal/name 重叠的 profile focus 合并到项目名。
+    - 后端 Daily Notes 标题生成改为自然 UI 短语，不再把内部 `context` 显示成“上下文”。
+    - 复跑 raw 测试后，Profile 只显示 `T2I统一评测项目`，Daily Notes 显示为 `风衣颜色选择` 和 `酸味水果偏好`。
+  - 为了什么：
+    - 避免项目描述和项目名重复污染用户画像。
+    - 避免前端暴露内部存储术语。
+    - 让 prompt 规则可泛化到其他项目和日常选择场景，而不是针对 T2I 或风衣样本写死。
+
+- 🏠 调整普通注入与精细注入的证据边界
+  - 改了什么：
+    - 普通注入恢复轻量 `episode summary` evidence，只保留 episode id、topic、summary、时间范围、key decisions 和 open issues。
+    - 普通注入继续排除 raw turn、原始 messages、related raw snippets 和存储元数据。
+    - 精细注入保留完整 episode record，并继续带 raw turn / messages 证据。
+    - Daily Notes 前端 description 改回完整摘要文本，不再只取第一句，也不使用省略号。
+    - compact 注入层过滤“用户尚未回应助手/助理提议”这类助手主动 follow-up，避免写成用户待办。
+  - 为了什么：
+    - 让普通注入既有必要的 episode 摘要证据，又不会把 raw 对话塞进当前会话。
+    - 让前端 daily note 摘要信息完整、可读，并避免半截截断。
+    - 进一步防止助手主动建议污染用户记忆状态。
+
 ## 2026-04-30
 
 - 🏠 梳理项目记忆架构与清理无用文件
@@ -174,3 +232,40 @@
   - 为了什么：
     - 让 backend、`memory_transferor` 和 prompts 对同一套节点定义与前端展示结构达成一致。
     - 支持后续“模型建议新增展示组，用户确认是否添加”的扩展机制。
+
+- 🏠 拆分 prompt 目录并修正主要任务类型展示
+  - 改了什么：
+    - 将根目录 prompt 按用途整理为 `episodes/`、`nodes/`、`platform/`、`display/` 四类子目录。
+    - 将 daily notes 的 prompt 明确命名为 `prompts/nodes/daily_notes_system.txt`。
+    - 更新 Python、backend 和 background prompt loader，确保新目录结构仍可加载。
+    - 更新 README、开发文档和 schema prompt 中的旧路径说明。
+    - 修正 Preferences 的“主要任务类型”前端输出，从一个合并 checkbox 拆成每个任务类型一个 checkbox。
+  - 为了什么：
+    - 让“一个节点一个 prompt”的结构更清楚，避免 daily_notes 继续藏在旧的 `persistent_node_distill_bg` 名字里。
+    - 让前端可以单独勾选“搭配建议”“推荐列表”“研究规划”等稳定任务类型，同时后端仍按 `primary_task_types` 字段和值做过滤。
+
+- 🏠 修复 raw 记忆整理中的节点路由问题
+  - 改了什么：
+    - 修复 daily_notes 维护时没有传入 support episode 对象，导致 LLM 返回的新节点全部被 support 校验丢弃的问题。
+    - 在 backend organize 路径加入 episode 路由归一化，避免生活类日常上下文被误送进 profile / preferences。
+    - 让 Preferences 在没有明确表达偏好证据时不再读取全量 episode 推断回答风格，只保留主语言和任务类型。
+    - 给 `primary_task_types` 增加非 LLM 候选生成和稳定性过滤，fresh run 也能产出“搭配建议 / 推荐列表 / 研究规划”这类高层任务类型。
+    - 将稳定项目补入 Profile 的“长期关注方向”，并把 Daily Notes 前端标题收短成短语。
+  - 为了什么：
+    - 让 raw → episode → persistent 的整理结果符合当前产品边界：Profile 是身份/背景/长期方向，Preferences 是语言/表达/任务类型，Daily Notes 承接生活选择和日常偏好。
+    - 修复测试 raw 中 daily_notes 为空、任务类型为空、酸味水果误入 profile/preferences 的问题。
+
+- 🏠 收紧节点 prompt 与 compact 注入粒度
+  - 改了什么：
+    - 更新 episodes、profile、preferences、projects、workflows、daily_notes、skills、delta prompt，统一要求区分用户事实、用户确认和助手建议。
+    - 在 projects prompt 中明确 `project_goal` 只能来自用户已表达目标，助手提出的定位、场景、策略和约束必须先作为待确认内容。
+    - 在 backend 注入路径新增 compact 适配层，普通注入只输出被选节点的有效字段，不再附带存储元数据、episode evidence 或 raw turn。
+    - 将精细注入保留为证据模式，只有用户开启 detailed injection 时才带 episode / raw 追溯。
+    - 对存量项目中的未确认定位做 compact 注入保护，避免把待确认的建议作为已确认 project goal 注入。
+    - 修正 related raw turn 的字段名，从 `summary` 改为 `turn_excerpt`，避免把原文截取伪装成摘要。
+    - 调整 Daily Notes 前端标题和描述生成，让标题保持短语化，描述优先取完整句子，不再出现省略号式截断。
+    - 移除前端记忆选择列表和 skill 卡片上的强制 line-clamp 省略号。
+  - 为了什么：
+    - 避免助手建议污染用户画像、偏好、项目目标、workflow、daily_notes 或 skills。
+    - 让普通注入更像“必要上下文”，而不是把大段存储结构和原始对话塞进当前会话。
+    - 让前端展示保持简洁、自然，并减少半截文本和省略号带来的误读。

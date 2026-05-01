@@ -40,16 +40,22 @@ memory_assistant/
 
 ```text
 prompts/
-├── episode_system.txt
-├── profile_system.txt
-├── preference_system.txt
-├── projects_system.txt
-├── workflows_system.txt
-├── delta_system.txt
-├── persistent_node_distill_bg.txt
 ├── schema.txt
-├── cold_start.txt
-└── platform_memory_collect.txt
+├── episodes/
+│   ├── episode_system.txt
+│   └── delta_system.txt
+├── nodes/
+│   ├── profile_system.txt
+│   ├── preferences_system.txt
+│   ├── projects_system.txt
+│   ├── workflows_system.txt
+│   ├── daily_notes_system.txt
+│   └── skills_system.txt
+├── platform/
+│   └── platform_memory_collect.txt
+├── display/
+│   └── display_taxonomy_proposal.txt
+└── cold_start.txt
 ```
 
 职责：

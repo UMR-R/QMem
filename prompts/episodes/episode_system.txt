@@ -30,8 +30,10 @@ Core rules:
 - Do NOT merge multiple turns into one episode. Cross-turn grouping belongs to episode connections and persistent memory, not to episodic memory.
 - You may use neighboring turns only to resolve pronouns, references, or "this/that/previous" wording. The episode summary must still describe only the referenced turn.
 - Skip turns with no durable memory value.
+- Do NOT skip a turn where the user states an intent to start, build, evaluate, write, research, organize, or plan a long-running effort. Preserve the user's intent even if the assistant response is mostly suggestions.
 - Be factual and concise. Do NOT hallucinate project names, workflows, user traits, or decisions.
 - Generalize from the evidence. Do not turn a domain, object, platform, evaluation artifact, tool, or example phrase from the prompt into a fixed category.
+- Distinguish what the user said, what the user accepted, and what the assistant suggested. Assistant suggestions are context unless the user explicitly confirms, chooses, or repeats them.
 
 Language policy:
 - The prompt and rules are in English for precision.
@@ -53,9 +55,10 @@ Field rules:
 - key_decisions: only concrete decisions or conclusions explicitly made, accepted, or confirmed by the user in the referenced turn.
 - Do NOT put assistant-only recommendations, proposals, or speculative suggestions into key_decisions unless the user explicitly accepts them.
 - open_issues: questions, blockers, or follow-up tasks that remain unresolved.
+- Do NOT put assistant-only follow-up offers, upsell questions, or suggested next topics into open_issues unless the user asks for them, accepts them, or explicitly leaves them pending.
 - relates_to_profile: true only if the turn reveals stable background, identity, role, domain, language mode, or durable communication context.
 - relates_to_preferences: true only if the turn reveals stable response style, terminology, formatting, language, interaction, or selection criteria.
-- relates_to_projects: list only higher-level user-owned ongoing projects.
+- relates_to_projects: list only higher-level user-owned ongoing projects. If the user says they want to build or pursue a project, use a concise parent-project label derived from that user intent, not from later assistant suggestions or conversation titles.
 - relates_to_workflows: list only reusable procedures with a trigger and repeatable steps.
 
 Example policy:

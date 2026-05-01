@@ -13,16 +13,16 @@ from pathlib import Path
 PROMPTS_DIR = Path(__file__).resolve().parents[4] / "prompts"
 
 PROMPT_FILES = {
-    "profile_system": "profile_system.txt",
-    "preference_system": "preference_system.txt",
-    "projects_system": "projects_system.txt",
-    "workflows_system": "workflows_system.txt",
-    "skills_system": "skills_system.txt",
-    "daily_notes_system": "persistent_node_distill_bg.txt",
-    "episode_system": "episode_system.txt",
-    "delta_system": "delta_system.txt",
-    "display_taxonomy_proposal": "display_taxonomy_proposal.txt",
-    "platform_memory_collect": "platform_memory_collect.txt",
+    "profile_system": "nodes/profile_system.txt",
+    "preference_system": "nodes/preferences_system.txt",
+    "projects_system": "nodes/projects_system.txt",
+    "workflows_system": "nodes/workflows_system.txt",
+    "skills_system": "nodes/skills_system.txt",
+    "daily_notes_system": "nodes/daily_notes_system.txt",
+    "episode_system": "episodes/episode_system.txt",
+    "delta_system": "episodes/delta_system.txt",
+    "display_taxonomy_proposal": "display/display_taxonomy_proposal.txt",
+    "platform_memory_collect": "platform/platform_memory_collect.txt",
     "cold_start": "cold_start.txt",
     "schema": "schema.txt",
 }

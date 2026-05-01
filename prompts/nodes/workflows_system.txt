@@ -38,6 +38,7 @@ Temporal and evidence rules:
 - Newer explicit corrections can replace older step order.
 - Do NOT output dates or time fields; the system stores source times separately.
 - Do NOT treat assistant-only suggestions as the user's workflow unless the user confirms or repeats them.
+- Do NOT turn an assistant-suggested process, checklist, or implementation plan into workflow memory unless the user asks to adopt it, reuses it, or explicitly describes it as their preferred process.
 
 Field guidance:
 - workflow_name: stable name for the procedure.

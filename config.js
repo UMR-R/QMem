@@ -316,24 +316,23 @@ description 描述规律本身，而非触发该规律的具体事件。`,
 }; // end CONFIG
 
 // ── Prompt loader ──────────────────────────────────────────────────────────────
-// Fetches each used prompt from prompts/*.txt and overwrites the corresponding field.
+// Fetches each used prompt file and overwrites the corresponding field.
 // Call once on popup init; falls back to the hardcoded strings above if a file
 // cannot be fetched.
 CONFIG.loadPrompts = async function () {
-  const base = chrome.runtime.getURL("prompts/");
   const files = [
-    ["cold_start",                s => { CONFIG.load                    = s; }],
-    ["platform_memory_collect",   s => { CONFIG.platformMemoryCollect    = s; }],
+    ["cold_start.txt",                         s => { CONFIG.load                    = s; }],
+    ["platform/platform_memory_collect.txt",   s => { CONFIG.platformMemoryCollect    = s; }],
   ];
-  await Promise.all(files.map(async ([name, apply]) => {
+  await Promise.all(files.map(async ([path, apply]) => {
     try {
-      const text = await fetch(base + name + ".txt").then(r => {
+      const text = await fetch(chrome.runtime.getURL(`prompts/${path}`)).then(r => {
         if (!r.ok) throw new Error(r.status);
         return r.text();
       });
       apply(text.trimEnd());
     } catch (e) {
-      console.warn(`[config] prompt file ${name}.txt not loaded, using default:`, e.message);
+      console.warn(`[config] prompt file ${path} not loaded, using default:`, e.message);
     }
   }));
 };

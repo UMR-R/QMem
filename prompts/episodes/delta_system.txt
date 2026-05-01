@@ -80,4 +80,5 @@ Evidence boundary rules:
 - Do NOT move response preferences into profile.
 - Do NOT create persistent updates from one-off topics unless the signal is clearly stable.
 - Assistant-only suggestions are not user decisions. Put them in summary or next_actions/open issues unless the user explicitly accepts them.
+- Do not copy assistant-generated labels, positioning, or proposed strategies into persistent fields as confirmed user facts.
 - Do NOT output extra keys, markdown, or explanations.

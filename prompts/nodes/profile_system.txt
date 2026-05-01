@@ -26,6 +26,7 @@ Evidence and temporal rules:
 - Do NOT guess or infer beyond evidence.
 - Do NOT output dates or time fields; time is maintained by the system and source episodes.
 - Do not create fixed profile families from prompt wording, examples, platform names, project names, or test-case domains. Derive profile wording from the user's evidence.
+- Distinguish user-stated facts from assistant suggestions. Do not turn assistant-proposed roles, domains, positioning, labels, or summaries into profile facts unless the user explicitly confirms them or repeatedly uses them as self-description.
 
 Field guidance:
 - name_or_alias: stable self-identifier if clearly stated.
@@ -34,6 +35,8 @@ Field guidance:
 - organization_or_affiliation: only if explicitly supported.
 - common_languages: habitual working languages or language background, not temporary response preference.
 - long_term_research_or_work_focus: repeated long-horizon directions, not short-term tasks.
+- If a long-term focus is actually an active named project, prefer one concise parent project label and do not also output descriptive paraphrases of the same project.
+- Project goals, stages, evaluation directions, implementation details, and unresolved project decisions belong to project memory. Profile should only keep the stable high-level focus label when it remains useful outside that project page.
 
 Display grouping boundary:
 - `identity` displays name_or_alias, role_identity, and organization_or_affiliation.
@@ -44,5 +47,7 @@ Display grouping boundary:
 Exclusion rules:
 - Do NOT put response-style preferences into profile.
 - Do NOT put one-off tasks, temporary topics, prompts, tools, experiments, feature ideas, project-stage details, unresolved questions, or workflow steps into profile.
+- Do NOT infer knowledge background from the language used in the conversation or from assistant-generated descriptions.
+- Do NOT output both a project name and a longer project description as separate long-term focuses when they refer to the same user-owned effort.
 - Treat any examples or field labels as guidance, not as a required taxonomy.
 - Return only the JSON object above.

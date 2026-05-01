@@ -492,30 +492,28 @@ function renderActionAvailability() {
   }
 }
 
-function truncateText(text, maxLength = 56) {
+function truncateText(text, maxLength = 56, ellipsis = true) {
   const value = String(text || "").replace(/\s+/g, " ").trim();
   if (!value) return "";
   if (value.length <= maxLength) return value;
-  return `${value.slice(0, Math.max(0, maxLength - 1)).trim()}…`;
+  const cutLength = ellipsis ? Math.max(0, maxLength - 1) : maxLength;
+  const cut = value.slice(0, cutLength).trim();
+  return ellipsis ? `${cut}…` : cut;
 }
 
 function localizeMemoryDescription(categoryId, description) {
   const raw = String(description || "").trim();
   if (!raw) return "";
-  if (categoryId === "daily_notes" || categoryId === "persistent") {
-    return "";
-  }
   return raw;
 }
 
 function buildSelectionPreview(categoryId, item) {
+  const isDailyNote = categoryId === "daily_notes" || categoryId === "persistent";
   const displayTitle = item?.display_title || item?.title || "";
   const displayDescription = item?.display_description ?? item?.description ?? "";
-  const title = truncateText(displayTitle, categoryId === "daily_notes" || categoryId === "persistent" ? 44 : 30);
-  const description = truncateText(
-    localizeMemoryDescription(categoryId, displayDescription),
-    categoryId === "daily_notes" || categoryId === "persistent" ? 20 : 42
-  );
+  const title = truncateText(displayTitle, isDailyNote ? 44 : 30, !isDailyNote);
+  const rawDescription = localizeMemoryDescription(categoryId, displayDescription);
+  const description = isDailyNote ? rawDescription : truncateText(rawDescription, 42);
   return { title, description };
 }
 
@@ -770,11 +768,13 @@ function buildEmptySkillCard() {
   };
 }
 
-function truncateText(text, maxLength = 72) {
+function truncateText(text, maxLength = 72, ellipsis = true) {
   const value = String(text || "").replace(/\s+/g, " ").trim();
   if (!value) return "";
   if (value.length <= maxLength) return value;
-  return `${value.slice(0, Math.max(0, maxLength - 1)).trim()}…`;
+  const cutLength = ellipsis ? Math.max(0, maxLength - 1) : maxLength;
+  const cut = value.slice(0, cutLength).trim();
+  return ellipsis ? `${cut}…` : cut;
 }
 
 function buildSkillPreview(item) {

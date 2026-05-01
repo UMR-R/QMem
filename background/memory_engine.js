@@ -8,11 +8,17 @@ import { newProfile, newPreferences, newProject, newWorkflow, newEpisode } from 
 // ── Prompt file loader ────────────────────────────────────────────────────────
 
 const _promptCache = new Map();
+const PROMPT_FILE_PATHS = {
+  delta_system: "prompts/episodes/delta_system.txt",
+  schema: "prompts/schema.txt",
+  daily_notes_system: "prompts/nodes/daily_notes_system.txt",
+};
 
 async function _loadPromptFile(name) {
   if (_promptCache.has(name)) return _promptCache.get(name);
   try {
-    const url = chrome.runtime.getURL(`prompts/${name}.txt`);
+    const path = PROMPT_FILE_PATHS[name] || `prompts/${name}.txt`;
+    const url = chrome.runtime.getURL(path);
     const text = await fetch(url).then(r => {
       if (!r.ok) throw new Error(r.status);
       return r.text();
@@ -430,7 +436,7 @@ async function _getDeltaSystem() {
 async function _getPersistentDistillSystem() {
   const [schema, distill] = await Promise.all([
     _loadPromptFile("schema"),
-    _loadPromptFile("persistent_node_distill_bg"),
+    _loadPromptFile("daily_notes_system"),
   ]);
   return `${schema}\n\n${distill}`;
 }
