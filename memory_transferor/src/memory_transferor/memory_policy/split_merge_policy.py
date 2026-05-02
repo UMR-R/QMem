@@ -6,25 +6,24 @@ from memory_transferor.memory_models import PersistentMemoryItem
 
 
 class SplitMergePolicy:
-    """Small deterministic splits that are too brittle to leave only to prompts."""
+    """Small deterministic merge/split guardrails for persistent memory.
+
+    Topic/project memory should default to one parent item per user-owned effort.
+    Subareas can still be created by the LLM when evidence supports an
+    independent retrieval intent, but this policy should not manufacture them.
+    """
 
     _CHECK_MARKERS = (
         "check", "review", "quality", "risk", "claim", "overclaim", "检查", "校验",
         "核对", "过度承诺", "风险", "质量",
-    )
-    _TOPIC_CONCEPTS = (
-        ("aggregation_schema", ("aggregation schema", "聚合 schema", "汇聚", "persistent node")),
-        ("retrieval_schema", ("retrieval schema", "检索 schema", "双向索引", "supporting episodes")),
-        ("export_schema", ("export package", "export schema", "导出", "注入")),
-        ("product_direction", ("browser plugin", "browser extension", "浏览器插件", "插件")),
     )
 
     def apply(self, items: list[PersistentMemoryItem]) -> list[PersistentMemoryItem]:
         expanded: list[PersistentMemoryItem] = []
         for item in items:
             expanded.extend(self._split_workflow_final_check(item))
-        expanded = self._split_topic_concepts(expanded)
-        return self._dedupe(expanded)
+        deduped = self._dedupe(expanded)
+        return self._merge_overlapping_topics(deduped)
 
     def _split_workflow_final_check(self, item: PersistentMemoryItem) -> list[PersistentMemoryItem]:
         if item.type != "workflow" or len(item.steps) < 3:
@@ -48,73 +47,6 @@ class SplitMergePolicy:
         )
         return [main, check]
 
-    def _split_topic_concepts(self, items: list[PersistentMemoryItem]) -> list[PersistentMemoryItem]:
-        topics = [item for item in items if item.type == "topic"]
-        additions: list[PersistentMemoryItem] = []
-        for item in items:
-            if item.type != "topic":
-                continue
-            if not self._is_broad_topic(item):
-                continue
-            text = f"{item.key} {item.description}".lower()
-            for suffix, markers in self._TOPIC_CONCEPTS:
-                if self._existing_topic_covers_concept(topics, item, markers):
-                    continue
-                if not any(marker.lower() in text for marker in markers):
-                    continue
-                key = f"{item.key}_{suffix}" if suffix not in item.key else item.key
-                if key == item.key:
-                    continue
-                description = self._topic_description(item.description, suffix)
-                additions.append(
-                    item.model_copy(
-                        update={
-                            "memory_id": self._stable_id("topic", key, description, item.evidence_episode_ids),
-                            "type": "topic",
-                            "key": key,
-                            "description": description,
-                            "export_priority": "medium",
-                        }
-                    )
-                )
-        return items + additions
-
-    def _is_broad_topic(self, item: PersistentMemoryItem) -> bool:
-        text = f"{item.key} {item.description}".lower().replace("_", " ")
-        broad_markers = ("system", "project", "platform", "系统", "项目", "平台")
-        specific_markers = (
-            "schema", "plugin", "extension", "benchmark", "proposal", "retrieval",
-            "aggregation", "export", "browser", "插件", "评测", "检索", "导出", "聚合",
-        )
-        return any(marker in text for marker in broad_markers) and not any(
-            marker in item.key.lower().replace("_", " ")
-            for marker in specific_markers
-        )
-
-    def _existing_topic_covers_concept(
-        self,
-        topics: list[PersistentMemoryItem],
-        source: PersistentMemoryItem,
-        markers: tuple[str, ...],
-    ) -> bool:
-        for topic in topics:
-            if topic is source:
-                continue
-            text = f"{topic.key} {topic.description}".lower().replace("_", " ")
-            if any(marker.lower() in text for marker in markers):
-                return True
-        return False
-
-    def _topic_description(self, parent_description: str, suffix: str) -> str:
-        labels = {
-            "aggregation_schema": "aggregation schema 设计",
-            "retrieval_schema": "retrieval schema 设计",
-            "export_schema": "export / injection package 设计",
-            "product_direction": "产品或插件方向",
-        }
-        label = labels.get(suffix, suffix.replace("_", " "))
-        return f"围绕该主题的{label}。"
-
     def _dedupe(self, items: list[PersistentMemoryItem]) -> list[PersistentMemoryItem]:
         deduped: dict[tuple[str, str], PersistentMemoryItem] = {}
         for item in items:
@@ -132,6 +64,88 @@ class SplitMergePolicy:
                 }
             )
         return list(deduped.values())
+
+    def _merge_overlapping_topics(self, items: list[PersistentMemoryItem]) -> list[PersistentMemoryItem]:
+        topics = [item for item in items if item.type == "topic"]
+        merged_children: set[str] = set()
+        parent_updates: dict[str, dict[str, list[str]]] = {}
+
+        for child in topics:
+            parent = self._find_parent_topic(child, topics)
+            if parent is None:
+                continue
+            merged_children.add(child.memory_id)
+            update = parent_updates.setdefault(
+                parent.memory_id,
+                {
+                    "evidence_episode_ids": list(parent.evidence_episode_ids),
+                    "evidence_turn_ids": list(parent.evidence_turn_ids),
+                },
+            )
+            update["evidence_episode_ids"] = list(
+                dict.fromkeys(update["evidence_episode_ids"] + child.evidence_episode_ids)
+            )
+            update["evidence_turn_ids"] = list(dict.fromkeys(update["evidence_turn_ids"] + child.evidence_turn_ids))
+
+        merged: list[PersistentMemoryItem] = []
+        for item in items:
+            if item.memory_id in merged_children:
+                continue
+            update = parent_updates.get(item.memory_id)
+            if update is None:
+                merged.append(item)
+                continue
+            merged.append(item.model_copy(update=update))
+        return merged
+
+    def _find_parent_topic(
+        self,
+        child: PersistentMemoryItem,
+        topics: list[PersistentMemoryItem],
+    ) -> PersistentMemoryItem | None:
+        if child.type != "topic":
+            return None
+        candidates = [topic for topic in topics if topic is not child and self._is_parent_topic(topic, child)]
+        if not candidates:
+            return None
+        return max(candidates, key=lambda topic: (len(topic.evidence_episode_ids), -len(topic.key)))
+
+    def _is_parent_topic(self, parent: PersistentMemoryItem, child: PersistentMemoryItem) -> bool:
+        parent_key = self._normalized_key(parent.key)
+        child_key = self._normalized_key(child.key)
+        if not parent_key or not child_key or parent_key == child_key:
+            return False
+
+        key_nested = child_key.startswith(f"{parent_key}_") or child_key.startswith(f"{parent_key}-")
+        if not key_nested:
+            return False
+
+        parent_evidence = set(parent.evidence_episode_ids or parent.evidence_turn_ids)
+        child_evidence = set(child.evidence_episode_ids or child.evidence_turn_ids)
+        if not child_evidence:
+            return False
+
+        overlap = len(parent_evidence & child_evidence) / len(child_evidence)
+        if overlap >= 0.7:
+            return True
+
+        return overlap >= 0.5 and self._parent_description_mentions_child(parent, child)
+
+    def _parent_description_mentions_child(
+        self,
+        parent: PersistentMemoryItem,
+        child: PersistentMemoryItem,
+    ) -> bool:
+        parent_text = f"{parent.key} {parent.description}".lower().replace("_", " ")
+        child_terms = [
+            term
+            for term in self._normalized_key(child.key).replace("-", "_").split("_")
+            if len(term) >= 4
+        ]
+        return any(term in parent_text for term in child_terms)
+
+    def _normalized_key(self, key: str) -> str:
+        return key.lower().strip().replace(" ", "_")
 
     def _is_check_step(self, step: str) -> bool:
         lowered = step.lower()

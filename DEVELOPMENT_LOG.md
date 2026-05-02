@@ -1,5 +1,31 @@
 # 开发日志
 
+## 2026-05-02
+
+- 🏠 收紧项目记忆的父子节点边界
+  - 改了什么：
+    - 停止 `SplitMergePolicy` 自动把 broad topic 拆成 `aggregation_schema`、`retrieval_schema`、`export_schema`、`product_direction` 等同级子 topic。
+    - 新增保守 topic 合并规则：当子 topic 的 key 嵌套在父 topic 下，且 evidence 与父 topic 高度重叠时，合并回父项目节点。
+    - 收紧 `PersistentBuilder` 内联 prompt，要求 topic/project 默认保留一个用户拥有的父项目；schema、工具、交付形态、实现轨道默认写进父项目 description，除非用户明确把它们作为独立长期工作推进。
+    - 用前一轮 AI 输出做本地复算验证，persistent items 从 15 条收敛到 11 条，topic 从 6 条收敛到 2 条。
+  - 为了什么：
+    - 修复 LLM memory migration 这类项目被拆成多个重复 schema/product 同级节点的问题。
+    - 让项目记忆更符合“父项目优先，子方向作为项目细节”的产品定位。
+    - 减少前端 Projects 展示和后续注入中的重复节点。
+
+- 🏠 保留 proposal 项目的具体主题实体
+  - 改了什么：
+    - 给 `EpisodeBuilder` 增加轻量关键词抽取，保留 `TCR-pMHC`、`ML proposal` 等实体和主题提示。
+    - 调整 episode semantic connection，当跨 session episode 共享明确技术实体时，允许建立保守语义连接。
+    - 在 `PersistentBuilder` 的 evidence 输入中加入 episode keywords。
+    - 更新 persistent prompt，要求 proposal、benchmark、writing、guidance 类证据必须保留底层研究主题或项目对象，不能泛化成普通写作指导。
+    - 增加 generic project topic 修正：当模型输出 `proposal_writing_guidance` 这类泛化项目时，回看 evidence 和 semantic neighbor，把它修正为带具体主题的 project。
+    - 复跑测试后，`proposal_writing_guidance` 被修正为 `tcr_pmhc_binding_prediction_ml_proposal`，项目描述保留了 `TCR-pMHC binding prediction` 主题。
+  - 为了什么：
+    - 避免有明确研究对象的 proposal 项目被抽象成泛泛的写作指导。
+    - 让 project 记忆更适合后续检索、展示和注入。
+    - 用跨 session 主题连接补足单轮 episode 的上下文。
+
 ## 2026-05-01
 
 - 🏠 压缩 Daily Notes 前端摘要

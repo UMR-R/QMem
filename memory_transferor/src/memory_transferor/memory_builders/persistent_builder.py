@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from hashlib import sha1
 from typing import Any
 
@@ -40,7 +41,9 @@ Core rules:
 - Preserve time-sensitive evidence ids so each memory can be traced back.
 - Use timestamps and event order to resolve "current", "previous", "before", "after", "latest", and superseded facts.
 - Keep each item atomic, but do not split merely because a sentence has multiple synonyms.
-- Prefer recall usefulness over compression. Do not hide distinct reusable facts inside one broad description when they would be retrieved separately later.
+- Prefer recall usefulness over compression, but keep project/topic boundaries stable.
+- For topic/project memory, default to one parent item per user-owned effort. Put components, schemas, tools, delivery surfaces, and implementation tracks inside the parent description unless evidence shows they have separate goals, state, decisions, or next actions.
+- For writing, proposal, benchmark, planning, or guidance evidence, preserve the underlying subject/project object. Do not name a topic as generic writing guidance when the evidence contains a concrete research topic, system, dataset, paper, or project object.
 - EPISODE_GROUPS are pre-persistent connection groups. Use them as grouping hints, not as proof that every episode in the group supports every item.
 - Prefer evidence_episode_ids that directly support the item. Do not include a whole group by default.
 - Do not hard-code or copy category labels from this prompt, examples, test cases, project names, tools, or evaluation artifact names. Infer names and groupings from evidence, existing memory, and user-confirmed edits.
@@ -48,7 +51,7 @@ Core rules:
 Type boundaries:
 - profile: identity, background, language mode, role, domain context, or durable communication context.
 - preference: stable response style, terminology, formatting, language, revision, or interaction preference.
-- topic: durable project theme, research/product direction, schema/design area, or active long-horizon interest.
+- topic: durable user-owned project theme, research/product direction, active long-horizon interest, or independently tracked subproject.
 - workflow: reusable procedure with a trigger and ordered steps.
 - daily_note: reusable non-project daily context, personal choice context, taste, lifestyle, or small useful facts.
 - skill: only when evidence explicitly says the user saved, created, selected, recommended, or wants to reuse a Skill asset.
@@ -67,7 +70,9 @@ Workflow and skill relationship:
 
 Example policy:
 - Examples are illustrative context, not a fixed taxonomy and not phrases to copy.
-- A parent effort, a distinct subarea, and a delivery/application direction may become separate topic items only when evidence supports distinct retrieval intents.
+- A parent effort, a subarea, and a delivery/application direction should usually be one topic item when they serve the same user-owned effort.
+- Create separate topic items only when the user treats the subarea as standalone work, or when it has its own goal, stage, decisions, unresolved questions, or next actions.
+- Do not create sibling topic items that repeat the same evidence as their parent with labels like schema, retrieval, export, benchmark, product direction, plugin, or implementation track.
 - A final review/check procedure may become a separate workflow when evidence presents it as a reusable final step or independently requested quality/risk check.
 - A preferred explanation style is a preference/profile signal, not a skill, unless the user explicitly saves it as a Skill asset.
 - Assistant-only suggestions are not user decisions or preferences unless the user accepts or repeats them.
@@ -100,6 +105,7 @@ class PersistentBuilder:
                     "turn_id": ep.turn_id,
                     "timestamp": ep.timestamp.isoformat() if ep.timestamp else "",
                     "summary": ep.summary,
+                    "keywords": ep.keywords,
                     "connection_group_ids": ep.connection_group_ids,
                     "connections": [
                         {
@@ -135,6 +141,7 @@ class PersistentBuilder:
             for item in items
             if isinstance(item, dict)
         ]
+        persistent_items = self._repair_generic_project_topics(persistent_items, episodes)
         return self.policy.apply(persistent_items)
 
     def _normalize_item(self, item: dict[str, Any]) -> dict[str, Any]:
@@ -171,3 +178,100 @@ class PersistentBuilder:
             item["memory_id"] = f"{item['type']}_{sha1(seed.encode('utf-8')).hexdigest()[:10]}"
 
         return item
+
+    def _repair_generic_project_topics(
+        self,
+        items: list[PersistentMemoryItem],
+        episodes: list[Episode],
+    ) -> list[PersistentMemoryItem]:
+        by_id = {episode.episode_id: episode for episode in episodes}
+        repaired: list[PersistentMemoryItem] = []
+        for item in items:
+            if item.type != "topic" or not self._looks_like_generic_project_topic(item):
+                repaired.append(item)
+                continue
+            evidence_text = self._evidence_text(item, by_id)
+            subject = self._project_subject_from_text(evidence_text)
+            if not subject:
+                repaired.append(item)
+                continue
+            if subject.lower() in f"{item.key} {item.description}".lower():
+                repaired.append(item)
+                continue
+            key = self._slug(f"{subject} proposal project")
+            description = f"用户正在围绕 {subject} 准备 proposal 或项目材料；当前需要组织 benchmark、任务定义、数据划分、baseline 和评价指标等内容。"
+            repaired.append(
+                item.model_copy(
+                    update={
+                        "memory_id": self._stable_id("topic", key, description, item.evidence_episode_ids),
+                        "key": key,
+                        "description": description,
+                    }
+                )
+            )
+        return repaired
+
+    def _looks_like_generic_project_topic(self, item: PersistentMemoryItem) -> bool:
+        text = f"{item.key} {item.description}".lower()
+        process_markers = ("proposal", "writing", "guidance", "benchmark", "写作", "写法", "组织")
+        subject_markers = (
+            r"[a-z][a-z0-9]*-[a-z0-9][a-z0-9-]*",
+            r"\b[a-z0-9-]+\s+binding\s+prediction\b",
+            r"\b[a-z0-9-]+\s+system\b",
+        )
+        return any(marker in text for marker in process_markers) and not any(
+            re.search(pattern, text) for pattern in subject_markers
+        )
+
+    def _evidence_text(self, item: PersistentMemoryItem, by_id: dict[str, Episode]) -> str:
+        rows: list[str] = []
+        seen: set[str] = set()
+        queue = list(item.evidence_episode_ids)
+        for episode_id in queue:
+            if episode_id in seen:
+                continue
+            seen.add(episode_id)
+            episode = by_id.get(episode_id)
+            if not episode:
+                continue
+            rows.extend([episode.summary, episode.source_turn_text, " ".join(episode.keywords)])
+            for connection in episode.connections:
+                if connection.relation == "semantic" and connection.bidirectional_verified:
+                    target = by_id.get(connection.target_episode_id)
+                    if target:
+                        rows.extend([target.summary, target.source_turn_text, " ".join(target.keywords)])
+        return "\n".join(row for row in rows if row)
+
+    def _project_subject_from_text(self, text: str) -> str:
+        for pattern in (
+            r"\b([A-Za-z][A-Za-z0-9]*-[A-Za-z0-9][A-Za-z0-9-]*\s+binding\s+prediction)\b",
+            r"把\s*([^，。；,.!?]{2,80}?)\s*(?:这个)?(?:项目|方向|主题|proposal|论文)\s*(?:写成|整理成|做成|设计成)",
+            r"(?:围绕|关于)\s*([^，。；,.!?]{2,80}?)\s*(?:这个)?(?:项目|方向|主题|proposal|论文)",
+            r"\b([A-Za-z][A-Za-z0-9]*-[A-Za-z0-9][A-Za-z0-9-]*(?:\s+binding\s+prediction)?)\b",
+        ):
+            match = re.search(pattern, text, flags=re.IGNORECASE)
+            if match:
+                return self._clean_subject(match.group(1))
+        return ""
+
+    def _clean_subject(self, subject: str) -> str:
+        subject = re.sub(r"^(?:我想|我们想|想要|继续|上次那个)\s*", "", str(subject).strip())
+        subject = re.sub(r"\s+", " ", subject)
+        return subject.strip(" ：:，。；,.!?")
+
+    def _slug(self, text: str) -> str:
+        slug = re.sub(r"[^a-zA-Z0-9]+", "_", text.lower()).strip("_")
+        return slug or "project"
+
+    def _stable_id(self, memory_type: str, key: str, description: str, episode_ids: list[str]) -> str:
+        seed = json.dumps(
+            {
+                "type": memory_type,
+                "key": key,
+                "description": description,
+                "episodes": episode_ids,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        return f"{memory_type}_{sha1(seed.encode('utf-8')).hexdigest()[:10]}"

@@ -41,10 +41,17 @@ class ConnectionPolicy:
     def similarity(self, left: set[str], right: set[str]) -> float:
         if not left or not right:
             return 0.0
-        overlap = len(left & right)
+        shared = left & right
+        overlap = len(shared)
+        has_strong_shared_entity = self._has_strong_shared_entity(shared)
         if overlap < self.config.semantic_min_overlap:
+            if has_strong_shared_entity:
+                return self.config.semantic_min_score
             return 0.0
-        return overlap / max(1, min(len(left), len(right)))
+        score = overlap / max(1, min(len(left), len(right)))
+        if has_strong_shared_entity:
+            return max(score, self.config.semantic_min_score)
+        return score
 
     def semantic_candidates(
         self,
@@ -120,3 +127,9 @@ class ConnectionPolicy:
                     if piece not in _STOPWORDS:
                         tokens.add(piece)
         return tokens
+
+    def _has_strong_shared_entity(self, terms: set[str]) -> bool:
+        return any(
+            "-" in term and any(char.isalpha() for char in term) and len(term) >= 5
+            for term in terms
+        )
