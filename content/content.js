@@ -468,6 +468,21 @@ window.addEventListener("message", (e) => {
   }
 });
 
+function enableClipboardCapture(timeoutMs = 1500) {
+  window.postMessage({
+    __memassist_clipboard_capture__: true,
+    action: "enable",
+    timeoutMs,
+  }, "*");
+}
+
+function disableClipboardCapture() {
+  window.postMessage({
+    __memassist_clipboard_capture__: true,
+    action: "disable",
+  }, "*");
+}
+
 function runtimeSendMessage(message) {
   return new Promise((resolve, reject) => {
     try {
@@ -551,8 +566,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   } else if (message.type === "SUBMIT_AND_WAIT") {
     const el = findInputElement(config);
-    if (!el) { sendResponse({ ok: false, error: "未找到输入框" }); return; }
-    // 立即应答，不持有 channel —— 防止 SPA 导航时 content script 被卸载导致 channel 断
+    if (!el) { sendResponse({ ok: false, error: "未找到输入框" }); return false; }
+    // 立即应答，不持有 channel，防止 SPA 导航时 content script 被卸载导致 channel 断。
     sendResponse({ ok: true });
     const jobId = message.jobId;
     const waitTimeout = message.timeoutMs ?? 90000;
@@ -571,7 +586,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         chrome.storage.local.set({ [jobId]: { ok: false, error: err.message } });
       });
 
-    return true;
+    return false;
 
   } else if (message.type === "UPLOAD_FILE") {
     uploadFile(message.fileBuffer, message.fileName, message.promptText, config)
@@ -761,10 +776,15 @@ async function extractLastResponse(config) {
     const btn = config.getCopyButton();
     if (btn) {
       const orig = btn.style.cssText;
-      btn.style.cssText += ";opacity:1!important;visibility:visible!important;pointer-events:auto!important";
-      btn.click();
-      await new Promise(r => setTimeout(r, 400));
-      btn.style.cssText = orig;
+      enableClipboardCapture(1200);
+      try {
+        btn.style.cssText += ";opacity:1!important;visibility:visible!important;pointer-events:auto!important";
+        btn.click();
+        await new Promise(r => setTimeout(r, 400));
+      } finally {
+        btn.style.cssText = orig;
+        disableClipboardCapture();
+      }
       if (_lastClipboardText?.trim()) {
         return { text: _lastClipboardText.trim(), source: "clipboard" };
       }

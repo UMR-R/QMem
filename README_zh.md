@@ -181,14 +181,16 @@ manifest.json
 | 文件 | 使用方 | 用途 |
 |---|---|---|
 | `prompts/cold_start.txt` | popup 注入流程 | 记忆迁移时的冷启动 prompt |
-| `prompts/platform_memory_collect.txt` | popup 平台记忆采集流程 | 采集当前平台保存的记忆和 agent 配置 |
-| `prompts/episode_system.txt` | `MemoryBuilder` | 整理记忆时抽取 episode |
-| `prompts/profile_system.txt` | `MemoryBuilder` | 重建 profile |
-| `prompts/preference_system.txt` | `MemoryBuilder` | 重建 preferences |
-| `prompts/projects_system.txt` | `MemoryBuilder` | 重建 projects |
-| `prompts/workflows_system.txt` | `MemoryBuilder` | 重建 workflows |
-| `prompts/delta_system.txt` | `MemoryUpdater` 和 background engine | 增量记忆更新 |
-| `prompts/persistent_node_distill_bg.txt` | backend 和 background engine | persistent node 蒸馏 |
+| `prompts/platform/platform_memory_collect.txt` | popup 平台记忆采集流程 | 采集当前平台保存的记忆和 agent 配置 |
+| `prompts/episodes/episode_system.txt` | `MemoryBuilder` | 整理记忆时抽取 episode |
+| `prompts/episodes/delta_system.txt` | `MemoryUpdater` 和 background engine | 增量记忆更新 |
+| `prompts/nodes/profile_system.txt` | `MemoryBuilder` | 重建 profile |
+| `prompts/nodes/preferences_system.txt` | `MemoryBuilder` | 重建 preferences |
+| `prompts/nodes/projects_system.txt` | `MemoryBuilder` | 重建 projects |
+| `prompts/nodes/workflows_system.txt` | `MemoryBuilder` | 重建 workflows |
+| `prompts/nodes/daily_notes_system.txt` | backend 和 background engine | daily notes 持久节点蒸馏 |
+| `prompts/nodes/skills_system.txt` | memory policy / 后续 skill 流程 | 保存和推荐的 skill 记忆 |
+| `prompts/display/display_taxonomy_proposal.txt` | memory display policy | 可选的前端展示分类建议 |
 | `prompts/schema.txt` | backend/background persistent-node 流程 | schema 上下文 |
 
 ## 记忆目录结构

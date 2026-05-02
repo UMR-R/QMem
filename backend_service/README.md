@@ -110,13 +110,14 @@ The backend reads and writes a memory root with directories such as:
 
 The backend does not hardcode its processor prompts in Python. It loads editable text prompts from the repository-level `prompts/` directory, including:
 
-- `episode_system.txt`
-- `profile_system.txt`
-- `preference_system.txt`
-- `projects_system.txt`
-- `workflows_system.txt`
-- `delta_system.txt`
-- `persistent_node_distill_bg.txt`
+- `episodes/episode_system.txt`
+- `episodes/delta_system.txt`
+- `nodes/profile_system.txt`
+- `nodes/preferences_system.txt`
+- `nodes/projects_system.txt`
+- `nodes/workflows_system.txt`
+- `nodes/daily_notes_system.txt`
+- `nodes/skills_system.txt`
 - `schema.txt`
 
 ## Notes

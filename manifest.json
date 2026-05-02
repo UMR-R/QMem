@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Memory Assitant",
+  "name": "Memory Assistant",
   "version": "1.0.0",
-  "description": "Chrome 插件 - 抓取网页数据并提供弹出界面",
+  "description": "AI 记忆迁移与本地长期记忆管理工具",
 
   "permissions": [
     "activeTab",
@@ -11,8 +11,7 @@
     "downloads",
     "clipboardRead",
     "idle",
-    "alarms",
-    "offscreen"
+    "alarms"
   ],
 
   "host_permissions": [

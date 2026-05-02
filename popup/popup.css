@@ -684,10 +684,7 @@ button {
   font-size: 12px;
   font-weight: 600;
   line-height: 1.35;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+  overflow-wrap: anywhere;
 }
 
 .selection-child p {
@@ -695,10 +692,7 @@ button {
   color: var(--muted);
   font-size: 11px;
   line-height: 1.4;
-  display: -webkit-box;
-  -webkit-line-clamp: 1;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+  overflow-wrap: anywhere;
 }
 
 .action-requirement-hint {
@@ -819,10 +813,7 @@ button {
   font-weight: var(--font-subtitle-weight);
   line-height: 1.4;
   color: var(--text);
-  display: -webkit-box;
-  -webkit-line-clamp: 1;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+  overflow-wrap: anywhere;
 }
 
 .skill-meta {
@@ -839,10 +830,7 @@ button {
   line-height: var(--font-caption-line);
   font-size: var(--font-caption-size);
   font-weight: var(--font-caption-weight);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+  overflow-wrap: anywhere;
 }
 
 .skill-check {

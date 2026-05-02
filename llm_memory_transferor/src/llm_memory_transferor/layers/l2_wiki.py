@@ -311,7 +311,7 @@ class L2Wiki:
                         episodes.append(ep)
             except Exception:
                 pass
-        episodes.sort(key=lambda e: e.created_at)
+        episodes.sort(key=self._episode_sort_key)
         return episodes
 
     def _episode_container_path(self, conv_id: str) -> Path:

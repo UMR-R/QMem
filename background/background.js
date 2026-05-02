@@ -37,13 +37,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     sendResponse?.({ ok: true });
 
   } else if (message.type === "ROUND_CAPTURED") {
-    handleRoundCaptured(message)
-      .then(() => sendResponse({ ok: true }))
-      .catch(err => {
-        console.error("[Background] ROUND_CAPTURED 处理失败:", err);
-        sendResponse({ ok: false, error: err.message });
-      });
-    return true;
+    sendResponse({ ok: true });
+    handleRoundCaptured(message).catch(err => {
+      console.error("[Background] ROUND_CAPTURED 处理失败:", err);
+    });
+    return false;
 
   } else if (message.type === "FLUSH_NOW") {
     flushPending()

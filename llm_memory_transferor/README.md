@@ -85,12 +85,15 @@ Processor prompts are no longer embedded directly in Python. They are loaded fro
 
 The active processor prompt files are:
 
-- `prompts/episode_system.txt`
-- `prompts/profile_system.txt`
-- `prompts/preference_system.txt`
-- `prompts/projects_system.txt`
-- `prompts/workflows_system.txt`
-- `prompts/delta_system.txt`
+- `prompts/episodes/episode_system.txt`
+- `prompts/episodes/delta_system.txt`
+- `prompts/nodes/profile_system.txt`
+- `prompts/nodes/preferences_system.txt`
+- `prompts/nodes/projects_system.txt`
+- `prompts/nodes/workflows_system.txt`
+- `prompts/nodes/daily_notes_system.txt`
+- `prompts/nodes/skills_system.txt`
+- `prompts/display/display_taxonomy_proposal.txt`
 
 This means prompt tuning can be done without editing the Python package itself.
 

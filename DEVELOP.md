@@ -39,10 +39,21 @@ memory_assistant/
 │   └── app.py
 ├── prompts/
 │   ├── schema.txt
-│   ├── persistent_node_distill_bg.txt
-│   ├── delta_system.txt
-│   ├── cold_start.txt
-│   └── platform_memory_collect.txt
+│   ├── episodes/
+│   │   ├── delta_system.txt
+│   │   └── episode_system.txt
+│   ├── nodes/
+│   │   ├── profile_system.txt
+│   │   ├── preferences_system.txt
+│   │   ├── projects_system.txt
+│   │   ├── workflows_system.txt
+│   │   ├── daily_notes_system.txt
+│   │   └── skills_system.txt
+│   ├── platform/
+│   │   └── platform_memory_collect.txt
+│   ├── display/
+│   │   └── display_taxonomy_proposal.txt
+│   └── cold_start.txt
 └── llm_memory_transferor/
     └── src/llm_memory_transferor/
         ├── processors/
@@ -79,7 +90,7 @@ Flow:
    - preferences
    - projects
    - workflows
-5. persistent nodes are distilled using `prompts/persistent_node_distill_bg.txt`
+5. daily-note persistent nodes are distilled using `prompts/nodes/daily_notes_system.txt`
 6. results are written into the wiki / backend-managed storage
 
 Relevant code:
@@ -110,7 +121,7 @@ Triggered by popup `加入平台记忆`.
 
 Flow:
 
-1. popup loads `prompts/platform_memory_collect.txt`
+1. popup loads `prompts/platform/platform_memory_collect.txt`
 2. popup injects the prompt into the current AI page
 3. current AI reports saved memory / custom instructions / agent config / platform skills
 4. popup parses the JSON result
@@ -132,9 +143,9 @@ Flow:
 
 1. `content/content.js` detects a new assistant reply
 2. background receives captured round
-3. `background/memory_engine.js` uses `delta_system.txt`
+3. `background/memory_engine.js` uses `prompts/episodes/delta_system.txt`
 4. incremental memory delta is produced
-5. persistent node maintenance may also run with `persistent_node_distill_bg.txt`
+5. daily-note persistent node maintenance may also run with `prompts/nodes/daily_notes_system.txt`
 
 This is separate from the full Python organize pipeline.
 
@@ -214,12 +225,14 @@ Important modules:
 
 ### Python prompt files currently in use
 
-- `prompts/episode_system.txt`
-- `prompts/profile_system.txt`
-- `prompts/preference_system.txt`
-- `prompts/projects_system.txt`
-- `prompts/workflows_system.txt`
-- `prompts/delta_system.txt`
+- `prompts/episodes/episode_system.txt`
+- `prompts/episodes/delta_system.txt`
+- `prompts/nodes/profile_system.txt`
+- `prompts/nodes/preferences_system.txt`
+- `prompts/nodes/projects_system.txt`
+- `prompts/nodes/workflows_system.txt`
+- `prompts/nodes/daily_notes_system.txt`
+- `prompts/nodes/skills_system.txt`
 
 `processors/prompts.py` is now the loader layer for these files.
 
@@ -229,15 +242,17 @@ These `prompts/*.txt` files are part of the current runtime:
 
 | File | Used by | Purpose |
 |---|---|---|
-| `platform_memory_collect.txt` | popup | Collect current platform memory/config from the webpage AI |
+| `platform/platform_memory_collect.txt` | popup | Collect current platform memory/config from the webpage AI |
 | `cold_start.txt` | popup | Bootstrap prompt for inject/export flows |
-| `episode_system.txt` | Python `MemoryBuilder` | Episode extraction during organize |
-| `profile_system.txt` | Python `MemoryBuilder` + backend | Profile rebuild |
-| `preference_system.txt` | Python `MemoryBuilder` + backend | Preference rebuild |
-| `projects_system.txt` | Python `MemoryBuilder` + backend | Project rebuild |
-| `workflows_system.txt` | Python `MemoryBuilder` + backend | Workflow rebuild |
-| `delta_system.txt` | Python `MemoryUpdater` + background memory engine | Shared incremental memory delta extraction |
-| `persistent_node_distill_bg.txt` | backend + background | Persistent node distillation / maintenance |
+| `episodes/episode_system.txt` | Python `MemoryBuilder` | Episode extraction during organize |
+| `episodes/delta_system.txt` | Python `MemoryUpdater` + background memory engine | Shared incremental memory delta extraction |
+| `nodes/profile_system.txt` | Python `MemoryBuilder` + backend | Profile rebuild |
+| `nodes/preferences_system.txt` | Python `MemoryBuilder` + backend | Preference rebuild |
+| `nodes/projects_system.txt` | Python `MemoryBuilder` + backend | Project rebuild |
+| `nodes/workflows_system.txt` | Python `MemoryBuilder` + backend | Workflow rebuild |
+| `nodes/daily_notes_system.txt` | backend + background | Daily-note persistent node distillation / maintenance |
+| `nodes/skills_system.txt` | memory policy / future skill flow | Saved and recommended skill memory |
+| `display/display_taxonomy_proposal.txt` | memory display policy | Optional display taxonomy proposals |
 | `schema.txt` | node distill flow | Schema context for persistent nodes |
 
 The previously unused prompt files removed from the repo are not part of the live flow anymore.
@@ -320,9 +335,9 @@ When debugging a feature, start from:
 
 - incremental-update problems
   - `background/memory_engine.js`
-  - `prompts/delta_system.txt`
+  - `prompts/episodes/delta_system.txt`
 
 - persistent-node problems
-  - `prompts/persistent_node_distill_bg.txt`
+  - `prompts/nodes/daily_notes_system.txt`
   - `background/memory_engine.js`
   - `backend_service/app.py`
