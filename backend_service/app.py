@@ -8,6 +8,7 @@ import re
 import shutil
 import sys
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -1720,9 +1721,11 @@ def _clean_daily_note_subject_phrase(value: str) -> str:
     if not subject:
         return ""
     subject = re.sub(r"^(的|对|于|吃|喝|用|看|听|去|做)", "", subject).strip("，,。；;：: ")
+    if "：" in subject or ":" in subject:
+        subject = re.split(r"[:：]", subject, maxsplit=1)[0].strip("，,。；;：: ")
     parts = [part.strip("，,。；;：: ") for part in re.split(r"[、,，]", subject) if part.strip("，,。；;：: ")]
     if len(parts) >= 2:
-        subject = parts[-1]
+        subject = next((part for part in parts if "的" in part), parts[0])
     if "的" in subject:
         subject = subject.rsplit("的", 1)[-1].strip("，,。；;：: ")
     subject = re.sub(r"(?:方案|选择|推荐|选项|偏好|需求|标准|条件|上下文)$", "", subject).strip("，,。；;：: ")
@@ -1752,6 +1755,15 @@ def _daily_note_subject_from_title(title_hint: str) -> str:
     return title if title and len(title) <= 14 else ""
 
 
+def _daily_note_overlap_subject(subject: str) -> str:
+    clean_subject = str(subject or "").strip("，,。；;：: ")
+    return clean_subject
+
+
+def _truncate_daily_note_display(value: str, max_length: int = 24) -> str:
+    return truncate_text(value, max_length, ellipsis=False).rstrip("，,、；;：: ")
+
+
 def _daily_note_title_from_description(raw_description: str, node: dict[str, Any]) -> str:
     text = _normalize_snippet_text(raw_description)
     if not text:
@@ -1762,13 +1774,13 @@ def _daily_note_title_from_description(raw_description: str, node: dict[str, Any
     subject = _daily_note_subject_from_text(user_side)
     if note_type == "preference":
         if subject:
-            return truncate_text(f"{subject}偏好", 18, ellipsis=False)
+            return _truncate_daily_note_display(f"{subject}偏好", 18)
 
     clean = _strip_daily_note_user_prefix(user_side)
     clean = re.sub(r"^为一?条?", "", clean).strip("，,。；;：: ")
     clean = re.split(r"目前|已确认|尚未|并进一步|，|,|。|；|;", clean, maxsplit=1)[0].strip("，,。；;：: ")
     clean = re.sub(r"^一?条?", "", clean).strip("，,。；;：: ")
-    return truncate_text(clean, 22, ellipsis=False)
+    return _truncate_daily_note_display(clean, 22)
 
 
 def _compact_display_join(parts: list[str], limit: int = 22) -> str:
@@ -1915,7 +1927,20 @@ def _criteria_without_subject_overlap(criteria: str, subject: str) -> str:
         return criteria
     kept = []
     for part in [item.strip() for item in str(criteria or "").split("、") if item.strip()]:
-        if part in subject or subject in part:
+        if part in subject:
+            continue
+        if subject in part:
+            if "：" in part or ":" in part:
+                head, tail = re.split(r"[:：]", part, maxsplit=1)
+                if subject in head and tail.strip("，,。；;：: "):
+                    clean_tail = tail.strip("，,。；;：: ")
+                    if clean_tail:
+                        kept.append(clean_tail)
+                    continue
+            stripped = part.replace(subject, "").strip("，,。；;：: ")
+            stripped = re.sub(r"^(?:方案|选择|推荐|选项|偏好|需求|标准|条件)+", "", stripped).strip("，,。；;：: ")
+            if stripped:
+                kept.append(stripped)
             continue
         kept.append(part)
     return "、".join(kept)
@@ -1941,11 +1966,11 @@ def _compact_daily_note_sentence(text: str, title_hint: str = "") -> str:
     subject = _daily_note_subject_from_title(title_hint) or _daily_note_subject_from_text(clean)
     status = _compact_confirmation_status(clean, subject or title_hint)
     if subject and status and subject not in status:
-        return truncate_text(f"{subject}，{status}", 24, ellipsis=False)
+        return _truncate_daily_note_display(f"{subject}，{status}", 24)
 
     preference = _compact_preference_signal(clean)
     if subject and preference and subject not in preference:
-        return truncate_text(f"{subject}，{preference}", 24, ellipsis=False)
+        return _truncate_daily_note_display(f"{subject}，{preference}", 24)
 
     return ""
 
@@ -1960,16 +1985,21 @@ def _daily_note_description_for_display(
         return ""
 
     note_type = str((node or {}).get("type") or "").strip().lower()
-    subject_hint = _daily_note_subject_from_title(title_hint) or _daily_note_subject_from_text(text)
-    criteria = _criteria_without_subject_overlap(_compact_criteria_signal(text), subject_hint)
-    if note_type == "preference" and subject_hint and criteria and "、" in criteria:
-        return truncate_text(f"{subject_hint}：{criteria}", 24, ellipsis=False)
-    if subject_hint and criteria and "、" in criteria:
+    title_subject = _daily_note_subject_from_title(title_hint)
+    text_subject = _daily_note_subject_from_text(text)
+    base_subject = title_subject or text_subject
+    overlap_subject = _daily_note_overlap_subject(base_subject) or text_subject
+    raw_criteria = _compact_criteria_signal(text)
+    subject_hint = base_subject
+    criteria = _criteria_without_subject_overlap(raw_criteria, overlap_subject)
+    if note_type == "preference" and subject_hint and criteria:
+        return _truncate_daily_note_display(f"{subject_hint}：{criteria}", 24)
+    if subject_hint and criteria:
         candidate = f"{subject_hint}：{criteria}"
         if len(candidate) <= 24:
             return candidate
     if criteria and "、" in criteria:
-        return truncate_text(f"要求{criteria}", 24, ellipsis=False)
+        return _truncate_daily_note_display(f"要求{criteria}", 24)
 
     sentence = _compact_daily_note_sentence(text, title_hint)
     if sentence:
@@ -2274,6 +2304,7 @@ def load_organize_state(settings: dict[str, Any]) -> dict[str, Any]:
             "node_maintenance_signature": data.get("node_maintenance_signature", ""),
             "last_persistent_rebuild_at": data.get("last_persistent_rebuild_at"),
             "last_node_maintained_at": data.get("last_node_maintained_at"),
+            "last_run_stats": data.get("last_run_stats", {}),
         }
     return {
         "raw_index": {},
@@ -2284,6 +2315,7 @@ def load_organize_state(settings: dict[str, Any]) -> dict[str, Any]:
         "node_maintenance_signature": "",
         "last_persistent_rebuild_at": None,
         "last_node_maintained_at": None,
+        "last_run_stats": {},
     }
 
 
@@ -2296,6 +2328,10 @@ def _hash_payload(payload: Any) -> str:
     return hashlib.sha1(
         json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
     ).hexdigest()
+
+
+def _elapsed_seconds(start: float) -> float:
+    return round(time.perf_counter() - start, 3)
 
 
 def compute_episode_signature(wiki: L2Wiki) -> str:
@@ -4616,7 +4652,11 @@ def build_summary(settings: dict[str, Any]) -> SummaryResponse:
     return SummaryResponse(
         last_sync_at=settings.get("last_sync_at"),
         conversation_count=raw_count,
-        memory_item_count=sum(breakdown.values()) - raw_count,
+        memory_item_count=profile_count
+        + preferences_count
+        + workflows_count
+        + projects_count
+        + persistent_count,
         sync_enabled=bool(settings.get("keep_updated")),
         breakdown=breakdown,
     )
@@ -6926,6 +6966,7 @@ def _prune_persistent_node_support_refs(settings: dict[str, Any], payload: dict[
     if not ep_by_id:
         return payload
 
+    nodes_to_drop: list[str] = []
     for node_id, node in nodes.items():
         if not isinstance(node, dict):
             continue
@@ -6933,6 +6974,8 @@ def _prune_persistent_node_support_refs(settings: dict[str, Any], payload: dict[
         refs = [str(ref).strip() for ref in (node.get("episode_refs") or []) if str(ref).strip()]
         known_refs = [ref for ref in refs if ref in ep_by_id]
         if not known_refs:
+            if refs:
+                nodes_to_drop.append(str(node_id))
             continue
 
         kept_refs = [
@@ -6941,6 +6984,7 @@ def _prune_persistent_node_support_refs(settings: dict[str, Any], payload: dict[
             if _episode_supports_persistent_node(node_for_match, ep_by_id[ref])
         ]
         if not kept_refs:
+            nodes_to_drop.append(str(node_id))
             continue
 
         allowed_turn_refs: list[str] = []
@@ -6955,6 +6999,9 @@ def _prune_persistent_node_support_refs(settings: dict[str, Any], payload: dict[
         if allowed_turn_refs:
             filtered_turn_refs = [ref for ref in existing_turn_refs if ref in allowed_turn_refs]
             node["turn_refs"] = filtered_turn_refs or allowed_turn_refs
+
+    for node_id in nodes_to_drop:
+        nodes.pop(node_id, None)
 
     return payload
 
@@ -7396,9 +7443,16 @@ def rebuild_persistent_nodes(
     episodes: list[EpisodicMemory],
     job_id: str,
     total_steps: int,
+    *,
+    reset: bool = True,
 ) -> dict[str, Any]:
-    pn_data = {"version": "1.0", "pn_next_id": 1, "episodic_tag_paths": [], "nodes": {}}
-    save_persistent_nodes(settings, pn_data)
+    if reset:
+        pn_data = {"version": "1.0", "pn_next_id": 1, "episodic_tag_paths": [], "nodes": {}}
+        save_persistent_nodes(settings, pn_data)
+    elif _persistent_node_assets_missing(settings):
+        pn_data = {"version": "1.0", "pn_next_id": 1, "episodic_tag_paths": [], "nodes": {}}
+        save_persistent_nodes(settings, pn_data)
+        reset = True
 
     for index, episode in enumerate(episodes, start=1):
         update_job(
@@ -7415,6 +7469,8 @@ def rebuild_persistent_nodes(
     final_nodes = load_persistent_nodes(settings)
     return {
         "persistent_nodes": len(final_nodes.get("nodes", {})),
+        "persistent_node_episodes_processed": len(episodes),
+        "persistent_node_full_rebuild": reset,
     }
 
 
@@ -7618,7 +7674,23 @@ def rebuild_persistent_memory(
 
 def _run_organize_job(job_id: str, settings: dict[str, Any]) -> None:
     try:
+        run_started = time.perf_counter()
+        timings: dict[str, float] = {}
+        organize_stats: dict[str, Any] = {
+            "raw_conversations": 0,
+            "raw_conversations_changed": 0,
+            "raw_conversations_skipped": 0,
+            "episode_llm_calls": 0,
+            "episodes_built": 0,
+            "persistent_rebuilt": False,
+            "persistent_nodes_maintained": False,
+            "persistent_node_full_rebuild": False,
+            "persistent_node_episodes_processed": 0,
+        }
+
+        stage_started = time.perf_counter()
         consolidate_result = consolidate_platform_memory(settings)
+        timings["platform_memory_consolidation_sec"] = _elapsed_seconds(stage_started)
         update_job(
             job_id,
             status="running",
@@ -7631,8 +7703,11 @@ def _run_organize_job(job_id: str, settings: dict[str, Any]) -> None:
                 ),
             },
         )
+        stage_started = time.perf_counter()
         conversations = load_all_raw_conversations(settings)
         l1_layer, l1_signature = load_l1_signals(settings)
+        timings["load_inputs_sec"] = _elapsed_seconds(stage_started)
+        organize_stats["raw_conversations"] = len(conversations)
         if not conversations and not l1_signature:
             update_job(
                 job_id,
@@ -7656,6 +7731,7 @@ def _run_organize_job(job_id: str, settings: dict[str, Any]) -> None:
         total_steps = max(len(conversations), 1) + 5
         current_step = 0
 
+        episode_stage_started = time.perf_counter()
         for conv in conversations:
             current_step += 1
             raw_key = f"{conv.platform}:{conv.conv_id}"
@@ -7687,10 +7763,13 @@ def _run_organize_job(job_id: str, settings: dict[str, Any]) -> None:
                 and existing_episode_ids
                 and _episode_container_has_ids(episodes_dir, conv.conv_id, existing_episode_ids)
             ):
+                organize_stats["raw_conversations_skipped"] += 1
                 continue
 
+            organize_stats["raw_conversations_changed"] += 1
             _remove_episode_storage_for_conversation(episodes_dir, conv.conv_id, existing_episode_ids)
 
+            organize_stats["episode_llm_calls"] += 1
             built_episodes = builder._build_episodes(conv)
             if not built_episodes:
                 episode_id = stable_episode_id(f"{raw_key}:fallback")
@@ -7707,6 +7786,7 @@ def _run_organize_job(job_id: str, settings: dict[str, Any]) -> None:
                 wiki.save_episode(episode)
                 changed_episodes.append(episode)
                 saved_episode_ids.append(episode.episode_id)
+            organize_stats["episodes_built"] += len(saved_episode_ids)
             raw_index[raw_key] = {
                 "signature": signature,
                 "episode_id": saved_episode_ids[0] if saved_episode_ids else "",
@@ -7715,6 +7795,7 @@ def _run_organize_job(job_id: str, settings: dict[str, Any]) -> None:
                 "status": status,
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }
+        timings["episode_extraction_sec"] = _elapsed_seconds(episode_stage_started)
 
         episode_signature = compute_episode_signature(wiki)
         persistent_result = {
@@ -7734,6 +7815,7 @@ def _run_organize_job(job_id: str, settings: dict[str, Any]) -> None:
             or _persistent_memory_assets_missing(settings)
         )
         if should_rebuild_persistent:
+            stage_started = time.perf_counter()
             persistent_result = rebuild_persistent_memory(
                 settings,
                 builder,
@@ -7742,13 +7824,16 @@ def _run_organize_job(job_id: str, settings: dict[str, Any]) -> None:
                 len(conversations),
                 total_steps,
             )
+            timings["persistent_rebuild_sec"] = _elapsed_seconds(stage_started)
             persistent_result["persistent_rebuilt"] = True
+            organize_stats["persistent_rebuilt"] = True
         else:
             update_job(
                 job_id,
                 status="running",
                 progress={"current": len(conversations) + 1, "total": total_steps, "message": "persistent 未变化，跳过重建"},
             )
+            timings["persistent_rebuild_sec"] = 0.0
 
         episode_signature = compute_episode_signature(wiki)
         persistent_signature = compute_persistent_signature(wiki)
@@ -7764,9 +7849,35 @@ def _run_organize_job(job_id: str, settings: dict[str, Any]) -> None:
             or _persistent_node_assets_missing(settings)
         )
         if should_maintain_nodes:
-            node_result = rebuild_persistent_nodes(settings, llm, wiki.list_episodes(), job_id, total_steps)
+            node_assets_missing = _persistent_node_assets_missing(settings)
+            full_node_rebuild = (
+                node_assets_missing
+                or not previous_node_signature
+                or (node_maintenance_signature != previous_node_signature and not changed_episodes)
+            )
+            all_episodes_for_nodes = wiki.list_episodes()
+            if full_node_rebuild:
+                node_episodes = all_episodes_for_nodes
+            else:
+                changed_episode_ids = {changed.episode_id for changed in changed_episodes}
+                node_episodes = [
+                    episode for episode in all_episodes_for_nodes if episode.episode_id in changed_episode_ids
+                ]
+            stage_started = time.perf_counter()
+            node_result = rebuild_persistent_nodes(
+                settings,
+                llm,
+                node_episodes,
+                job_id,
+                total_steps,
+                reset=full_node_rebuild,
+            )
+            timings["persistent_node_maintenance_sec"] = _elapsed_seconds(stage_started)
             persistent_result.update(node_result)
             persistent_result["nodes_maintained"] = True
+            organize_stats["persistent_nodes_maintained"] = True
+            organize_stats["persistent_node_full_rebuild"] = bool(node_result.get("persistent_node_full_rebuild"))
+            organize_stats["persistent_node_episodes_processed"] = int(node_result.get("persistent_node_episodes_processed", 0) or 0)
             connect_episodes_by_persistent_nodes(settings, wiki)
         else:
             update_job(
@@ -7774,14 +7885,18 @@ def _run_organize_job(job_id: str, settings: dict[str, Any]) -> None:
                 status="running",
                 progress={"current": total_steps, "total": total_steps, "message": "结构化记忆节点未变化，跳过维护"},
             )
+            timings["persistent_node_maintenance_sec"] = 0.0
 
         episode_signature = compute_episode_signature(wiki)
+        timings["total_sec"] = _elapsed_seconds(run_started)
+        organize_stats["timings"] = timings
         organize_state["raw_index"] = raw_index
         organize_state["last_organized_at"] = datetime.now(timezone.utc).isoformat()
         organize_state["l1_signature"] = l1_signature
         organize_state["episode_signature"] = episode_signature
         organize_state["persistent_signature"] = persistent_signature
         organize_state["node_maintenance_signature"] = node_maintenance_signature
+        organize_state["last_run_stats"] = organize_stats
         if should_rebuild_persistent:
             organize_state["last_persistent_rebuild_at"] = datetime.now(timezone.utc).isoformat()
         if should_maintain_nodes:
@@ -7797,6 +7912,7 @@ def _run_organize_job(job_id: str, settings: dict[str, Any]) -> None:
                 "raw_conversations": len(conversations),
                 "episodes": len(wiki.list_episodes()),
                 "updated_episodes": len(changed_episodes),
+                "performance": organize_stats,
                 **persistent_result,
             },
         )
