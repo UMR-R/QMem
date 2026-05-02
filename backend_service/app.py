@@ -1764,6 +1764,26 @@ def _truncate_daily_note_display(value: str, max_length: int = 24) -> str:
     return truncate_text(value, max_length, ellipsis=False).rstrip("，,、；;：: ")
 
 
+def _remove_daily_note_repeated_title_prefix(text: str, title_hint: str) -> str:
+    value = str(text or "").strip("，,。；;：: ")
+    title = str(title_hint or "").strip("，,。；;：: ")
+    if not value or not title or not value.startswith(title):
+        return value
+    remainder = value[len(title):].strip("，,。；;：: ")
+    if remainder.endswith("偏好") and len(remainder) > len("偏好待确认"):
+        remainder = remainder.removesuffix("偏好").strip("，,。；;：: ")
+    return remainder or value
+
+
+def _daily_note_title_carries_subject(title_hint: str, subject: str) -> bool:
+    title = str(title_hint or "").strip("，,。；;：: ")
+    clean_subject = str(subject or "").strip("，,。；;：: ")
+    if not title or not clean_subject:
+        return False
+    title_base = re.sub(r"(?:偏好|选择|推荐|记录|待确认)$", "", title).strip("，,。；;：: ")
+    return title == clean_subject or title_base == clean_subject
+
+
 def _daily_note_title_from_description(raw_description: str, node: dict[str, Any]) -> str:
     text = _normalize_snippet_text(raw_description)
     if not text:
@@ -1964,13 +1984,13 @@ def _compact_daily_note_sentence(text: str, title_hint: str = "") -> str:
         return ""
 
     subject = _daily_note_subject_from_title(title_hint) or _daily_note_subject_from_text(clean)
-    status = _compact_confirmation_status(clean, subject or title_hint)
-    if subject and status and subject not in status:
-        return _truncate_daily_note_display(f"{subject}，{status}", 24)
-
     preference = _compact_preference_signal(clean)
     if subject and preference and subject not in preference:
         return _truncate_daily_note_display(f"{subject}，{preference}", 24)
+
+    status = _compact_confirmation_status(clean, subject or title_hint)
+    if subject and status and subject not in status:
+        return _truncate_daily_note_display(f"{subject}，{status}", 24)
 
     return ""
 
@@ -1993,8 +2013,12 @@ def _daily_note_description_for_display(
     subject_hint = base_subject
     criteria = _criteria_without_subject_overlap(raw_criteria, overlap_subject)
     if note_type == "preference" and subject_hint and criteria:
+        if _daily_note_title_carries_subject(title_hint, subject_hint):
+            return _truncate_daily_note_display(criteria, 24)
         return _truncate_daily_note_display(f"{subject_hint}：{criteria}", 24)
     if subject_hint and criteria:
+        if _daily_note_title_carries_subject(title_hint, subject_hint):
+            return _truncate_daily_note_display(criteria, 24)
         candidate = f"{subject_hint}：{criteria}"
         if len(candidate) <= 24:
             return candidate
@@ -2003,7 +2027,7 @@ def _daily_note_description_for_display(
 
     sentence = _compact_daily_note_sentence(text, title_hint)
     if sentence:
-        return sentence
+        return _remove_daily_note_repeated_title_prefix(sentence, title_hint)
 
     status = _compact_confirmation_status(text, title_hint)
     preference = _compact_preference_signal(text)
