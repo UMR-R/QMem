@@ -31,7 +31,7 @@ Base taxonomy:
 
 Proposal rules:
 - Propose a new group only when the memory cannot be cleanly represented by the base taxonomy.
-- Do NOT propose a group for one fine-grained rule, punctuation mark, single object, product, food, outfit, paper, dataset, tool, or project-specific detail.
+- Do NOT propose a group for one fine-grained rule, punctuation mark, single concrete object, specific entity, or project-specific detail.
 - Do NOT duplicate or rename an existing base group.
 - A proposal should have multiple episode support or an explicit durable user instruction.
 - New groups are always `suggested`. They must not become active until policy review and user acceptance.

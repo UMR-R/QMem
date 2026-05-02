@@ -237,11 +237,14 @@ function isSupportedTab(tab) {
 }
 
 function isMissingReceiverError(error) {
-  const message = String(error?.message || "");
+  const message = String(error?.message || "").toLowerCase();
   return (
-    message.includes("Receiving end does not exist") ||
-    message.includes("Could not establish connection") ||
-    message.includes("message port closed")
+    message.includes("receiving end does not exist") ||
+    message.includes("could not establish connection") ||
+    message.includes("message port closed") ||
+    message.includes("message channel closed") ||
+    message.includes("channel closed before a response") ||
+    message.includes("asynchronous response")
   );
 }
 

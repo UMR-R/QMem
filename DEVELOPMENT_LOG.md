@@ -2,6 +2,20 @@
 
 ## 2026-05-02
 
+- 🏠 清理记忆抽取和展示中的样例硬编码
+  - 改了什么：
+    - 删除 Daily Notes 标题生成中的固定物品映射，不再把 `coat`、`shoe`、`cocktail`、`fruit` 等 token 直接翻译成固定前端标题。
+    - 将 Daily Notes 摘要生成改成从自然描述中抽取“主题 + 条件”，例如保留生活主题，再展示约束条件。
+    - 去掉 `快速（20分钟内）`、`酸的`、风衣/鞋子/鸡尾酒等样例驱动的精确替换和专门分支。
+    - 收紧 project、workflow、skill、primary task type 的过滤逻辑，用“临时建议、一次性选项、过细对象、稳定任务模式”等通用信号替代具体领域词。
+    - 将 `type_boundary_policy` 中的特定学科 marker 改成通用的“专业 / 领域 / 研究方向”边界词。
+    - 泛化 daily_notes prompt 和 README 中的例子列表，避免模型把示例场景当作固定分类。
+    - 修复扩展消息通道和 clipboard 捕获逻辑，避免前端异步响应通道关闭导致 console 报错，并让复制捕获只在需要提取回答时临时启用。
+  - 为了什么：
+    - 保证记忆系统不会针对当前测试素材过拟合，后续换成其他用户、其他生活主题或其他项目主题时仍能按同一套抽象规则工作。
+    - 让前端 Daily Notes 能保留主题和短摘要，同时避免把后端 key、内部 context 或样例词暴露给用户。
+    - 降低浏览器扩展在 ChatGPT 页面注入和提取回答时对页面自身交互的干扰。
+
 - 🏠 收紧项目记忆的父子节点边界
   - 改了什么：
     - 停止 `SplitMergePolicy` 自动把 broad topic 拆成 `aggregation_schema`、`retrieval_schema`、`export_schema`、`product_direction` 等同级子 topic。

@@ -42,7 +42,7 @@ Language policy:
 - Preserve proper nouns, product names, places, media titles, technical terms, and user-specific item names in their original form.
 
 Scope:
-- daily_notes stores reusable non-project daily context: life preferences, personal-choice context, shopping/travel/food/entertainment context, recurring personal criteria, and small facts that may help future conversations.
+- daily_notes stores reusable non-project daily context: life preferences, personal-choice context, recurring personal criteria, and small facts that may help future conversations.
 - Do NOT create profile, workflow, project, or skill nodes here.
 - If an episode belongs to a project, project goals, architecture, evaluation choices, datasets, implementation plans, and unresolved project questions belong to project memory, not daily_notes.
 - A project-related episode may create a daily_note only when it expresses a cross-project personal preference or reusable working habit.
@@ -67,6 +67,7 @@ Temporal and connection rules:
 
 Granularity rules:
 - Create daily notes at a reusable level. Keep concrete details when they are likely useful later, but avoid one node per tiny subdetail.
+- When storing criteria, constraints, or option filters, keep the domain or activity noun they belong to in the description. Do not output a detached list of criteria without the life context it applies to.
 - Merge semantic duplicates and overly fine-grained siblings.
 - For one personal-choice thread, keep upstream context and downstream follow-up choices together unless they clearly support different future retrieval intents.
 - If one daily_note is an application or extension of another daily_note and their support episodes overlap, merge them into one node instead of keeping sibling cards.

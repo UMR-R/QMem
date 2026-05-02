@@ -336,18 +336,23 @@ class MemoryBuilder:
         )
         if not text:
             return False
-        daily_domains = {
-            "outfit", "clothing", "dress", "coat", "shoe", "style", "shopping", "food", "drink",
-            "cocktail", "fruit", "travel", "restaurant", "movie", "concert",
-            "穿搭", "服装", "衣服", "裙", "风衣", "鞋", "搭配", "配色", "口味", "水果", "饮品",
-            "鸡尾酒", "购物", "旅行", "餐厅", "电影", "演出",
-        }
         personal_choice_markers = {
             "用户", "user", "asks", "wants", "requested", "considering", "recommend", "choose",
-            "用户询问", "想", "希望", "要求", "推荐", "选择", "是否合适", "适合", "首选",
+            "preference", "criteria", "option", "compare", "plan",
+            "用户询问", "想", "希望", "要求", "推荐", "选择", "比较", "偏好", "标准", "条件",
+            "是否合适", "适合", "首选", "待确认",
         }
-        return any(token in text for token in daily_domains) and any(
-            marker in text for marker in personal_choice_markers
+        project_markers = {
+            "project", "platform", "system", "benchmark", "paper", "proposal", "workflow",
+            "项目", "平台", "系统", "评测", "论文", "工作流",
+        }
+        profile_markers = {
+            "身份", "背景", "职业", "机构", "研究方向", "role", "background", "affiliation",
+        }
+        return (
+            any(marker in text for marker in personal_choice_markers)
+            and not any(marker in text for marker in project_markers)
+            and not any(marker in text for marker in profile_markers)
         )
 
     def build(

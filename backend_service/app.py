@@ -1668,25 +1668,6 @@ def _daily_note_title_from_key(raw_key: str, node: dict[str, Any]) -> str:
     key = str(raw_key or "").strip().lower()
     if not key or key.startswith("pn_"):
         return ""
-    token_labels = {
-        "coat": "风衣",
-        "trenchcoat": "风衣",
-        "trench": "风衣",
-        "clothing": "服装",
-        "outfit": "穿搭",
-        "dress": "长裙",
-        "shoe": "鞋子",
-        "shoes": "鞋子",
-        "color": "颜色",
-        "fruit": "水果",
-        "fruits": "水果",
-        "sour": "酸味",
-        "cocktail": "鸡尾酒",
-        "drink": "饮品",
-        "food": "食物",
-        "taste": "口味",
-        "bar": "酒吧",
-    }
     ignored = {
         "context",
         "candidate",
@@ -1699,41 +1680,19 @@ def _daily_note_title_from_key(raw_key: str, node: dict[str, Any]) -> str:
         "notes",
         "prefers",
     }
-    suffix_tokens = {"preference", "preferences", "taste"}
-    labels: list[str] = []
     tokens = [token for token in re.split(r"[_\-\s]+", key) if token]
-    for token in re.split(r"[_\-\s]+", key):
-        if not token or token in ignored or token in suffix_tokens:
-            continue
-        label = token_labels.get(token)
-        if label and label not in labels:
-            labels.append(label)
-    if not labels:
+    content_tokens = [
+        token
+        for token in tokens
+        if token not in ignored and token not in {"preference", "preferences", "taste", "criteria"}
+    ]
+    if not content_tokens:
         return ""
-    specific_title = _daily_note_title_from_tokens(tokens)
-    if specific_title:
-        return specific_title
+    title = "".join(content_tokens[:3]) if re.search(r"[\u4e00-\u9fff]", key) else " ".join(content_tokens[:3])
     suffix = _daily_note_title_suffix(tokens, node)
-    title = "".join(labels[:3])
-    if suffix and not title.endswith(suffix):
+    if suffix and re.search(r"[\u4e00-\u9fff]", title) and not title.endswith(suffix):
         title = f"{title}{suffix}"
-    return title
-
-
-def _daily_note_title_from_tokens(tokens: list[str]) -> str:
-    token_set = {str(token or "").strip().lower() for token in tokens if str(token or "").strip()}
-    has_color = bool(token_set & {"color", "colors", "colour", "colours", "颜色"})
-    if has_color and token_set & {"coat", "trenchcoat", "trench"}:
-        return "风衣颜色选择"
-    if has_color and token_set & {"shoe", "shoes"}:
-        return "鞋子颜色选择"
-    if token_set & {"shoe", "shoes"} and token_set & {"candidate", "candidates", "option", "options", "choice", "choices", "select", "selection"}:
-        return "鞋子颜色选择"
-    if token_set & {"cocktail", "cocktails"}:
-        prefix = "酸味" if token_set & {"sour"} else ""
-        suffix = "推荐" if token_set & {"recommendation", "recommendations", "suggestion", "suggestions", "option", "options"} else "选择"
-        return f"{prefix}鸡尾酒{suffix}"
-    return ""
+    return truncate_text(title, 24, ellipsis=False)
 
 
 def _daily_note_title_suffix(tokens: list[str], node: dict[str, Any]) -> str:
@@ -1748,6 +1707,51 @@ def _daily_note_title_suffix(tokens: list[str], node: dict[str, Any]) -> str:
     return "记录"
 
 
+def _strip_daily_note_user_prefix(text: str) -> str:
+    return re.sub(
+        r"^用户(正在|曾经|曾|明确表示|表示|希望|需要|喜欢|倾向于|进一步|正在寻找|寻找|询问|想要|想)?",
+        "",
+        str(text or ""),
+    ).strip("，,。；;：: ")
+
+
+def _clean_daily_note_subject_phrase(value: str) -> str:
+    subject = str(value or "").strip("，,。；;：: ")
+    if not subject:
+        return ""
+    subject = re.sub(r"^(的|对|于|吃|喝|用|看|听|去|做)", "", subject).strip("，,。；;：: ")
+    parts = [part.strip("，,。；;：: ") for part in re.split(r"[、,，]", subject) if part.strip("，,。；;：: ")]
+    if len(parts) >= 2:
+        subject = parts[-1]
+    if "的" in subject:
+        subject = subject.rsplit("的", 1)[-1].strip("，,。；;：: ")
+    subject = re.sub(r"(?:方案|选择|推荐|选项|偏好|需求|标准|条件|上下文)$", "", subject).strip("，,。；;：: ")
+    return truncate_text(subject, 14, ellipsis=False)
+
+
+def _daily_note_subject_from_text(text: str) -> str:
+    user_side = re.split(r"助手|assistant", str(text or ""), maxsplit=1, flags=re.IGNORECASE)[0]
+    user_side = _strip_daily_note_user_prefix(user_side)
+    for pattern in (
+        r"(?:偏好|喜欢|要求|需要|希望)([^。；;\n]{2,80}?)(?:方案|选择|推荐|选项|偏好|需求|标准|条件|$)",
+        r"(?:寻找|找|比较|学习|调整|搭配)([^，。；;,.]{2,30})",
+    ):
+        match = re.search(pattern, user_side)
+        if not match:
+            continue
+        subject = _clean_daily_note_subject_phrase(match.group(1))
+        if subject:
+            return subject
+    first_clause = re.split(r"目前|已确认|尚未|并进一步|，|,|。|；|;", user_side, maxsplit=1)[0]
+    return _clean_daily_note_subject_phrase(first_clause)
+
+
+def _daily_note_subject_from_title(title_hint: str) -> str:
+    title = str(title_hint or "").strip()
+    title = re.sub(r"(偏好|选择|推荐|记录|待确认)$", "", title).strip("，,。；;：: ")
+    return title if title and len(title) <= 14 else ""
+
+
 def _daily_note_title_from_description(raw_description: str, node: dict[str, Any]) -> str:
     text = _normalize_snippet_text(raw_description)
     if not text:
@@ -1755,26 +1759,12 @@ def _daily_note_title_from_description(raw_description: str, node: dict[str, Any
     user_side = re.split(r"助手|assistant", text, maxsplit=1, flags=re.IGNORECASE)[0].strip("，,。；;：: ")
     note_type = str(node.get("type") or "").strip().lower()
 
-    if "鞋子" in user_side and "颜色" in user_side:
-        return "鞋子颜色选择"
-
+    subject = _daily_note_subject_from_text(user_side)
     if note_type == "preference":
-        for pattern in (
-            r"喜欢(?:吃|喝|用|看|听|去|做)?([^，。；;,.]+)",
-            r"偏好([^，。；;,.]+)",
-        ):
-            match = re.search(pattern, user_side)
-            if match:
-                subject = re.sub(r"^(的|对|于)", "", match.group(1).strip("，,。；;：: "))
-                subject = subject.replace("酸的", "酸味")
-                if subject:
-                    return truncate_text(f"{subject}偏好", 18, ellipsis=False)
+        if subject:
+            return truncate_text(f"{subject}偏好", 18, ellipsis=False)
 
-    clean = re.sub(
-        r"^用户(正在|曾经|曾|明确表示|表示|希望|需要|喜欢|倾向于|进一步|正在寻找|寻找|询问|想要|想)?",
-        "",
-        user_side,
-    ).strip("，,。；;：: ")
+    clean = _strip_daily_note_user_prefix(user_side)
     clean = re.sub(r"^为一?条?", "", clean).strip("，,。；;：: ")
     clean = re.split(r"目前|已确认|尚未|并进一步|，|,|。|；|;", clean, maxsplit=1)[0].strip("，,。；;：: ")
     clean = re.sub(r"^一?条?", "", clean).strip("，,。；;：: ")
@@ -1849,7 +1839,7 @@ def _compact_confirmation_status(text: str, title_hint: str = "") -> str:
 def _compact_preference_signal(text: str) -> str:
     patterns = (
         r"(?:基于|根据|延续)([^，。；;,.]{1,14})(?:偏好|喜好|需求)",
-        r"(?:喜欢|偏好)(?:吃|喝|用|看|听|去|做)?([^，。；;,.]{1,14})",
+        r"(?:喜欢|偏好)(?:吃|喝|用|看|听|去|做)?([^，。；;,.、]{1,14})",
     )
     for pattern in patterns:
         match = re.search(pattern, text)
@@ -1857,12 +1847,78 @@ def _compact_preference_signal(text: str) -> str:
             continue
         subject = match.group(1).strip("，,。；;：: ")
         subject = re.sub(r"^(的|对|于)", "", subject).strip("，,。；;：: ")
-        subject = subject.replace("酸的", "酸味")
+        if subject in {"不", "低"}:
+            continue
         if subject in {"此", "该", "这个", "这种"}:
             continue
         if subject:
             return f"{subject}偏好"
     return ""
+
+
+def _normalize_criteria_part(part: str) -> str:
+    value = str(part or "").strip("，,。；;：: ")
+    if not value:
+        return ""
+
+    paren_match = re.search(r"[（(]([^（）()]{2,32})[）)]", value)
+    if paren_match:
+        inner = paren_match.group(1).strip("，,。；;：: ")
+        outer = re.sub(r"[（(][^（）()]+[）)]", "", value).strip("，,。；;：: ")
+        inner_is_specific_constraint = bool(
+            re.search(
+                r"(\d+\s*(?:分钟|小时|天|周|月|年)|以内|内|以下|以上|不超过|至少|最多|不少于|不低于)",
+                inner,
+            )
+        )
+        if inner_is_specific_constraint:
+            value = inner
+        elif outer and inner and inner not in outer:
+            value = f"{outer}{inner}"
+
+    return value.strip("，,。；;：: ")
+
+
+def _compact_criteria_signal(text: str) -> str:
+    match = re.search(r"(?:偏好|要求|需要|希望)([^。；;\n]{4,80}?)(?:方案|选择|推荐|选项|$)", text)
+    if not match:
+        match = re.search(r"(?:偏好|要求|需要|希望)([^。；;\n]{4,120})", text)
+    if not match:
+        return ""
+    raw = match.group(1).strip("，,。；;：: ")
+    raw = re.sub(r"^(?:吃|喝|用|看|听|去|做)?", "", raw)
+    parts = [
+        part.strip("，,。；;：: ")
+        for part in re.split(r"[、,，]", raw)
+        if part.strip("，,。；;：: ")
+    ]
+    cleaned: list[str] = []
+    for part in parts:
+        part = _normalize_criteria_part(part)
+        part = re.sub(r"^(?:偏好|要求|需要|希望)", "", part).strip("，,。；;：: ")
+        if "的" in part and re.match(r"^(只|仅|不用|无需)", part):
+            part = part.split("的", 1)[0]
+        part = re.sub(r"(?:方案|选择|推荐|选项|偏好|需求|标准|条件)$", "", part).strip("，,。；;：: ")
+        if not re.search(r"(\d+\s*(?:分钟|小时)|快|慢|少|多|低|高|不|无|免|只|仅|非|轻松|简单|复杂)", part):
+            continue
+        if not part or part in {"用户", "方案"}:
+            continue
+        cleaned.append(part)
+        if len(cleaned) >= 4:
+            break
+    return "、".join(dict.fromkeys(cleaned))
+
+
+def _criteria_without_subject_overlap(criteria: str, subject: str) -> str:
+    subject = str(subject or "").strip()
+    if not subject:
+        return criteria
+    kept = []
+    for part in [item.strip() for item in str(criteria or "").split("、") if item.strip()]:
+        if part in subject or subject in part:
+            continue
+        kept.append(part)
+    return "、".join(kept)
 
 
 def _compact_constraint_signal(text: str) -> str:
@@ -1882,61 +1938,38 @@ def _compact_daily_note_sentence(text: str, title_hint: str = "") -> str:
     if not clean:
         return ""
 
-    if "风衣" in clean and "搭配" in clean:
-        outfit = ""
-        outfit_match = re.search(r"风衣(?:以)?搭配([^，。；;,.]+)", clean)
-        if outfit_match:
-            outfit = outfit_match.group(1).strip("，,。；;：: ")
-        compare = ""
-        compare_patterns = (
-            r"(?:正在)?比较([^，。；;,.]+?)风衣(?:以)?搭配",
-            r"(?:曾)?比较(?:过)?([^，。；;,.]+)",
-        )
-        for pattern in compare_patterns:
-            compare_match = re.search(pattern, clean)
-            if compare_match:
-                compare = compare_match.group(1).strip("，,。；;：: ")
-                break
-        compare = re.sub(r"(?:风衣|颜色|哪个更好|哪个更合适)$", "", compare).strip("，,。；;：: ")
-        compare = compare.replace("和", "与")
-        if outfit and compare:
-            return f"用户考虑风衣搭配{outfit}，比较{compare}"
-        if outfit:
-            return f"用户考虑风衣搭配{outfit}"
-        if compare:
-            return f"用户比较{compare}风衣"
+    subject = _daily_note_subject_from_title(title_hint) or _daily_note_subject_from_text(clean)
+    status = _compact_confirmation_status(clean, subject or title_hint)
+    if subject and status and subject not in status:
+        return truncate_text(f"{subject}，{status}", 24, ellipsis=False)
 
-    if "鞋子" in clean and "颜色" in clean:
-        choice = ""
-        for pattern in (
-            r"首选([^，。；;,.、]{1,8})",
-            r"第一推荐[:： ]*([^，。；;,.、]{1,8})",
-            r"建议(?:选择|用)?([^的，。；;,.、]{1,8})",
-        ):
-            choice_match = re.search(pattern, clean)
-            if choice_match:
-                choice = choice_match.group(1).strip("，,。；;：: ")
-                break
-        if choice:
-            return f"用户搭配鞋子颜色，{choice}待确认"
-        return "用户搭配鞋子颜色，选择待确认"
-
-    if "低酒精" in clean or "低酒感" in clean:
-        prefix = "用户偏好酸味，" if "酸" in clean else "用户"
-        return f"{prefix}关注低酒精鸡尾酒"
-
-    if "酸味水果" in clean or "酸的水果" in clean:
-        if "鸡尾酒" in clean or "酒吧" in clean:
-            return "用户偏好酸味水果，也关注酸爽低酒精鸡尾酒"
-        return "用户偏好酸味水果"
+    preference = _compact_preference_signal(clean)
+    if subject and preference and subject not in preference:
+        return truncate_text(f"{subject}，{preference}", 24, ellipsis=False)
 
     return ""
 
 
-def _daily_note_description_for_display(raw_description: str, title_hint: str = "") -> str:
+def _daily_note_description_for_display(
+    raw_description: str,
+    title_hint: str = "",
+    node: dict[str, Any] | None = None,
+) -> str:
     text = _normalize_snippet_text(raw_description).replace("…", "").replace("...", "")
     if not text:
         return ""
+
+    note_type = str((node or {}).get("type") or "").strip().lower()
+    subject_hint = _daily_note_subject_from_title(title_hint) or _daily_note_subject_from_text(text)
+    criteria = _criteria_without_subject_overlap(_compact_criteria_signal(text), subject_hint)
+    if note_type == "preference" and subject_hint and criteria and "、" in criteria:
+        return truncate_text(f"{subject_hint}：{criteria}", 24, ellipsis=False)
+    if subject_hint and criteria and "、" in criteria:
+        candidate = f"{subject_hint}：{criteria}"
+        if len(candidate) <= 24:
+            return candidate
+    if criteria and "、" in criteria:
+        return truncate_text(f"要求{criteria}", 24, ellipsis=False)
 
     sentence = _compact_daily_note_sentence(text, title_hint)
     if sentence:
@@ -1981,7 +2014,7 @@ def _daily_note_display_texts(
     description_title = _daily_note_title_from_description(raw_description, node)
     if key_title.endswith("记录") and description_title:
         key_title = ""
-    title_source = key_title or description_title or cached_title
+    title_source = description_title or cached_title or key_title
     if not title_source or title_source == cached_description or len(title_source) > 24:
         title_source = raw_description or raw_key
     first_sentence = re.split(r"[。；;\n]", title_source, maxsplit=1)[0].strip()
@@ -1992,7 +2025,7 @@ def _daily_note_display_texts(
     ).strip("，,。；;：: ")
     first_sentence = re.sub(r"^为一?条?", "", first_sentence).strip("，,。；;：: ")
     title = truncate_text(first_sentence or raw_key or node_id, 32, ellipsis=False)
-    description = _daily_note_description_for_display(description_source, title)
+    description = _daily_note_description_for_display(description_source, title, node)
     return title, description
 
 
@@ -3032,14 +3065,16 @@ def _looks_like_stable_project(project: ProjectMemory) -> bool:
     # but still don't yet look like an actual long-running project.
     exploratory_tokens = {
         "recommendation",
-        "food",
-        "recipe",
-        "concert",
-        "travel",
-        "shopping",
+        "suggestion",
+        "option",
+        "choice",
+        "selection",
+        "comparison",
         "price",
-        "fruit",
-        "skill",
+        "list",
+        "guide",
+        "question",
+        "advice",
         "configuration",
         "exploration",
     }
@@ -3083,13 +3118,15 @@ def _looks_like_stable_workflow(workflow: WorkflowMemory) -> bool:
     lowered = name.lower()
     generic_topic_tokens = [
         "recommendation",
-        "troubleshooting",
-        "shopping",
-        "concert",
-        "recipe",
-        "travel",
-        "fruit",
-        "food",
+        "suggestion",
+        "option",
+        "choice",
+        "comparison",
+        "list",
+        "guide",
+        "question",
+        "advice",
+        "exploration",
     ]
     if any(token in lowered for token in generic_topic_tokens):
         return False
@@ -3117,13 +3154,14 @@ def _is_concrete_skill_record(
         return False
     vague_tokens = [
         "recommendation",
+        "suggestion",
+        "option",
+        "choice",
         "interest",
         "topic",
         "habit",
         "exploration",
         "configuration",
-        "food",
-        "fruit",
     ]
     lowered = clean_title.lower()
     if any(token in lowered for token in vague_tokens):
@@ -3505,18 +3543,10 @@ def _looks_like_over_specific_task_type(value: str) -> bool:
         "recommend", "advice", "suggest", "choose", "compare", "analyze", "summarize",
         "plan", "write", "debug", "test", "design",
     }
-    # A broad label should usually be just an action mode, not action + concrete
-    # object. If a label is longer and starts with an action marker, it is likely
-    # a one-turn topic such as "推荐酸味饮品".
+    # A broad label should usually be an action mode, not action + one concrete object.
     broad_connectors = {"与", "和", "或", "及", "、", "and", "or"}
     has_broad_connector = any(connector in text for connector in broad_connectors)
-    concrete_scope_markers = {
-        "服装", "衣服", "风衣", "长裙", "鞋", "水果", "食品", "饮品", "鸡尾酒",
-        "酸味", "酒吧", "outfit", "clothing", "fruit", "cocktail", "drink", "food",
-    }
     if "/" in label or "／" in label:
-        return True
-    if any(marker in text for marker in concrete_scope_markers) and any(marker in text for marker in action_markers):
         return True
     if len(label) >= 5 and not has_broad_connector and any(text.startswith(marker) for marker in action_markers):
         return True
@@ -3696,7 +3726,7 @@ def _infer_primary_task_type_candidates(
         compact = text.replace(" ", "")
         is_project_episode = bool(episode.relates_to_projects)
 
-        if any(token in compact for token in ["穿搭", "搭配", "配色", "风衣", "长裙", "鞋子", "服装", "衣服", "outfit", "clothing"]):
+        if any(token in compact for token in ["搭配", "配色", "styling", "matching"]):
             add("搭配建议")
 
         if any(token in compact for token in ["推荐", "建议", "有哪些", "有什么", "哪个", "哪些", "比较", "recommend", "suggest", "compare"]):
@@ -3954,7 +3984,13 @@ def _focus_overlaps_project(focus: str, project_texts: list[str]) -> bool:
 
 def _memory_text_tokens(text: str) -> set[str]:
     raw = str(text or "").lower()
-    raw = raw.replace("text-to-image", "text image t2i").replace("text2image", "text image t2i")
+    for phrase in re.findall(r"\b[a-z0-9]+(?:[-_/][a-z0-9]+)+\b", raw):
+        parts = [part for part in re.split(r"[-_/]+", phrase) if part]
+        if len(parts) >= 2:
+            raw += " " + " ".join(parts)
+            acronym = "".join("2" if part == "to" else part[0] for part in parts if part)
+            if len(acronym) >= 2:
+                raw += f" {acronym}"
     tokens = {token for token in re.findall(r"[a-z0-9]+", raw) if len(token) >= 2}
     tokens.update(re.findall(r"[\u4e00-\u9fff]{2,}", raw))
     stopwords = {
@@ -7082,7 +7118,7 @@ def save_persistent_nodes(settings: dict[str, Any], data: dict[str, Any]) -> Non
     )
     (persistent_root / "README.md").write_text(
         "# Daily Notes\n\n"
-        "此目录存放“日常记忆”层的节点化记忆资产，包含生活场景、个人选择、口味、穿搭、消费等不属于项目/画像/工作流的上下文。\n\n"
+        "此目录存放“日常记忆”层的节点化记忆资产，包含可复用的非项目类生活上下文、个人选择、约束条件和小事实。\n\n"
         "- `index.json`：索引与汇总\n"
         "- `<node-id>/node.json`：单条节点结构化数据\n"
         "- `<node-id>/node.md`：单条节点说明\n",

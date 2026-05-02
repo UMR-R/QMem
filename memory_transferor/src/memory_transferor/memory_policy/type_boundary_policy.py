@@ -10,7 +10,7 @@ class TypeBoundaryPolicy:
     )
     _PROFILE_MARKERS = (
         "背景", "身份", "role", "background", "常用", "习惯用", "讨论想法", "语言",
-        "domain", "计算生物", "结构生物",
+        "domain", "专业", "领域", "研究方向",
     )
     _PREFERENCE_MARKERS = (
         "偏好", "喜欢", "不要", "避免", "格式", "语气", "风格", "输出", "回答",
