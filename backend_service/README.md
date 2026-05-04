@@ -49,7 +49,7 @@ pip install -r backend_service/requirements.txt
 uvicorn backend_service.app:app --host 127.0.0.1 --port 8765 --reload
 ```
 
-`backend_service/requirements.txt` is the expected first-run install entrypoint. It also includes the runtime dependencies needed by the in-repo `llm_memory_transferor` modules imported by the backend.
+`backend_service/requirements.txt` is the expected first-run install entrypoint. It also includes the runtime dependencies needed by the in-repo `memory_transferor` modules imported by the backend.
 
 Health check:
 

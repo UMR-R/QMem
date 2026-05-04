@@ -59,26 +59,21 @@ RECOMMENDED_REMOTE_SOURCES = [
         "usage_bias": 0.96,
     },
 ]
-LLM_TRANSFEROR_SRC = PROJECT_ROOT / "llm_memory_transferor" / "src"
 MEMORY_TRANSFEROR_SRC = PROJECT_ROOT / "memory_transferor" / "src"
 JOB_LOCK = threading.Lock()
 L2_PERSISTENT_NODE_MAINTENANCE_VERSION = "l2_persistent_nodes_v4_daily_notes_merge"
 
-if str(LLM_TRANSFEROR_SRC) not in sys.path:
-    sys.path.insert(0, str(LLM_TRANSFEROR_SRC))
 if str(MEMORY_TRANSFEROR_SRC) not in sys.path:
     sys.path.insert(0, str(MEMORY_TRANSFEROR_SRC))
 
-from llm_memory_transferor.exporters import BootstrapGenerator, PackageExporter  # noqa: E402
-from llm_memory_transferor.layers.l0_raw import L0RawLayer, RawConversation, RawMessage  # noqa: E402
-from llm_memory_transferor.layers.l1_signals import L1SignalLayer  # noqa: E402
-from llm_memory_transferor.layers.l2_wiki import L2Wiki  # noqa: E402
-from llm_memory_transferor.layers.l3_schema import L3Schema  # noqa: E402
-from llm_memory_transferor.models import EpisodeConnection, EpisodicMemory, PreferenceMemory, ProfileMemory, ProjectMemory, WorkflowMemory  # noqa: E402
-from llm_memory_transferor.models.base import MemoryBase  # noqa: E402
-from llm_memory_transferor.processors import MemoryBuilder, MemoryUpdater  # noqa: E402
-from llm_memory_transferor.utils.llm_client import LLMClient  # noqa: E402
-from memory_transferor.memory_export import base_display_taxonomy, taxonomy_group_source_fields  # noqa: E402
+from memory_transferor.managed_memory import L2Wiki, MemoryBuilder, MemoryUpdater  # noqa: E402
+from memory_transferor.managed_memory.models import EpisodeConnection, EpisodicMemory, MemoryBase, PreferenceMemory, ProfileMemory, ProjectMemory, WorkflowMemory  # noqa: E402
+from memory_transferor.memory_models import RawConversation, RawMessage  # noqa: E402
+from memory_transferor.memory_export import BootstrapGenerator, PackageExporter, base_display_taxonomy, taxonomy_group_source_fields  # noqa: E402
+from memory_transferor.memory_policy import L3Schema  # noqa: E402
+from memory_transferor.memory_store import L0RawLayer  # noqa: E402
+from memory_transferor.platform_memory import L1SignalLayer  # noqa: E402
+from memory_transferor.runtime import LLMClient  # noqa: E402
 
 
 JOB_REGISTRY: dict[str, dict[str, Any]] = {}

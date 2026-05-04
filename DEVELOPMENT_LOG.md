@@ -1,5 +1,18 @@
 # 开发日志
 
+## 2026-05-04
+
+- 🏠 将 backend 主路径迁到 memory_transferor
+  - 改了什么：
+    - 将 raw 导入解析、L1 平台记忆信号、LLM client、L3 lifecycle policy、export/bootstrap、typed managed memory models、L2Wiki、MemoryBuilder 和 MemoryUpdater 逐步迁入 `memory_transferor`。
+    - 更新 `backend_service/app.py` 的 import，backend 不再从 `llm_memory_transferor` 加载产品主路径模块，也不再把 `llm_memory_transferor/src` 注入 `sys.path`。
+    - 保留现有存储格式、API 行为和前端选择逻辑，只改变模块归属与依赖方向。
+    - 同步更新 `backend_service/README.md` 中关于 backend runtime 依赖的说明。
+  - 为了什么：
+    - 为后续删除旧 `llm_memory_transferor` 目录铺路。
+    - 让产品后端统一依赖新的 canonical `memory_transferor` 包，减少新旧两套命名和模块边界混用。
+    - 先完成可验证的主路径迁移，再处理旧 CLI、eval、tests 和文档引用。
+
 ## 2026-05-02
 
 - 🏠 优化记忆整理速度和前端展示口径

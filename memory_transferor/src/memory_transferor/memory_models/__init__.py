@@ -1,6 +1,14 @@
 from .episode import Episode, EpisodeConnection, EpisodeGroup
 from .persistent import PersistentMemoryItem
-from .raw import RawChatSession, RawChatTurn
+from .raw import (
+    RawChatSession,
+    RawChatTurn,
+    RawConversation,
+    RawMessage,
+    RawTurn,
+    build_raw_turns,
+    parse_raw_timestamp,
+)
 
 __all__ = [
     "Episode",
@@ -9,4 +17,9 @@ __all__ = [
     "PersistentMemoryItem",
     "RawChatSession",
     "RawChatTurn",
+    "RawConversation",
+    "RawMessage",
+    "RawTurn",
+    "build_raw_turns",
+    "parse_raw_timestamp",
 ]
