@@ -16,6 +16,7 @@ const STORAGE_KEYS = {
   lastSyncAt: "last_sync_at",
   savedSkills: "saved_skill_ids",
   organizeJobState: "organize_job_state",
+  memorySelection: "memory_selection_ids",
 };
 
 const SUPPORTED_HOSTS = new Set([
@@ -71,6 +72,7 @@ const state = {
   selectedSkillIds: new Set(),
   selectedRecommendedIds: new Set(),
   selectedMemoryIds: new Set(),
+  hasStoredMemorySelection: false,
   expandedCategories: new Set(),
   memoryItemsByCategory: {},
   recommendedSkillItems: [],
@@ -203,6 +205,61 @@ function backendApi() {
     throw new Error("BackendAPI 未加载");
   }
   return window.BackendAPI;
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function sanitizeStoredMemoryIds(value) {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.map(item => String(item || "").trim()).filter(Boolean))];
+}
+
+function persistMemorySelection() {
+  state.hasStoredMemorySelection = true;
+  return storageSet({ [STORAGE_KEYS.memorySelection]: [...state.selectedMemoryIds] });
+}
+
+function setMemoryItemSelected(itemId, checked) {
+  const id = String(itemId || "").trim();
+  if (!id) return;
+  if (checked) state.selectedMemoryIds.add(id);
+  else state.selectedMemoryIds.delete(id);
+  persistMemorySelection().catch(err => {
+    logPopupError("persistMemorySelection", err);
+  });
+}
+
+function validMemorySelectionIds() {
+  const valid = new Set();
+  for (const [category, items] of Object.entries(state.memoryItemsByCategory || {})) {
+    if (Array.isArray(items) && items.length) {
+      items.forEach(item => {
+        if (item?.id) valid.add(String(item.id));
+      });
+    } else if ((state.categories?.[category] || 0) > 0) {
+      valid.add(`${category}:default`);
+    }
+  }
+  return valid;
+}
+
+async function pruneUnavailableMemorySelection() {
+  const valid = validMemorySelectionIds();
+  if (!valid.size || !state.selectedMemoryIds.size) return;
+  let changed = false;
+  for (const itemId of [...state.selectedMemoryIds]) {
+    if (valid.has(itemId)) continue;
+    state.selectedMemoryIds.delete(itemId);
+    changed = true;
+  }
+  if (changed) await persistMemorySelection();
 }
 
 function runtimeSendMessage(message) {
@@ -588,7 +645,27 @@ async function toggleCategorySelection(category, checked) {
   } else {
     items.forEach(item => state.selectedMemoryIds[checked ? "add" : "delete"](item.id));
   }
+  await persistMemorySelection();
   renderSelectionList();
+}
+
+async function deleteMemoryItem(categoryId, item) {
+  const itemId = String(item?.id || "").trim();
+  if (!itemId) return;
+  const preview = buildSelectionPreview(categoryId, item);
+  const label = preview.title || preview.description || itemId;
+  const confirmed = confirm(`删除这条记忆吗？\n\n${label}`);
+  if (!confirmed) return;
+  try {
+    await backendApi().deleteMemoryItems(state.backendUrl, { item_ids: [itemId] });
+    state.selectedMemoryIds.delete(itemId);
+    await persistMemorySelection();
+    state.memoryItemsByCategory = {};
+    await refreshSummary();
+    toast("已删除这条记忆");
+  } catch (err) {
+    toast(`删除失败：${errorMessage(err, "无法删除这条记忆")}`, true);
+  }
 }
 
 function renderSelectionList() {
@@ -661,22 +738,35 @@ function renderSelectionList() {
           const chips = groupItems.map(item => {
             const preview = buildSelectionPreview(category.id, item);
             return `
-              <label class="selection-chip" title="${item.display_description || item.description || ""}">
-                <input type="checkbox" data-item-id="${item.id}" ${state.selectedMemoryIds.has(item.id) ? "checked" : ""}>
-                <span>${preview.description || preview.title}</span>
-              </label>
+              <div class="selection-chip-item">
+                <label class="selection-chip" title="${escapeHtml(item.display_description || item.description || "")}">
+                  <input type="checkbox" data-item-id="${escapeHtml(item.id)}" ${state.selectedMemoryIds.has(item.id) ? "checked" : ""}>
+                  <span>${escapeHtml(preview.description || preview.title)}</span>
+                </label>
+                <button class="selection-memory-delete-btn" type="button" data-delete-item-id="${escapeHtml(item.id)}" aria-label="删除 ${escapeHtml(preview.description || preview.title)}">×</button>
+              </div>
             `;
           }).join("");
           subgroup.innerHTML = `
-            <div class="selection-subgroup-title">${groupLabel}</div>
+            <div class="selection-subgroup-title">${escapeHtml(groupLabel)}</div>
             <div class="selection-chip-row" data-scroll-key="${scrollKey}">${chips}</div>
           `;
           subgroup.querySelectorAll("input").forEach(checkbox => {
             checkbox.addEventListener("change", event => {
               const itemId = event.target.dataset.itemId;
-              if (event.target.checked) state.selectedMemoryIds.add(itemId);
-              else state.selectedMemoryIds.delete(itemId);
+              setMemoryItemSelected(itemId, event.target.checked);
               renderSelectionList();
+            });
+          });
+          subgroup.querySelectorAll("[data-delete-item-id]").forEach(button => {
+            button.addEventListener("click", event => {
+              event.preventDefault();
+              event.stopPropagation();
+              const itemId = event.currentTarget.dataset.deleteItemId;
+              const item = groupItems.find(candidate => candidate.id === itemId);
+              deleteMemoryItem(category.id, item).catch(err => {
+                toast(`删除失败：${errorMessage(err, "无法删除这条记忆")}`, true);
+              });
             });
           });
           childList.appendChild(subgroup);
@@ -684,20 +774,28 @@ function renderSelectionList() {
       } else {
         items.forEach(item => {
           const preview = buildSelectionPreview(category.id, item);
-          const child = document.createElement("label");
+          const child = document.createElement("div");
           child.className = "selection-child";
           child.innerHTML = `
-            <input type="checkbox" data-item-id="${item.id}" ${state.selectedMemoryIds.has(item.id) ? "checked" : ""}>
+            <input type="checkbox" data-item-id="${escapeHtml(item.id)}" ${state.selectedMemoryIds.has(item.id) ? "checked" : ""}>
             <div>
-              <strong title="${item.title || ""}">${preview.title}</strong>
-              <p title="${item.description || ""}">${preview.description}</p>
+              <strong title="${escapeHtml(item.title || "")}">${escapeHtml(preview.title)}</strong>
+              <p title="${escapeHtml(item.description || "")}">${escapeHtml(preview.description)}</p>
             </div>
+            <button class="selection-memory-delete-btn" type="button" data-delete-item-id="${escapeHtml(item.id)}" aria-label="删除 ${escapeHtml(preview.title || preview.description)}">×</button>
           `;
           const checkbox = child.querySelector("input");
           checkbox.addEventListener("change", event => {
-            if (event.target.checked) state.selectedMemoryIds.add(item.id);
-            else state.selectedMemoryIds.delete(item.id);
+            setMemoryItemSelected(item.id, event.target.checked);
             renderSelectionList();
+          });
+          const deleteBtn = child.querySelector("[data-delete-item-id]");
+          deleteBtn.addEventListener("click", event => {
+            event.preventDefault();
+            event.stopPropagation();
+            deleteMemoryItem(category.id, item).catch(err => {
+              toast(`删除失败：${errorMessage(err, "无法删除这条记忆")}`, true);
+            });
           });
           childList.appendChild(child);
         });
@@ -716,6 +814,7 @@ async function initializeDefaultMemorySelection() {
     if (items.length === 0) state.selectedMemoryIds.add(`${category}:default`);
     else items.forEach(item => state.selectedMemoryIds.add(item.id));
   }
+  await persistMemorySelection();
 }
 
 function deriveMySkills(allData, pnData) {
@@ -997,7 +1096,8 @@ async function refreshSummary() {
     state.categoryLabels.workflows = categories.categories.find(item => item.id === "workflows")?.label || CATEGORY_LABELS.workflows;
     state.categoryLabels.daily_notes = dailyNotesCategory?.label || CATEGORY_LABELS.daily_notes;
     await Promise.all(["profile", "preferences", "projects", "workflows", "daily_notes"].map(category => ensureCategoryItems(category)));
-    if (state.selectedMemoryIds.size === 0) {
+    await pruneUnavailableMemorySelection();
+    if (state.selectedMemoryIds.size === 0 && !state.hasStoredMemorySelection) {
       await initializeDefaultMemorySelection();
     }
     renderSelectionList();
@@ -1841,6 +1941,8 @@ async function clearAllMemoryFiles() {
   }
 
   state.selectedMemoryIds.clear();
+  state.hasStoredMemorySelection = true;
+  await storageSet({ [STORAGE_KEYS.memorySelection]: [] });
   state.expandedCategories.clear();
   state.memoryItemsByCategory = {};
   state.organizeJobState = null;
@@ -2067,6 +2169,7 @@ async function init() {
     STORAGE_KEYS.lastSyncAt,
     STORAGE_KEYS.savedSkills,
     STORAGE_KEYS.organizeJobState,
+    STORAGE_KEYS.memorySelection,
   ]);
 
   state.apiProvider = settings[STORAGE_KEYS.apiProvider] || state.apiProvider;
@@ -2087,6 +2190,10 @@ async function init() {
   const savedSkillIds = settings[STORAGE_KEYS.savedSkills] || [];
   state.selectedSkillIds = new Set(savedSkillIds);
   state.selectedRecommendedIds = new Set(savedSkillIds.filter(id => String(id).startsWith("rec:")));
+  if (Array.isArray(settings[STORAGE_KEYS.memorySelection])) {
+    state.selectedMemoryIds = new Set(sanitizeStoredMemoryIds(settings[STORAGE_KEYS.memorySelection]));
+    state.hasStoredMemorySelection = true;
+  }
 
   try {
     const backendSettings = await backendApi().getSettings(state.backendUrl);

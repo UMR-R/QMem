@@ -61,7 +61,7 @@ RECOMMENDED_REMOTE_SOURCES = [
 ]
 MEMORY_TRANSFEROR_SRC = PROJECT_ROOT / "memory_transferor" / "src"
 JOB_LOCK = threading.Lock()
-L2_PERSISTENT_NODE_MAINTENANCE_VERSION = "l2_persistent_nodes_v4_daily_notes_merge"
+L2_PERSISTENT_NODE_MAINTENANCE_VERSION = "l2_persistent_nodes_v5_daily_notes_display"
 
 if str(MEMORY_TRANSFEROR_SRC) not in sys.path:
     sys.path.insert(0, str(MEMORY_TRANSFEROR_SRC))
@@ -73,6 +73,7 @@ from memory_transferor.memory_export import BootstrapGenerator, PackageExporter,
 from memory_transferor.memory_policy import L3Schema  # noqa: E402
 from memory_transferor.memory_store import L0RawLayer  # noqa: E402
 from memory_transferor.platform_memory import L1SignalLayer  # noqa: E402
+from memory_transferor.prompt_loader import load_prompt  # noqa: E402
 from memory_transferor.runtime import LLMClient  # noqa: E402
 
 
@@ -413,6 +414,10 @@ class ExportSkillsRequest(BaseModel):
 
 class DeleteSkillsRequest(BaseModel):
     skill_ids: list[str]
+
+
+class DeleteMemoryItemsRequest(BaseModel):
+    item_ids: list[str]
 
 
 class InjectSkillsRequest(BaseModel):
@@ -1609,6 +1614,74 @@ def _taxonomy_title(group: dict[str, Any], locale: str | None) -> str:
     return str(title or group.get("group_id") or "").strip()
 
 
+def _frontend_display_text(value: Any, *, max_length: int = 96) -> str:
+    text = _normalize_snippet_text(str(value or "")).replace("…", "").replace("...", "")
+    text = text.strip(" \t\r\n，,、；;：:。")
+    if not text:
+        return ""
+    return truncate_text(text, max_length, ellipsis=False).rstrip("，,、；;：:。")
+
+
+def _looks_incomplete_frontend_title(value: Any) -> bool:
+    text = _frontend_display_text(value, max_length=120).lower()
+    if not text:
+        return True
+    if text in {"未命名", "暂无", "暂无细项", "unknown", "none", "n/a", "null"}:
+        return True
+    if re.fullmatch(r"(pn_\d+|[a-f0-9]{8}|[a-f0-9-]{20,})", text):
+        return True
+    if re.fullmatch(r"[\W_]+", text, flags=re.UNICODE):
+        return True
+    return False
+
+
+def _frontend_title_from_description(description: Any, fallback: str = "") -> str:
+    text = _frontend_display_text(description, max_length=160)
+    if not text:
+        return fallback
+    text = re.sub(
+        r"^用户(正在|曾经|曾|明确表示|表示|希望|需要|喜欢|倾向于|进一步|正在寻找|寻找|询问|想要|想)?",
+        "",
+        text,
+    ).strip("，,。；;：: ")
+    first = re.split(r"[。；;\n]", text, maxsplit=1)[0].strip("，,。；;：: ")
+    if not first:
+        return fallback
+    return truncate_text(first, 32, ellipsis=False).rstrip("，,、；;：:。")
+
+
+def _frontend_memory_item(
+    item: dict[str, Any],
+    *,
+    category: str,
+    fallback_title: str = "",
+    fallback_description: str = "",
+) -> dict[str, Any]:
+    normalized = dict(item)
+    title = _frontend_display_text(
+        normalized.get("display_title") or normalized.get("title") or fallback_title,
+        max_length=64,
+    )
+    description = _frontend_display_text(
+        normalized.get("display_description") or normalized.get("description") or fallback_description,
+        max_length=140,
+    )
+    if _looks_incomplete_frontend_title(title):
+        title = _frontend_title_from_description(description, fallback_title) or _frontend_display_text(
+            normalized.get("id") or category,
+            max_length=32,
+        )
+    if not description or description == title:
+        description = _frontend_display_text(fallback_description, max_length=140)
+    if not description and category in {"profile", "preferences"}:
+        description = title
+    normalized["title"] = title
+    normalized["display_title"] = title
+    normalized["description"] = description
+    normalized["display_description"] = description
+    return normalized
+
+
 def _payload_field_value(
     payload: dict[str, Any],
     field: str,
@@ -1660,7 +1733,7 @@ def _taxonomy_group_description(
     return truncate_text(description, 140, ellipsis=False), active_fields
 
 
-def _daily_note_title_from_key(raw_key: str, node: dict[str, Any]) -> str:
+def _daily_note_title_from_key(raw_key: str) -> str:
     key = str(raw_key or "").strip().lower()
     if not key or key.startswith("pn_"):
         return ""
@@ -1675,373 +1748,75 @@ def _daily_note_title_from_key(raw_key: str, node: dict[str, Any]) -> str:
         "note",
         "notes",
         "prefers",
+        "preference",
+        "preferences",
+        "taste",
+        "criteria",
     }
     tokens = [token for token in re.split(r"[_\-\s]+", key) if token]
-    content_tokens = [
-        token
-        for token in tokens
-        if token not in ignored and token not in {"preference", "preferences", "taste", "criteria"}
-    ]
+    content_tokens = [token for token in tokens if token not in ignored]
     if not content_tokens:
         return ""
     title = "".join(content_tokens[:3]) if re.search(r"[\u4e00-\u9fff]", key) else " ".join(content_tokens[:3])
-    suffix = _daily_note_title_suffix(tokens, node)
-    if suffix and re.search(r"[\u4e00-\u9fff]", title) and not title.endswith(suffix):
-        title = f"{title}{suffix}"
     return truncate_text(title, 24, ellipsis=False)
 
 
-def _daily_note_title_suffix(tokens: list[str], node: dict[str, Any]) -> str:
-    note_type = str(node.get("type") or "").strip().lower()
-    token_set = {str(token or "").strip().lower() for token in tokens if str(token or "").strip()}
-    if note_type == "preference" or token_set & {"preference", "preferences", "taste", "prefers"}:
-        return "偏好"
-    if token_set & {"recommendation", "recommendations", "suggestion", "suggestions"}:
-        return "推荐"
-    if token_set & {"candidate", "candidates", "option", "options", "choice", "choices", "select", "selection"}:
-        return "选择"
-    return "记录"
-
-
-def _strip_daily_note_user_prefix(text: str) -> str:
+def _strip_daily_note_display_prefix(text: str) -> str:
     return re.sub(
-        r"^用户(正在|曾经|曾|明确表示|表示|希望|需要|喜欢|倾向于|进一步|正在寻找|寻找|询问|想要|想)?",
+        r"^用户(正在|曾经|曾|明确表示|表示|希望|需要|喜欢|倾向于|进一步|正在寻找|寻找|询问|想要|想|要求)?",
         "",
         str(text or ""),
     ).strip("，,。；;：: ")
 
 
-def _clean_daily_note_subject_phrase(value: str) -> str:
-    subject = str(value or "").strip("，,。；;：: ")
-    if not subject:
-        return ""
-    subject = re.sub(r"^(的|对|于|吃|喝|用|看|听|去|做)", "", subject).strip("，,。；;：: ")
-    if "：" in subject or ":" in subject:
-        subject = re.split(r"[:：]", subject, maxsplit=1)[0].strip("，,。；;：: ")
-    parts = [part.strip("，,。；;：: ") for part in re.split(r"[、,，]", subject) if part.strip("，,。；;：: ")]
-    if len(parts) >= 2:
-        subject = next((part for part in parts if "的" in part), parts[0])
-    if "的" in subject:
-        subject = subject.rsplit("的", 1)[-1].strip("，,。；;：: ")
-    subject = re.sub(r"(?:方案|选择|推荐|选项|偏好|需求|标准|条件|上下文)$", "", subject).strip("，,。；;：: ")
-    return truncate_text(subject, 14, ellipsis=False)
-
-
-def _daily_note_subject_from_text(text: str) -> str:
-    user_side = re.split(r"助手|assistant", str(text or ""), maxsplit=1, flags=re.IGNORECASE)[0]
-    user_side = _strip_daily_note_user_prefix(user_side)
-    for pattern in (
-        r"(?:偏好|喜欢|要求|需要|希望)([^。；;\n]{2,80}?)(?:方案|选择|推荐|选项|偏好|需求|标准|条件|$)",
-        r"(?:寻找|找|比较|学习|调整|搭配)([^，。；;,.]{2,30})",
-    ):
-        match = re.search(pattern, user_side)
-        if not match:
-            continue
-        subject = _clean_daily_note_subject_phrase(match.group(1))
-        if subject:
-            return subject
-    first_clause = re.split(r"目前|已确认|尚未|并进一步|，|,|。|；|;", user_side, maxsplit=1)[0]
-    return _clean_daily_note_subject_phrase(first_clause)
-
-
-def _daily_note_subject_from_title(title_hint: str) -> str:
-    title = str(title_hint or "").strip()
-    title = re.sub(r"(偏好|选择|推荐|记录|待确认)$", "", title).strip("，,。；;：: ")
-    return title if title and len(title) <= 14 else ""
-
-
-def _daily_note_overlap_subject(subject: str) -> str:
-    clean_subject = str(subject or "").strip("，,。；;：: ")
-    return clean_subject
-
-
-def _truncate_daily_note_display(value: str, max_length: int = 24) -> str:
-    return truncate_text(value, max_length, ellipsis=False).rstrip("，,、；;：: ")
-
-
-def _remove_daily_note_repeated_title_prefix(text: str, title_hint: str) -> str:
-    value = str(text or "").strip("，,。；;：: ")
-    title = str(title_hint or "").strip("，,。；;：: ")
-    if not value or not title or not value.startswith(title):
-        return value
-    remainder = value[len(title):].strip("，,。；;：: ")
-    if remainder.endswith("偏好") and len(remainder) > len("偏好待确认"):
-        remainder = remainder.removesuffix("偏好").strip("，,。；;：: ")
-    return remainder or value
-
-
-def _daily_note_title_carries_subject(title_hint: str, subject: str) -> bool:
-    title = str(title_hint or "").strip("，,。；;：: ")
-    clean_subject = str(subject or "").strip("，,。；;：: ")
-    if not title or not clean_subject:
-        return False
-    title_base = re.sub(r"(?:偏好|选择|推荐|记录|待确认)$", "", title).strip("，,。；;：: ")
-    return title == clean_subject or title_base == clean_subject
-
-
-def _daily_note_title_from_description(raw_description: str, node: dict[str, Any]) -> str:
-    text = _normalize_snippet_text(raw_description)
+def _clean_daily_note_display_text(value: Any, *, max_length: int) -> str:
+    text = str(value or "").strip("，,。；;：: ")
     if not text:
         return ""
-    user_side = re.split(r"助手|assistant", text, maxsplit=1, flags=re.IGNORECASE)[0].strip("，,。；;：: ")
-    note_type = str(node.get("type") or "").strip().lower()
-
-    subject = _daily_note_subject_from_text(user_side)
-    if note_type == "preference":
-        if subject:
-            return _truncate_daily_note_display(f"{subject}偏好", 18)
-
-    clean = _strip_daily_note_user_prefix(user_side)
-    clean = re.sub(r"^为一?条?", "", clean).strip("，,。；;：: ")
-    clean = re.split(r"目前|已确认|尚未|并进一步|，|,|。|；|;", clean, maxsplit=1)[0].strip("，,。；;：: ")
-    clean = re.sub(r"^一?条?", "", clean).strip("，,。；;：: ")
-    return _truncate_daily_note_display(clean, 22)
-
-
-def _compact_display_join(parts: list[str], limit: int = 22) -> str:
-    cleaned = [part.strip("，,。；;：: ") for part in parts if part.strip("，,。；;：: ")]
-    if not cleaned:
-        return ""
-    if len(cleaned) >= 2:
-        combined = "，".join(cleaned[:2])
-        if len(combined) <= limit:
-            return combined
-    for part in cleaned:
-        if len(part) <= limit:
-            return part
-    return truncate_text(cleaned[0], limit, ellipsis=False)
-
-
-def _status_from_title_hint(title_hint: str) -> str:
-    subject = str(title_hint or "").strip()
-    subject = re.sub(r"(选择|推荐|偏好|记录)$", "", subject).strip("，,。；;：: ")
-    return f"{subject or '选择'}待确认"
-
-
-def _normalize_confirmation_subject(subject: str) -> str:
-    subject = subject.strip("，,。；;：: ")
-    subject = re.sub(r"^(但|且|不过|用户|具体|最终|是否|仍|还|尚|均)+", "", subject).strip("，,。；;：: ")
-    subject = re.sub(r"(均|仍|还|尚)$", "", subject).strip("，,。；;：: ")
-    subject = subject.replace("和", "与").replace("及", "与")
-    return subject
-
-
-def _compact_confirmation_status(text: str, title_hint: str = "") -> str:
-    subjects: list[str] = []
-    for match in re.finditer(r"(?:尚未|还未|未)确认([^，。；;,.]{0,18})", text):
-        subject = _normalize_confirmation_subject(match.group(1))
-        if subject in {"此", "该", "这个", "这种"}:
-            subject = ""
-        if subject:
-            subjects.append(subject)
-    for match in re.finditer(r"([^，。；;,.]{1,18}?)(?:均)?(?:尚未|还未|未)(?:最终|具体)?确认", text):
-        subject = _normalize_confirmation_subject(match.group(1))
-        if subject:
-            subjects.append(subject)
-    for match in re.finditer(r"(?:尚未|还未|未)(?:最终|具体)?确定([^，。；;,.]{0,18})", text):
-        subject = _normalize_confirmation_subject(match.group(1))
-        if not subject and title_hint:
-            subject = _status_from_title_hint(title_hint).removesuffix("待确认")
-        if subject:
-            subjects.append(subject)
-    for match in re.finditer(r"([^，。；;,.]{1,18}?)(?:尚未|还未|未)(?:最终|具体)?确定", text):
-        subject = _normalize_confirmation_subject(match.group(1))
-        if subject:
-            subjects.append(subject)
-    subjects = list(dict.fromkeys(subjects))
-    if not subjects:
-        return _status_from_title_hint(title_hint) if re.search(r"(?:尚未|还未|未)(?:最终|具体)?确认", text) else ""
-    if len(subjects) >= 2:
-        shared_suffix = ""
-        for suffix in ("颜色", "选择", "方案", "款式", "偏好"):
-            if all(subject.endswith(suffix) for subject in subjects[:2]):
-                shared_suffix = suffix
-                break
-        if shared_suffix:
-            heads = [subject[: -len(shared_suffix)] for subject in subjects[:2]]
-            return f"{'与'.join(heads)}{shared_suffix}待确认"
-    return f"{subjects[0]}待确认"
-
-
-def _compact_preference_signal(text: str) -> str:
-    patterns = (
-        r"(?:基于|根据|延续)([^，。；;,.]{1,14})(?:偏好|喜好|需求)",
-        r"(?:喜欢|偏好)(?:吃|喝|用|看|听|去|做)?([^，。；;,.、]{1,14})",
-    )
-    for pattern in patterns:
-        match = re.search(pattern, text)
-        if not match:
-            continue
-        subject = match.group(1).strip("，,。；;：: ")
-        subject = re.sub(r"^(的|对|于)", "", subject).strip("，,。；;：: ")
-        if subject in {"不", "低"}:
-            continue
-        if subject in {"此", "该", "这个", "这种"}:
-            continue
-        if subject:
-            return f"{subject}偏好"
-    return ""
-
-
-def _normalize_criteria_part(part: str) -> str:
-    value = str(part or "").strip("，,。；;：: ")
-    if not value:
-        return ""
-
-    paren_match = re.search(r"[（(]([^（）()]{2,32})[）)]", value)
-    if paren_match:
-        inner = paren_match.group(1).strip("，,。；;：: ")
-        outer = re.sub(r"[（(][^（）()]+[）)]", "", value).strip("，,。；;：: ")
-        inner_is_specific_constraint = bool(
-            re.search(
-                r"(\d+\s*(?:分钟|小时|天|周|月|年)|以内|内|以下|以上|不超过|至少|最多|不少于|不低于)",
-                inner,
-            )
-        )
-        if inner_is_specific_constraint:
-            value = inner
-        elif outer and inner and inner not in outer:
-            value = f"{outer}{inner}"
-
-    return value.strip("，,。；;：: ")
-
-
-def _compact_criteria_signal(text: str) -> str:
-    match = re.search(r"(?:偏好|要求|需要|希望)([^。；;\n]{4,80}?)(?:方案|选择|推荐|选项|$)", text)
-    if not match:
-        match = re.search(r"(?:偏好|要求|需要|希望)([^。；;\n]{4,120})", text)
-    if not match:
-        return ""
-    raw = match.group(1).strip("，,。；;：: ")
-    raw = re.sub(r"^(?:吃|喝|用|看|听|去|做)?", "", raw)
-    parts = [
-        part.strip("，,。；;：: ")
-        for part in re.split(r"[、,，]", raw)
-        if part.strip("，,。；;：: ")
-    ]
-    cleaned: list[str] = []
-    for part in parts:
-        part = _normalize_criteria_part(part)
-        part = re.sub(r"^(?:偏好|要求|需要|希望)", "", part).strip("，,。；;：: ")
-        if "的" in part and re.match(r"^(只|仅|不用|无需)", part):
-            part = part.split("的", 1)[0]
-        part = re.sub(r"(?:方案|选择|推荐|选项|偏好|需求|标准|条件)$", "", part).strip("，,。；;：: ")
-        if not re.search(r"(\d+\s*(?:分钟|小时)|快|慢|少|多|低|高|不|无|免|只|仅|非|轻松|简单|复杂)", part):
-            continue
-        if not part or part in {"用户", "方案"}:
-            continue
-        cleaned.append(part)
-        if len(cleaned) >= 4:
-            break
-    return "、".join(dict.fromkeys(cleaned))
-
-
-def _criteria_without_subject_overlap(criteria: str, subject: str) -> str:
-    subject = str(subject or "").strip()
-    if not subject:
-        return criteria
-    kept = []
-    for part in [item.strip() for item in str(criteria or "").split("、") if item.strip()]:
-        if part in subject:
-            continue
-        if subject in part:
-            if "：" in part or ":" in part:
-                head, tail = re.split(r"[:：]", part, maxsplit=1)
-                if subject in head and tail.strip("，,。；;：: "):
-                    clean_tail = tail.strip("，,。；;：: ")
-                    if clean_tail:
-                        kept.append(clean_tail)
-                    continue
-            stripped = part.replace(subject, "").strip("，,。；;：: ")
-            stripped = re.sub(r"^(?:方案|选择|推荐|选项|偏好|需求|标准|条件)+", "", stripped).strip("，,。；;：: ")
-            if stripped:
-                kept.append(stripped)
-            continue
-        kept.append(part)
-    return "、".join(kept)
-
-
-def _compact_constraint_signal(text: str) -> str:
-    for pattern in (
-        r"(低[^，。；;,.、]{1,10}(?:款式|选择|方案|类型)?)",
-        r"(清爽[^，。；;,.、]{0,8}(?:款式|选择|方案|类型)?)",
-        r"(不[^，。；;,.、]{1,8}(?:方案|选择|款式))",
-    ):
-        match = re.search(pattern, text)
-        if match:
-            return match.group(1).strip("，,。；;：: ")
-    return ""
-
-
-def _compact_daily_note_sentence(text: str, title_hint: str = "") -> str:
-    clean = _normalize_snippet_text(text).replace("助理", "助手")
-    if not clean:
-        return ""
-
-    subject = _daily_note_subject_from_title(title_hint) or _daily_note_subject_from_text(clean)
-    preference = _compact_preference_signal(clean)
-    if subject and preference and subject not in preference:
-        return _truncate_daily_note_display(f"{subject}，{preference}", 24)
-
-    status = _compact_confirmation_status(clean, subject or title_hint)
-    if subject and status and subject not in status:
-        return _truncate_daily_note_display(f"{subject}，{status}", 24)
-
-    return ""
-
-
-def _daily_note_description_for_display(
-    raw_description: str,
-    title_hint: str = "",
-    node: dict[str, Any] | None = None,
-) -> str:
-    text = _normalize_snippet_text(raw_description).replace("…", "").replace("...", "")
-    if not text:
-        return ""
-
-    note_type = str((node or {}).get("type") or "").strip().lower()
-    title_subject = _daily_note_subject_from_title(title_hint)
-    text_subject = _daily_note_subject_from_text(text)
-    base_subject = title_subject or text_subject
-    overlap_subject = _daily_note_overlap_subject(base_subject) or text_subject
-    raw_criteria = _compact_criteria_signal(text)
-    subject_hint = base_subject
-    criteria = _criteria_without_subject_overlap(raw_criteria, overlap_subject)
-    if note_type == "preference" and subject_hint and criteria:
-        if _daily_note_title_carries_subject(title_hint, subject_hint):
-            return _truncate_daily_note_display(criteria, 24)
-        return _truncate_daily_note_display(f"{subject_hint}：{criteria}", 24)
-    if subject_hint and criteria:
-        if _daily_note_title_carries_subject(title_hint, subject_hint):
-            return _truncate_daily_note_display(criteria, 24)
-        candidate = f"{subject_hint}：{criteria}"
-        if len(candidate) <= 24:
-            return candidate
-    if criteria and "、" in criteria:
-        return _truncate_daily_note_display(f"要求{criteria}", 24)
-
-    sentence = _compact_daily_note_sentence(text, title_hint)
-    if sentence:
-        return _remove_daily_note_repeated_title_prefix(sentence, title_hint)
-
-    status = _compact_confirmation_status(text, title_hint)
-    preference = _compact_preference_signal(text)
-    constraint = _compact_constraint_signal(text)
-    if constraint and status.endswith("选择待确认"):
-        constraint = f"{constraint}待确认"
-        status = ""
-    summary = _compact_display_join([preference, constraint, status])
-    if summary:
-        return summary
-
-    first_clause = re.split(r"[。；;\n]", text, maxsplit=1)[0].strip("，,。；;：: ")
-    first_clause = re.sub(
-        r"^用户(正在|曾经|曾|明确表示|表示|希望|需要|喜欢|倾向于|进一步|正在寻找|寻找|询问|想要|想)?",
+    text = _normalize_snippet_text(text).replace("…", "").replace("...", "")
+    text = re.sub(
+        r"\b(?:pending|pending choice|pending preference|to be confirmed|needs confirmation)\b",
         "",
-        first_clause,
-    ).strip("，,。；;：: ")
-    first_clause = re.sub(r"助手[^，。；;,.]*(?:推荐|建议|提醒)[^，。；;,.]*", "", first_clause).strip("，,。；;：: ")
-    return truncate_text(first_clause, 22, ellipsis=False)
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(r"(?:，|,|、|；|;)?\s*(?:偏好|选择|方案|选项)?待确认$", "", text)
+    text = re.sub(r"(?:，|,|、|；|;)?\s*待确认(?:偏好|选择|方案|选项)?$", "", text)
+    text = re.sub(r"^(?:偏好|选择|方案|选项)?待确认$", "", text)
+    text = re.sub(r"^待确认(?:偏好|选择|方案|选项)?$", "", text)
+    text = re.sub(r"\b(?:context|candidate|node|memory|support|episode|display)\b", "", text, flags=re.IGNORECASE)
+    text = _strip_daily_note_display_prefix(text)
+    return truncate_text(text.strip("，,。；;：: "), max_length, ellipsis=False).rstrip("，,、；;：: ")
+
+
+def _daily_note_first_sentence(value: str, *, max_length: int) -> str:
+    text = _normalize_snippet_text(value).replace("…", "").replace("...", "")
+    if not text:
+        return ""
+    first = re.split(r"[。；;\n]", text, maxsplit=1)[0]
+    return _clean_daily_note_display_text(first, max_length=max_length)
+
+
+def _daily_note_fallback_title(raw_description: str, raw_key: str, node_id: str) -> str:
+    title = _daily_note_first_sentence(raw_description, max_length=24)
+    if title and not _is_noise_memory_text(title):
+        return title
+    key_title = _daily_note_title_from_key(raw_key)
+    if key_title and not _is_noise_memory_text(key_title):
+        return key_title
+    return _clean_daily_note_display_text(node_id, max_length=24) or "日常记忆"
+
+
+def _daily_note_fallback_description(raw_description: str, title: str, raw_key: str) -> str:
+    description = _daily_note_first_sentence(raw_description, max_length=36)
+    if description and description != title and not _is_noise_memory_text(description):
+        return description
+    if re.search(r"[_\-]", str(raw_key or "")):
+        return ""
+    key_description = _clean_daily_note_display_text(raw_key, max_length=36)
+    if key_description and key_description != title and not _is_noise_memory_text(key_description):
+        return key_description
+    return ""
 
 
 def _daily_note_display_texts(
@@ -2052,29 +1827,56 @@ def _daily_note_display_texts(
 ) -> tuple[str, str]:
     raw_description = str(node.get("description") or "").strip()
     raw_key = str(node.get("key") or node_id).strip()
-    cached_title = _display_text(display_entry.get("title"), locale, "").strip()
-    cached_description = _display_text(display_entry.get("description"), locale, "").strip()
+    if not display_entry:
+        display_entry = _node_display_entry(node, raw_description or raw_key) or {}
+    cached_title = _clean_daily_note_display_text(
+        _display_text(display_entry.get("title"), locale, ""),
+        max_length=24,
+    )
+    cached_description = _clean_daily_note_display_text(
+        _display_text(display_entry.get("description"), locale, ""),
+        max_length=36,
+    )
 
-    description_source = cached_description or raw_description or raw_key
-    if not description_source or _is_noise_memory_text(description_source):
-        description_source = raw_key
+    title = cached_title if cached_title and not _is_noise_memory_text(cached_title) else ""
+    description = (
+        cached_description
+        if cached_description
+        and cached_description != title
+        and not _is_noise_memory_text(cached_description)
+        else ""
+    )
+    if not title:
+        title = _daily_note_fallback_title(raw_description, raw_key, node_id)
+    if not description:
+        description = _daily_note_fallback_description(raw_description, title, raw_key)
+    return title, description
 
-    key_title = _daily_note_title_from_key(raw_key, node)
-    description_title = _daily_note_title_from_description(raw_description, node)
-    if key_title.endswith("记录") and description_title:
-        key_title = ""
-    title_source = description_title or cached_title or key_title
-    if not title_source or title_source == cached_description or len(title_source) > 24:
-        title_source = raw_description or raw_key
-    first_sentence = re.split(r"[。；;\n]", title_source, maxsplit=1)[0].strip()
-    first_sentence = re.sub(
-        r"^用户(正在|曾经|曾|希望|需要|喜欢|倾向于|进一步|正在寻找|寻找|询问|想要|想)?",
-        "",
-        first_sentence,
-    ).strip("，,。；;：: ")
-    first_sentence = re.sub(r"^为一?条?", "", first_sentence).strip("，,。；;：: ")
-    title = truncate_text(first_sentence or raw_key or node_id, 32, ellipsis=False)
-    description = _daily_note_description_for_display(description_source, title, node)
+
+def _display_cache_entry(display_cache: dict[str, Any], category: str, item_id: str) -> dict[str, Any]:
+    category_cache = display_cache.get(category)
+    if not isinstance(category_cache, dict):
+        return {}
+    entry = category_cache.get(item_id)
+    return entry if isinstance(entry, dict) else {}
+
+
+def _display_cache_texts(
+    display_cache: dict[str, Any],
+    category: str,
+    item_id: str,
+    locale: str | None,
+    *,
+    fallback_title: str,
+    fallback_description: str,
+) -> tuple[str, str]:
+    entry = _display_cache_entry(display_cache, category, item_id)
+    title = _display_text(entry.get("title"), locale, fallback_title) if entry else fallback_title
+    description = _display_text(entry.get("description"), locale, fallback_description) if entry else fallback_description
+    title = _frontend_display_text(title, max_length=64) or _frontend_display_text(fallback_title, max_length=64)
+    description = _frontend_display_text(description, max_length=140)
+    if not description or description == title:
+        description = _frontend_display_text(fallback_description, max_length=140)
     return title, description
 
 
@@ -2171,41 +1973,54 @@ def _ensure_bilingual_display_value(
     return zh_text or raw_text, en_text or raw_text
 
 
-def _get_persistent_display_entry(
-    settings: dict[str, Any],
-    display_cache: dict[str, Any],
-    item_id: str,
-    raw_text: str,
-) -> dict[str, Any]:
-    persistent_cache = display_cache.setdefault("persistent", {})
-    source_hash = _hash_payload(raw_text)
-    cached = persistent_cache.get(item_id)
-    if isinstance(cached, dict) and cached.get("source_hash") == source_hash:
-        return cached
+def _daily_note_display_entry_from_result(result: Any, fallback: str) -> dict[str, Any] | None:
+    if not isinstance(result, dict):
+        return None
+    title = result.get("title")
+    description = result.get("description")
+    if not isinstance(title, dict) or not isinstance(description, dict):
+        return None
+    title_zh = _clean_daily_note_display_text(title.get("zh"), max_length=24)
+    title_en = _clean_daily_note_display_text(title.get("en"), max_length=80)
+    desc_zh = _clean_daily_note_display_text(description.get("zh"), max_length=36)
+    desc_en = _clean_daily_note_display_text(description.get("en"), max_length=120)
+    if not title_zh and not title_en:
+        return None
+    title_zh = title_zh or title_en or fallback
+    title_en = title_en or title_zh or fallback
+    desc_zh = desc_zh or title_zh
+    desc_en = desc_en or title_en
+    return _make_display_entry(
+        title_zh=title_zh,
+        title_en=title_en,
+        desc_zh=desc_zh,
+        desc_en=desc_en,
+    )
 
-    entry = _make_display_entry(
+
+def _node_display_entry(node: dict[str, Any], fallback: str) -> dict[str, Any] | None:
+    display = node.get("display")
+    if isinstance(display, dict):
+        entry = _daily_note_display_entry_from_result(display, fallback)
+        if entry is not None:
+            return entry
+    return None
+
+
+def _get_persistent_display_entry(
+    raw_text: str,
+    node: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    node_entry = _node_display_entry(node or {}, raw_text)
+    if node_entry is not None:
+        return node_entry
+
+    return _make_display_entry(
         title_zh=raw_text,
         title_en=raw_text,
         desc_zh=raw_text,
         desc_en=raw_text,
     )
-    if raw_text and _looks_like_english_ui_text(raw_text):
-        try:
-            llm = get_llm(settings)
-            zh_text, en_text = _ensure_bilingual_display_value(llm, raw_text, raw_text, raw_text)
-            entry = _make_display_entry(
-                title_zh=str(zh_text).strip() or raw_text,
-                title_en=str(en_text).strip() or raw_text,
-                desc_zh=str(zh_text).strip() or raw_text,
-                desc_en=str(en_text).strip() or raw_text,
-            )
-        except Exception:
-            pass
-
-    entry["source_hash"] = source_hash
-    persistent_cache[item_id] = entry
-    save_display_texts(settings, display_cache)
-    return entry
 
 
 def get_storage_root(settings: dict[str, Any], *, create: bool = False) -> Path:
@@ -4470,134 +4285,277 @@ def load_l1_signals(settings: dict[str, Any]) -> tuple[L1SignalLayer, str]:
     return layer, signature
 
 
-def build_display_texts(
+def _display_entry_from_title_description(title: dict[str, Any], description: dict[str, Any]) -> dict[str, Any] | None:
+    title_zh = _clean_daily_note_display_text(title.get("zh"), max_length=64)
+    title_en = _clean_daily_note_display_text(title.get("en"), max_length=100)
+    desc_zh = _clean_daily_note_display_text(description.get("zh"), max_length=140)
+    desc_en = _clean_daily_note_display_text(description.get("en"), max_length=180)
+    if not title_zh and not title_en:
+        return None
+    title_zh = title_zh or title_en
+    title_en = title_en or title_zh
+    desc_zh = desc_zh or title_zh
+    desc_en = desc_en or title_en
+    return _make_display_entry(
+        title_zh=title_zh,
+        title_en=title_en,
+        desc_zh=desc_zh,
+        desc_en=desc_en,
+    )
+
+
+def _display_entry_from_card(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    title = value.get("title")
+    description = value.get("description")
+    if not isinstance(title, dict) or not isinstance(description, dict):
+        return None
+    return _display_entry_from_title_description(title, description)
+
+
+def _build_memory_display_with_llm(
     llm: LLMClient,
-    profile: Any,
-    preferences: Any,
+    payload: dict[str, Any],
 ) -> dict[str, Any]:
-    profile_payload = profile.model_dump(mode="json") if profile else {}
-    preferences_payload = preferences.model_dump(mode="json") if preferences else {}
-    payload = {
-        "profile": profile_payload,
-        "preferences": preferences_payload,
-    }
     system_prompt = (
-        "你是一个双语记忆展示文案生成器。"
-        "给定 profile 和 preferences 的 JSON，请返回严格 JSON。"
-        "只支持 zh 和 en。"
-        "字段结构必须保持不变；列表必须保持原顺序和原长度；"
-        "只生成适合 UI 展示的简洁文本，不要解释。"
-        "不要把字段名、示例短语或单个关键词扩展成固定领域标签；"
-        "如需概括，请根据输入内容自适应生成高层表达，并保留细粒度规则的原意。"
+        "You are the canonical frontend display generator for a memory picker UI.\n"
+        "Given structured memory, generate concise card display copy for every provided item.\n"
+        "Return ONLY strict JSON. Preserve item ids exactly. Use zh and en only.\n"
+        "Each display card must have title.zh, title.en, description.zh, description.en.\n"
+        "Profile and preference cards are checkbox keywords: title should be a high-level label, "
+        "description should contain compact supporting detail.\n"
+        "Projects, workflows, daily notes, and skills are phrase cards: title should be a normal short phrase, "
+        "description should be a short user-facing summary.\n"
+        "Do not expose internal ids, keys, field names, node/memory/episode/display labels, or backend status words.\n"
+        "Do not surface assistant-only suggestions unless the user accepted or requested them.\n"
+        "Do not write mechanical phrases like 待确认, 偏好待确认, pending, or X pending.\n"
+        "Chinese titles should usually be 6 to 18 Chinese characters and never exceed 24. "
+        "Chinese descriptions should usually be 12 to 28 Chinese characters and never exceed 36 when possible.\n"
+        "Preserve proper nouns and domain-specific terms in their original language when clearer.\n"
+        "Before returning, silently self-check every card. Verify that the card is faithful to "
+        "user-stated or user-accepted evidence, that it does not promote assistant-only advice "
+        "or inferred labels into user memory, that it does not expose internal fields/status, "
+        "and that the zh/en versions describe the same memory. If a card fails this check, "
+        "revise it before returning. Do not include the self-check in the output."
     )
     user_prompt = (
-        "请把下面这份 memory 转成双语展示文本。\n"
-        "返回格式必须是：\n"
+        "Generate display cards for this memory payload.\n"
+        "Return shape:\n"
         "{\n"
-        '  "profile": {"field": {"zh": ..., "en": ...}},\n'
-        '  "preferences": {"field": {"zh": ..., "en": ...}}\n'
+        '  "profile": {"item_id": {"title": {"zh": "", "en": ""}, "description": {"zh": "", "en": ""}}},\n'
+        '  "preferences": {"item_id": {"title": {"zh": "", "en": ""}, "description": {"zh": "", "en": ""}}},\n'
+        '  "projects": {"item_id": {"title": {"zh": "", "en": ""}, "description": {"zh": "", "en": ""}}},\n'
+        '  "workflows": {"item_id": {"title": {"zh": "", "en": ""}, "description": {"zh": "", "en": ""}}},\n'
+        '  "skills": {"item_id": {"title": {"zh": "", "en": ""}, "description": {"zh": "", "en": ""}}}\n'
         "}\n\n"
         f"{json.dumps(payload, ensure_ascii=False, indent=2)}"
     )
     result = llm.extract_json(system_prompt, user_prompt)
-    if not isinstance(result, dict):
-        result = {}
+    return result if isinstance(result, dict) else {}
+
+
+def _project_display_payload(project: ProjectMemory) -> dict[str, Any]:
+    return {
+        "project_name": project.project_name,
+        "project_goal": project.project_goal,
+        "current_stage": project.current_stage,
+        "finished_decisions": [entry.text for entry in project.finished_decisions[:4]],
+        "unresolved_questions": [entry.text for entry in project.unresolved_questions[:4]],
+        "important_constraints": [entry.text for entry in project.important_constraints[:4]],
+        "next_actions": [entry.text for entry in project.next_actions[:4]],
+    }
+
+
+def _workflow_display_payload(workflow: WorkflowMemory) -> dict[str, Any]:
+    return {
+        "workflow_name": workflow.workflow_name,
+        "trigger_condition": workflow.trigger_condition,
+        "typical_steps": workflow.typical_steps[:5],
+        "preferred_artifact_format": workflow.preferred_artifact_format,
+        "review_style": workflow.review_style,
+        "escalation_rule": workflow.escalation_rule,
+        "reuse_frequency": workflow.reuse_frequency,
+        "occurrence_count": workflow.occurrence_count,
+    }
+
+
+def _skill_display_payload(skill: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "title": skill.get("title", ""),
+        "description": skill.get("description", ""),
+        "kind": skill.get("kind", ""),
+        "trigger": skill.get("trigger", ""),
+        "goal": skill.get("goal", ""),
+        "steps": (skill.get("steps") or [])[:5],
+        "output_format": skill.get("output_format", ""),
+    }
+
+
+def _cache_display_cards(category: str, raw_cards: Any) -> dict[str, Any]:
+    cache: dict[str, Any] = {}
+    if not isinstance(raw_cards, dict):
+        return cache
+    for item_id, card in raw_cards.items():
+        entry = _display_entry_from_card(card)
+        if entry is not None:
+            cache[str(item_id)] = entry
+    return cache
+
+
+def _cache_fallback_display_entry(
+    cache: dict[str, Any],
+    category: str,
+    item_id: str,
+    *,
+    title_zh: str,
+    title_en: str = "",
+    desc_zh: str = "",
+    desc_en: str = "",
+) -> None:
+    if item_id in cache.get(category, {}):
+        return
+    cache.setdefault(category, {})[item_id] = _make_display_entry(
+        title_zh=_frontend_display_text(title_zh, max_length=64),
+        title_en=_frontend_display_text(title_en or title_zh, max_length=100),
+        desc_zh=_frontend_display_text(desc_zh or title_zh, max_length=140),
+        desc_en=_frontend_display_text(desc_en or desc_zh or title_en or title_zh, max_length=180),
+    )
+
+
+def build_display_texts(
+    llm: LLMClient,
+    profile: Any,
+    preferences: Any,
+    projects: list[ProjectMemory] | None = None,
+    workflows: list[WorkflowMemory] | None = None,
+    skills: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    profile_payload = profile.model_dump(mode="json") if profile else {}
+    preferences_payload = preferences.model_dump(mode="json") if preferences else {}
+    projects = projects or []
+    workflows = workflows or []
+    skills = skills or []
+    profile_groups = []
+    for group in _base_display_taxonomy("profile"):
+        description, active_fields = _taxonomy_group_description(
+            category="profile",
+            payload=profile_payload,
+            group=group,
+            locale="zh",
+        )
+        group_id = str(group.get("group_id") or "").strip()
+        if group_id and description:
+            profile_groups.append({
+                "id": f"profile:group:{group_id}",
+                "group_id": group_id,
+                "label": _taxonomy_title(group, "zh"),
+                "description": description,
+                "source_fields": active_fields,
+            })
+    preference_groups = []
+    for group in _base_display_taxonomy("preferences"):
+        description, active_fields = _taxonomy_group_description(
+            category="preferences",
+            payload=preferences_payload,
+            group=group,
+            locale="zh",
+        )
+        group_id = str(group.get("group_id") or "").strip()
+        if not group_id or not description:
+            continue
+        if group_id == "main_task_types":
+            for task_type in _payload_field_value(preferences_payload, "primary_task_types", category="preferences") or []:
+                task_label = str(task_type or "").strip()
+                if task_label:
+                    preference_groups.append({
+                        "id": f"preferences:primary_task_types:{_safe_slug(task_label, 'item')}",
+                        "group_id": group_id,
+                        "label": _taxonomy_title(group, "zh"),
+                        "description": task_label,
+                        "source_fields": ["primary_task_types"],
+                    })
+            continue
+        preference_groups.append({
+            "id": f"preferences:group:{group_id}",
+            "group_id": group_id,
+            "label": _taxonomy_title(group, "zh"),
+            "description": description,
+            "source_fields": active_fields,
+        })
+    display_payload = {
+        "profile": profile_groups,
+        "preferences": preference_groups,
+        "projects": [
+            {"id": f"project:{project.project_name}", **_project_display_payload(project)}
+            for project in projects
+        ],
+        "workflows": [
+            {"id": f"workflow:{workflow.workflow_name}", **_workflow_display_payload(workflow)}
+            for workflow in workflows
+        ],
+        "skills": [
+            {"id": str(skill.get("id") or ""), **_skill_display_payload(skill)}
+            for skill in skills
+            if str(skill.get("id") or "").strip()
+        ],
+    }
+    result = _build_memory_display_with_llm(llm, display_payload)
 
     profile_display = result.get("profile", {}) if isinstance(result.get("profile"), dict) else {}
     preferences_display = (
         result.get("preferences", {}) if isinstance(result.get("preferences"), dict) else {}
     )
+    cache = {
+        "profile": _cache_display_cards("profile", profile_display),
+        "preferences": _cache_display_cards("preferences", preferences_display),
+        "projects": _cache_display_cards("projects", result.get("projects", {})),
+        "workflows": _cache_display_cards("workflows", result.get("workflows", {})),
+        "skills": _cache_display_cards("skills", result.get("skills", {})),
+    }
 
-    cache = {"profile": {}, "preferences": {}}
-
-    for field, value in profile_payload.items():
-        if not value:
-            continue
-        title_zh = FIELD_LABELS["profile"]["zh"].get(field, field)
-        title_en = FIELD_LABELS["profile"]["en"].get(field, field)
-        translated = profile_display.get(field, {}) if isinstance(profile_display.get(field), dict) else {}
-        if isinstance(value, list):
-            zh_values = translated.get("zh", value)
-            en_values = translated.get("en", value)
-            if not isinstance(zh_values, list) or len(zh_values) != len(value):
-                zh_values = value
-            if not isinstance(en_values, list) or len(en_values) != len(value):
-                en_values = value
-            zh_values, en_values = _ensure_bilingual_display_value(llm, value, zh_values, en_values)
-            for raw, zh_text, en_text in zip(value, zh_values, en_values):
-                raw_text = str(raw).strip()
-                if not raw_text:
-                    continue
-                if field in {"style_preference", "terminology_preference", "formatting_constraints", "revision_preference", "response_granularity"} and not _looks_like_response_style_text(raw_text):
-                    continue
-                item_id = f"profile:{field}:{_safe_slug(raw_text, 'item')}"
-                cache["profile"][item_id] = _make_display_entry(
-                    title_zh=title_zh,
-                    title_en=title_en,
-                    desc_zh=str(zh_text).strip() or raw_text,
-                    desc_en=str(en_text).strip() or raw_text,
-                )
-        else:
-            raw_text = str(value).strip()
-            if not raw_text:
-                continue
-            zh_text = translated.get("zh", raw_text)
-            en_text = translated.get("en", raw_text)
-            zh_text, en_text = _ensure_bilingual_display_value(llm, raw_text, zh_text, en_text)
-            cache["profile"][f"profile:{field}"] = _make_display_entry(
-                title_zh=title_zh,
-                title_en=title_en,
-                desc_zh=str(zh_text).strip() or raw_text,
-                desc_en=str(en_text).strip() or raw_text,
-            )
-
-    for field, value in preferences_payload.items():
-        if not value:
-            continue
-        title_zh = FIELD_LABELS["preferences"]["zh"].get(field, field)
-        title_en = FIELD_LABELS["preferences"]["en"].get(field, field)
-        translated = (
-            preferences_display.get(field, {})
-            if isinstance(preferences_display.get(field), dict)
-            else {}
+    for card in profile_groups:
+        _cache_fallback_display_entry(
+            cache,
+            "profile",
+            str(card["id"]),
+            title_zh=str(card.get("label") or ""),
+            desc_zh=str(card.get("description") or ""),
         )
-        if isinstance(value, list):
-            zh_values = translated.get("zh", value)
-            en_values = translated.get("en", value)
-            if not isinstance(zh_values, list) or len(zh_values) != len(value):
-                zh_values = value
-            if not isinstance(en_values, list) or len(en_values) != len(value):
-                en_values = value
-            zh_values, en_values = _ensure_bilingual_display_value(llm, value, zh_values, en_values)
-            for raw, zh_text, en_text in zip(value, zh_values, en_values):
-                raw_text = str(raw).strip()
-                if not raw_text:
-                    continue
-                item_id = f"preferences:{field}:{_safe_slug(raw_text, 'item')}"
-                cache["preferences"][item_id] = _make_display_entry(
-                    title_zh=title_zh,
-                    title_en=title_en,
-                    desc_zh=str(zh_text).strip() or raw_text,
-                    desc_en=str(en_text).strip() or raw_text,
-                )
-            desc_zh = "，".join(str(item).strip() for item in zh_values if str(item).strip())
-            desc_en = ", ".join(str(item).strip() for item in en_values if str(item).strip())
-            raw_text = ", ".join(str(item).strip() for item in value if str(item).strip())
-        else:
-            desc_zh = str(translated.get("zh", value)).strip()
-            desc_en = str(translated.get("en", value)).strip()
-            raw_text = str(value).strip()
-            desc_zh, desc_en = _ensure_bilingual_display_value(llm, raw_text, desc_zh, desc_en)
-
-        if field in {"style_preference", "terminology_preference", "formatting_constraints", "revision_preference", "response_granularity"} and raw_text and not _looks_like_response_style_text(raw_text):
+    for card in preference_groups:
+        _cache_fallback_display_entry(
+            cache,
+            "preferences",
+            str(card["id"]),
+            title_zh=str(card.get("label") or ""),
+            desc_zh=str(card.get("description") or ""),
+        )
+    for project in projects:
+        _cache_fallback_display_entry(
+            cache,
+            "projects",
+            f"project:{project.project_name}",
+            title_zh=project.project_name,
+            desc_zh=project.current_stage or project.project_goal or "项目记忆",
+        )
+    for workflow in workflows:
+        _cache_fallback_display_entry(
+            cache,
+            "workflows",
+            f"workflow:{workflow.workflow_name}",
+            title_zh=workflow.workflow_name,
+            desc_zh=workflow.trigger_condition or workflow.preferred_artifact_format or "工作流 / SOP",
+        )
+    for skill in skills:
+        skill_id = str(skill.get("id") or "").strip()
+        if not skill_id:
             continue
-        if not raw_text:
-            continue
-        cache["preferences"][f"preferences:{field}"] = _make_display_entry(
-            title_zh=title_zh,
-            title_en=title_en,
-            desc_zh=desc_zh or raw_text,
-            desc_en=desc_en or raw_text,
+        _cache_fallback_display_entry(
+            cache,
+            "skills",
+            skill_id,
+            title_zh=str(skill.get("title") or ""),
+            desc_zh=str(skill.get("description") or ""),
         )
 
     return cache
@@ -4753,6 +4711,14 @@ def _persistent_node_markdown(node_id: str, node: dict[str, Any]) -> str:
         lines.append(f"- Episode 引用: {', '.join(str(item) for item in node.get('episode_refs', []) if str(item).strip())}")
     if node.get("turn_refs"):
         lines.append(f"- Turn 引用: {', '.join(str(item) for item in node.get('turn_refs', []) if str(item).strip())}")
+    display_entry = _node_display_entry(node, str(node.get("description") or node.get("key") or node_id))
+    if display_entry:
+        display_title = _display_text(display_entry.get("title"), "zh", "")
+        display_description = _display_text(display_entry.get("description"), "zh", "")
+        if display_title:
+            lines.append(f"- 前端标题: {display_title}")
+        if display_description:
+            lines.append(f"- 前端摘要: {display_description}")
     if node.get("created_at"):
         lines.append(f"- 创建时间: `{node.get('created_at')}`")
     if node.get("updated_at"):
@@ -4825,35 +4791,62 @@ def memory_items_for_category(settings: dict[str, Any], category: str, locale: s
     if category == "projects":
         items = []
         for project in _valid_projects(wiki):
+            item_id = f"project:{project.project_name}"
             description = project.current_stage or project.project_goal or "项目记忆"
+            display_title, display_description = _display_cache_texts(
+                display_cache,
+                "projects",
+                item_id,
+                locale,
+                fallback_title=project.project_name,
+                fallback_description=project.project_goal or description,
+            )
             items.append(
-                {
-                    "id": f"project:{project.project_name}",
-                    "title": project.project_name,
-                    "description": description,
-                    "display_title": project.project_name,
-                    "display_description": description,
-                    "selected": False,
-                }
+                _frontend_memory_item(
+                    {
+                        "id": item_id,
+                        "title": display_title,
+                        "description": display_description,
+                        "display_title": display_title,
+                        "display_description": display_description,
+                        "selected": False,
+                    },
+                    category="projects",
+                    fallback_title=project.project_name,
+                    fallback_description=project.project_goal or description,
+                )
             )
         return items
 
     if category == "workflows":
-        return [
-            {
-                "id": f"workflow:{workflow.workflow_name}",
-                "title": workflow.workflow_name,
-                "description": workflow.trigger_condition
-                or workflow.preferred_artifact_format
-                or "工作流 / SOP",
-                "display_title": workflow.workflow_name,
-                "display_description": workflow.trigger_condition
-                or workflow.preferred_artifact_format
-                or "工作流 / SOP",
-                "selected": False,
-            }
-            for workflow in _valid_workflows(wiki)
-        ]
+        items = []
+        for workflow in _valid_workflows(wiki):
+            item_id = f"workflow:{workflow.workflow_name}"
+            fallback_description = workflow.trigger_condition or workflow.preferred_artifact_format or "工作流 / SOP"
+            display_title, display_description = _display_cache_texts(
+                display_cache,
+                "workflows",
+                item_id,
+                locale,
+                fallback_title=workflow.workflow_name,
+                fallback_description=fallback_description,
+            )
+            items.append(
+                _frontend_memory_item(
+                    {
+                        "id": item_id,
+                        "title": display_title,
+                        "description": display_description,
+                        "display_title": display_title,
+                        "display_description": display_description,
+                        "selected": False,
+                    },
+                    category="workflows",
+                    fallback_title=workflow.workflow_name,
+                    fallback_description=fallback_description,
+                )
+            )
+        return items
 
     if category in {"persistent", "daily_notes"}:
         persistent = load_persistent_nodes(settings)
@@ -4864,7 +4857,7 @@ def memory_items_for_category(settings: dict[str, Any], category: str, locale: s
             if _is_noise_memory_text(title):
                 continue
             item_id = f"daily_notes:{node_id}"
-            display_entry = _get_persistent_display_entry(settings, display_cache, item_id, str(title))
+            display_entry = _get_persistent_display_entry(str(title), node)
             display_title, display_description = _daily_note_display_texts(
                 node_id,
                 node,
@@ -4872,14 +4865,19 @@ def memory_items_for_category(settings: dict[str, Any], category: str, locale: s
                 locale,
             )
             items.append(
-                {
-                    "id": item_id,
-                    "title": display_title,
-                    "description": display_description,
-                    "display_title": display_title,
-                    "display_description": display_description,
-                    "selected": False,
-                }
+                _frontend_memory_item(
+                    {
+                        "id": item_id,
+                        "title": display_title,
+                        "description": display_description,
+                        "display_title": display_title,
+                        "display_description": display_description,
+                        "selected": False,
+                    },
+                    category="daily_notes",
+                    fallback_title=str(title),
+                    fallback_description=str(node.get("description") or title),
+                )
             )
         return items
 
@@ -4901,17 +4899,31 @@ def memory_items_for_category(settings: dict[str, Any], category: str, locale: s
                 if not group_id:
                     continue
                 title = _taxonomy_title(group, locale)
+                item_id = f"profile:group:{group_id}"
+                display_title, display_description = _display_cache_texts(
+                    display_cache,
+                    "profile",
+                    item_id,
+                    locale,
+                    fallback_title=title,
+                    fallback_description=description,
+                )
                 items.append(
-                    {
-                        "id": f"profile:group:{group_id}",
-                        "title": title,
-                        "description": description,
-                        "display_title": title,
-                        "display_description": description,
-                        "source_fields": active_fields,
-                        "status": group.get("status", "active"),
-                        "selected": False,
-                    }
+                    _frontend_memory_item(
+                        {
+                            "id": item_id,
+                            "title": display_title,
+                            "description": display_description,
+                            "display_title": display_title,
+                            "display_description": display_description,
+                            "source_fields": active_fields,
+                            "status": group.get("status", "active"),
+                            "selected": False,
+                        },
+                        category="profile",
+                        fallback_title=title,
+                        fallback_description=description,
+                    )
                 )
             return items
         return []
@@ -4950,30 +4962,58 @@ def memory_items_for_category(settings: dict[str, Any], category: str, locale: s
                         task_label = str(task_type or "").strip()
                         if not task_label or _is_noise_memory_text(task_label):
                             continue
+                        item_id = f"preferences:primary_task_types:{_safe_slug(task_label, 'item')}"
+                        display_title, display_description = _display_cache_texts(
+                            display_cache,
+                            "preferences",
+                            item_id,
+                            locale,
+                            fallback_title=title,
+                            fallback_description=task_label,
+                        )
                         items.append(
-                            {
-                                "id": f"preferences:primary_task_types:{_safe_slug(task_label, 'item')}",
-                                "title": title,
-                                "description": task_label,
-                                "display_title": title,
-                                "display_description": task_label,
-                                "source_fields": ["primary_task_types"],
-                                "status": group.get("status", "active"),
-                                "selected": False,
-                            }
+                            _frontend_memory_item(
+                                {
+                                    "id": item_id,
+                                    "title": display_title,
+                                    "description": display_description,
+                                    "display_title": display_title,
+                                    "display_description": display_description,
+                                    "source_fields": ["primary_task_types"],
+                                    "status": group.get("status", "active"),
+                                    "selected": False,
+                                },
+                                category="preferences",
+                                fallback_title=title,
+                                fallback_description=task_label,
+                            )
                         )
                     continue
+                item_id = f"preferences:group:{group_id}"
+                display_title, display_description = _display_cache_texts(
+                    display_cache,
+                    "preferences",
+                    item_id,
+                    locale,
+                    fallback_title=title,
+                    fallback_description=description,
+                )
                 items.append(
-                    {
-                        "id": f"preferences:group:{group_id}",
-                        "title": title,
-                        "description": description,
-                        "display_title": title,
-                        "display_description": description,
-                        "source_fields": active_fields,
-                        "status": group.get("status", "active"),
-                        "selected": False,
-                    }
+                    _frontend_memory_item(
+                        {
+                            "id": item_id,
+                            "title": display_title,
+                            "description": display_description,
+                            "display_title": display_title,
+                            "display_description": display_description,
+                            "source_fields": active_fields,
+                            "status": group.get("status", "active"),
+                            "selected": False,
+                        },
+                        category="preferences",
+                        fallback_title=title,
+                        fallback_description=description,
+                    )
                 )
             return items
         return []
@@ -5172,6 +5212,18 @@ def derive_my_skills(settings: dict[str, Any]) -> list[dict[str, Any]]:
         seen_titles.add(title_key)
         deduped.append(item)
     final_items = [item for item in deduped if item["id"] not in dismissed_ids][:6]
+    skill_display_cache = load_display_texts(settings).get("skills", {})
+    if isinstance(skill_display_cache, dict):
+        for item in final_items:
+            entry = skill_display_cache.get(item.get("id"))
+            if not isinstance(entry, dict):
+                continue
+            display_title = _display_text(entry.get("title"), "zh", "")
+            display_summary = _display_text(entry.get("description"), "zh", "")
+            if display_title:
+                item["display_title"] = display_title
+            if display_summary:
+                item["display_summary"] = display_summary
     save_skill_library(settings, final_items)
     return final_items
 
@@ -5367,6 +5419,186 @@ def parse_selected_ids(selected_ids: list[str]) -> dict[str, set[str]]:
             else:
                 selected["persistent"].add("*")
     return selected
+
+
+def _empty_memory_field_value(value: Any) -> Any:
+    if isinstance(value, list):
+        return []
+    if isinstance(value, dict):
+        return {}
+    if isinstance(value, bool):
+        return False
+    return ""
+
+
+def _remove_slugged_list_value(values: Any, slug: str) -> tuple[Any, bool]:
+    if not isinstance(values, list):
+        return values, False
+    kept = [item for item in values if _safe_slug(str(item), "item") != slug]
+    return kept, len(kept) != len(values)
+
+
+def _delete_model_memory_item(
+    model: ProfileMemory | PreferenceMemory,
+    category: str,
+    suffix: str,
+) -> tuple[bool, set[str]]:
+    changed = False
+    touched_fields: set[str] = set()
+    if not suffix or suffix == "default":
+        fields = [
+            field
+            for field in type(model).model_fields
+            if field not in MemoryBase.model_fields
+        ]
+        value_slug = ""
+    elif suffix.startswith("group:"):
+        group_id = suffix.split(":", 1)[1]
+        fields = _taxonomy_group_source_fields(category, group_id)
+        value_slug = ""
+    else:
+        field, sep, value_slug = suffix.partition(":")
+        fields = [field] if field else []
+        if not sep:
+            value_slug = ""
+
+    for field in fields:
+        if not hasattr(model, field):
+            continue
+        current = getattr(model, field)
+        if value_slug:
+            next_value, field_changed = _remove_slugged_list_value(current, value_slug)
+        else:
+            next_value = _empty_memory_field_value(current)
+            field_changed = next_value != current
+        if not field_changed:
+            continue
+        setattr(model, field, next_value)
+        touched_fields.add(field)
+        changed = True
+    return changed, touched_fields
+
+
+def _drop_memory_display_cache(
+    settings: dict[str, Any],
+    *,
+    item_ids: set[str],
+    profile_fields: set[str],
+    preferences_fields: set[str],
+) -> None:
+    cache = load_display_texts(settings)
+    changed = False
+    if not isinstance(cache, dict):
+        return
+
+    for category, fields in (("profile", profile_fields), ("preferences", preferences_fields)):
+        entries = cache.get(category)
+        if not isinstance(entries, dict):
+            continue
+        for item_id in item_ids:
+            if item_id in entries:
+                entries.pop(item_id, None)
+                changed = True
+        for field in fields:
+            direct_key = f"{category}:{field}"
+            if direct_key in entries:
+                entries.pop(direct_key, None)
+                changed = True
+            prefix = f"{category}:{field}:"
+            for key in list(entries.keys()):
+                if str(key).startswith(prefix):
+                    entries.pop(key, None)
+                    changed = True
+
+    persistent_entries = cache.get("persistent")
+    if isinstance(persistent_entries, dict):
+        for item_id in item_ids:
+            if item_id in persistent_entries:
+                persistent_entries.pop(item_id, None)
+                changed = True
+
+    if changed:
+        save_display_texts(settings, cache)
+
+
+def delete_memory_items(settings: dict[str, Any], item_ids: list[str]) -> dict[str, Any]:
+    wiki = get_wiki(settings)
+    profile = wiki.load_profile()
+    preferences = wiki.load_preferences()
+    persistent = load_persistent_nodes(settings)
+    persistent_nodes = persistent.get("nodes", {}) if isinstance(persistent, dict) else {}
+
+    deleted: list[str] = []
+    missing: list[str] = []
+    profile_changed = False
+    preferences_changed = False
+    persistent_changed = False
+    touched_profile_fields: set[str] = set()
+    touched_preference_fields: set[str] = set()
+
+    for raw_item_id in item_ids:
+        item_id = str(raw_item_id or "").strip()
+        if not item_id:
+            continue
+        prefix, _, suffix = item_id.partition(":")
+        removed = False
+
+        if prefix == "profile":
+            if profile is not None:
+                removed, fields = _delete_model_memory_item(profile, "profile", suffix)
+                if removed:
+                    profile_changed = True
+                    touched_profile_fields.update(fields)
+
+        elif prefix == "preferences":
+            if preferences is not None:
+                removed, fields = _delete_model_memory_item(preferences, "preferences", suffix)
+                if removed:
+                    preferences_changed = True
+                    touched_preference_fields.update(fields)
+
+        elif prefix in {"project", "projects"} and suffix:
+            removed = wiki.delete_project(suffix)
+
+        elif prefix in {"workflow", "workflows"} and suffix:
+            workflows = wiki.load_workflows()
+            kept = [workflow for workflow in workflows if workflow.workflow_name != suffix]
+            removed = len(kept) != len(workflows)
+            if removed:
+                wiki.save_workflows(kept)
+
+        elif prefix in {"persistent", "daily_notes"} and suffix:
+            if suffix in persistent_nodes:
+                persistent_nodes.pop(suffix, None)
+                persistent_changed = True
+                removed = True
+
+        if removed:
+            deleted.append(item_id)
+        else:
+            missing.append(item_id)
+
+    if profile_changed and profile is not None:
+        wiki.save_profile(profile)
+    if preferences_changed and preferences is not None:
+        wiki.save_preferences(preferences)
+    if persistent_changed:
+        persistent["nodes"] = persistent_nodes
+        save_persistent_nodes(settings, persistent)
+    if deleted:
+        _drop_memory_display_cache(
+            settings,
+            item_ids=set(deleted),
+            profile_fields=touched_profile_fields,
+            preferences_fields=touched_preference_fields,
+        )
+
+    return {
+        "ok": True,
+        "deleted_count": len(deleted),
+        "deleted_ids": deleted,
+        "missing_ids": missing,
+    }
 
 
 def _filter_fields(data: dict[str, Any], selected_fields: set[str]) -> dict[str, Any]:
@@ -6836,6 +7068,10 @@ def _memory_support_terms(value: Any) -> set[str]:
 
 
 def _persistent_node_support_text(node: dict[str, Any]) -> str:
+    display = node.get("display") if isinstance(node.get("display"), dict) else {}
+    display_text = ""
+    if isinstance(display, dict):
+        display_text = json.dumps(display, ensure_ascii=False)
     return " ".join(
         str(value or "")
         for value in [
@@ -6843,6 +7079,7 @@ def _persistent_node_support_text(node: dict[str, Any]) -> str:
             node.get("description"),
             node.get("display_title"),
             node.get("display_summary"),
+            display_text,
         ]
     )
 
@@ -7072,6 +7309,13 @@ def _merge_persistent_node_pair(primary: dict[str, Any], secondary: dict[str, An
         primary[field] = merged
 
     primary["description"] = _merge_persistent_node_description(primary, secondary)
+    if not _node_display_entry(primary, str(primary.get("description") or primary.get("key") or "")):
+        secondary_display = _node_display_entry(secondary, str(secondary.get("description") or secondary.get("key") or ""))
+        if secondary_display is not None:
+            primary["display"] = {
+                "title": secondary_display.get("title", {}),
+                "description": secondary_display.get("description", {}),
+            }
     primary["updated_at"] = max(
         str(primary.get("updated_at") or ""),
         str(secondary.get("updated_at") or ""),
@@ -7237,6 +7481,17 @@ def apply_persistent_result(
                     turn_ids.append(turn_ref)
         return refs, turn_ids
 
+    def apply_display(item: dict[str, Any], node: dict[str, Any]) -> None:
+        display_entry = _daily_note_display_entry_from_result(
+            item.get("display"),
+            str(node.get("description") or node.get("key") or ""),
+        )
+        if display_entry is not None:
+            node["display"] = {
+                "title": display_entry.get("title", {}),
+                "description": display_entry.get("description", {}),
+            }
+
     for upd in result.get("updates", []):
         node = nodes.get(upd.get("id"))
         if not node:
@@ -7254,6 +7509,7 @@ def apply_persistent_result(
             node["platform"] = [*(node.get("platform") or []), platform]
         if upd.get("description"):
             node["description"] = upd["description"]
+        apply_display(upd, node)
         if primary_language:
             node["primary_language"] = primary_language
         if upd.get("confidence"):
@@ -7284,6 +7540,7 @@ def apply_persistent_result(
             "created_at": now,
             "updated_at": now,
         }
+        apply_display(new_node, nodes[node_id])
 
     for merge in result.get("merges", []):
         target = nodes.get(merge.get("merged_into"))
@@ -7314,6 +7571,7 @@ def apply_persistent_result(
             target["confidence"] = "medium"
         if merge.get("description"):
             target["description"] = merge["description"]
+        apply_display(merge, target)
         if primary_language:
             target["primary_language"] = primary_language
         target["updated_at"] = now
@@ -7333,6 +7591,7 @@ def update_persistent_nodes_for_episode(
             "type": node.get("type"),
             "key": node.get("key"),
             "description": node.get("description"),
+            "display": node.get("display"),
             "confidence": node.get("confidence"),
             "refs": len(node.get("episode_refs") or []),
         }
@@ -7513,7 +7772,9 @@ def connect_episodes_by_persistent_nodes(settings: dict[str, Any], wiki: L2Wiki)
         refs = [str(ref).strip() for ref in (node.get("episode_refs") or []) if str(ref).strip() in ep_by_id]
         if len(refs) < 2:
             continue
-        label = str(node.get("display_title") or node.get("key") or node.get("description") or node_id).strip()[:80]
+        display_entry = _node_display_entry(node, str(node.get("description") or node.get("key") or node_id))
+        display_title = _display_text(display_entry.get("title"), "zh", "") if display_entry else ""
+        label = str(display_title or node.get("key") or node.get("description") or node_id).strip()[:80]
         for ref in refs:
             episode = ep_by_id[ref]
             for other_ref in refs[:20]:
@@ -7677,11 +7938,22 @@ def rebuild_persistent_memory(
         {workflow.workflow_name: list(workflow.source_episode_ids or []) for workflow in workflows},
     )
 
-    save_display_texts(settings, build_display_texts(builder.llm, profile, prefs))
+    skills = derive_my_skills(settings)
+    save_display_texts(
+        settings,
+        build_display_texts(
+            builder.llm,
+            profile,
+            prefs,
+            projects=projects,
+            workflows=workflows,
+            skills=skills,
+        ),
+    )
+    derive_my_skills(settings)
 
     stage("正在重建索引...", 5)
     index = wiki.rebuild_index()
-    derive_my_skills(settings)
     return {
         "profile": True,
         "preferences": True,
@@ -8303,6 +8575,11 @@ def memory_categories(locale: str | None = Query(default=None)) -> dict[str, Any
 @app.get("/api/memory/items")
 def memory_items(category: str = Query(...), locale: str | None = Query(default=None)) -> dict[str, Any]:
     return {"items": memory_items_for_category(load_settings(), category, locale)}
+
+
+@app.post("/api/memory/items/delete")
+def memory_items_delete(payload: DeleteMemoryItemsRequest) -> dict[str, Any]:
+    return delete_memory_items(load_settings(), payload.item_ids)
 
 
 @app.post("/api/export/package")

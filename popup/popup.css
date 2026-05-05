@@ -641,6 +641,13 @@ button {
   scrollbar-width: thin;
 }
 
+.selection-chip-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
 .selection-chip {
   display: inline-flex;
   align-items: center;
@@ -667,7 +674,7 @@ button {
 
 .selection-child {
   display: grid;
-  grid-template-columns: 20px 1fr;
+  grid-template-columns: 20px 1fr 20px;
   gap: 8px;
   align-items: start;
 }
@@ -693,6 +700,25 @@ button {
   font-size: 11px;
   line-height: 1.4;
   overflow-wrap: anywhere;
+}
+
+.selection-memory-delete-btn {
+  width: 20px;
+  height: 20px;
+  border: 1px solid #d9e0f0;
+  border-radius: 999px;
+  background: #ffffff;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.selection-memory-delete-btn:hover {
+  border-color: #f0b6b6;
+  color: var(--danger);
 }
 
 .action-requirement-hint {

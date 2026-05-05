@@ -159,6 +159,14 @@
       return request(baseUrl, `/api/memory/items?${query.toString()}`);
     },
 
+    deleteMemoryItems(baseUrl, payload) {
+      return request(baseUrl, "/api/memory/items/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+    },
+
     exportPackage(baseUrl, payload) {
       return request(baseUrl, "/api/export/package", {
         method: "POST",

@@ -13,6 +13,10 @@ Output ONLY valid JSON:
     {
       "id": "pn_XXXX",
       "description": "optional updated description",
+      "display": {
+        "title": {"zh": "optional frontend title", "en": "optional frontend title"},
+        "description": {"zh": "optional frontend short description", "en": "optional frontend short description"}
+      },
       "confidence": "optional low|medium|high",
       "support_episode_ids": ["optional episode ids present in the input"]
     }
@@ -22,6 +26,10 @@ Output ONLY valid JSON:
       "type": "preference | topic",
       "key": "snake_case_key",
       "description": "one stable daily-memory description",
+      "display": {
+        "title": {"zh": "frontend title", "en": "frontend title"},
+        "description": {"zh": "frontend short description", "en": "frontend short description"}
+      },
       "export_priority": "low | medium | high",
       "support_episode_ids": ["optional episode ids present in the input"]
     }
@@ -30,7 +38,11 @@ Output ONLY valid JSON:
     {
       "merged_into": "pn_XXXX",
       "merged_from": "pn_YYYY",
-      "description": "optional merged description"
+      "description": "optional merged description",
+      "display": {
+        "title": {"zh": "optional merged frontend title", "en": "optional merged frontend title"},
+        "description": {"zh": "optional merged frontend short description", "en": "optional merged frontend short description"}
+      }
     }
   ]
 }
@@ -58,6 +70,17 @@ Evidence boundary rules:
 - Do not copy assistant-generated category labels or marketing-style descriptions as if they were the user's own preference or life context.
 - `key` is an internal retrieval key. It may use neutral status words, but `description` should be natural user-facing prose and should not expose internal words like "context", "candidate", "node", or "memory" as labels.
 
+Frontend display rules:
+- Every new daily_note node should include `display`. Existing-node updates should include `display` whenever the title or short description should change.
+- `display.title` and `display.description` are the canonical frontend card copy. They should be normal short phrases a user can recognize, not backend labels, keys, or status words.
+- `display.title` names the underlying situation, activity, object, goal, or decision under discussion.
+- `display.description` adds one compact user-side detail: user-stated criteria, constraints, approach, requested format, or user-accepted result.
+- Do not surface assistant-only suggestions, add-on strategies, follow-up offers, coaching tactics, or invented labels in `display`. If they are not user-stated or user-accepted, leave them out of frontend copy even if they remain in backend evidence.
+- Do not write mechanical frontend copy such as `X pending`, `X 待确认`, `偏好待确认`, or `待确认`.
+- Keep Chinese display title around 6 to 18 characters when possible, never more than 24. Keep Chinese display description around 12 to 28 characters when possible, never more than 36.
+- Preserve proper nouns and domain-specific terms in their original language when clearer.
+- Before returning, silently self-check every `display` value. Verify that the title and description are faithful to user-stated or user-accepted evidence, do not surface assistant-only suggestions or invented labels, do not expose internal keys/status words, and describe the same memory in zh and en. If any display fails this check, revise it before returning. Do not include the self-check in the JSON.
+
 Temporal and connection rules:
 - Use timestamps, event order, and connected episode summaries to decide whether a new note updates, supersedes, or merely relates to an old note.
 - `support_episode_ids` may include only the current episode id or connected episode ids provided in the input.
@@ -69,6 +92,10 @@ Granularity rules:
 - Create daily notes at a reusable level. Keep concrete details when they are likely useful later, but avoid one node per tiny subdetail.
 - When storing criteria, constraints, or option filters, keep the domain or activity noun they belong to in the description. Do not output a detached list of criteria without the life context it applies to.
 - Put the most distinguishing user-stated constraint close to the domain or activity phrase when it changes the future retrieval intent. Preserve the user's concrete wording instead of replacing it with a synonym invented by the model.
+- If a request includes output formats, channels, tone, style, variants, or version requirements, anchor the note on the underlying situation, activity, object, or goal. Treat those requirements as supporting details unless they are the real memory theme.
+- Do not turn negative constraints from one request into standalone preference subjects. Keep them as concise details only when they help future retrieval.
+- For learning or practice requests, anchor the note on the user's learning goal or preferred learning mode. Treat assistant-proposed drills, sample artifacts, tools, and examples as suggested details unless the user confirms they are the ongoing focus.
+- If the user explicitly states a preferred approach, such as wanting to start hands-on or avoid too much theory, preserve that approach directly instead of wrapping it as an unresolved status.
 - Merge semantic duplicates and overly fine-grained siblings.
 - For one personal-choice thread, keep upstream context and downstream follow-up choices together unless they clearly support different future retrieval intents.
 - If one daily_note is an application or extension of another daily_note and their support episodes overlap, merge them into one node instead of keeping sibling cards.

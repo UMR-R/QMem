@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -225,6 +226,29 @@ class L2Wiki:
         self._write_projects_index()
         self._write_root_readme()
         self._log_change("project", "update", project.project_name)
+
+    def delete_project(self, name: str) -> bool:
+        removed = False
+        p = self._project_path(name)
+        if p.exists():
+            if p.is_dir():
+                shutil.rmtree(p)
+            else:
+                p.unlink()
+            removed = True
+
+        legacy = self._legacy_project_path(name)
+        for suffix in (".json", ".md"):
+            legacy_file = legacy.with_suffix(suffix)
+            if legacy_file.exists():
+                legacy_file.unlink()
+                removed = True
+
+        if removed:
+            self._write_projects_index()
+            self._write_root_readme()
+            self._log_change("project", "delete", name)
+        return removed
 
     def _project_path(self, name: str) -> Path:
         safe_name = name.lower().replace(" ", "_").replace("/", "_")[:64]
