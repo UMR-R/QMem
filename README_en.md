@@ -12,6 +12,15 @@
 
 QMem is a browser extension for AI conversations. It saves conversations from ChatGPT, Gemini, DeepSeek, Doubao, and other AI platforms to local storage, then organizes them into long-term memory that can be viewed, selected, deleted, exported, and injected into a new AI session.
 
+<p align="center">
+  <a href="#quickstart">Quickstart</a> ·
+  <a href="#pages">Pages</a> ·
+  <a href="#local-memory">Local Memory</a> ·
+  <a href="#repository-structure">Repository Structure</a>
+</p>
+
+<br>
+
 ## Interface Preview
 
 <table>
@@ -26,6 +35,8 @@ QMem is a browser extension for AI conversations. It saves conversations from Ch
     <td align="center">Migrate</td>
   </tr>
 </table>
+
+<br>
 
 ## Quickstart
 
@@ -79,6 +90,8 @@ The backend currently uses an OpenAI-compatible interface by default:
 4. Go to Migrate and click `Organize Memory`.
 5. Select the memory you want, then click `Export` or `Inject`.
 
+<br>
+
 ## Pages
 
 ### Home
@@ -113,7 +126,28 @@ The backend currently uses an OpenAI-compatible interface by default:
 - `Add to My Skill`: saves recommended Skills.
 - `Export` / `Inject Current Session`: migrates or uses Skills.
 
-## Local Memory Structure
+### Injection and Export
+
+Regular injection:
+
+- Injects structured memory nodes.
+- Injects related episode summaries.
+- Does not inject long raw conversation excerpts by default.
+
+Detailed injection:
+
+- Injects structured memory nodes.
+- Injects episode summaries.
+- Additionally injects related raw turns for cases that need complete context.
+
+Export:
+
+- Generates a portable memory package.
+- Supports backup, copying to another device, or migration to another AI platform.
+
+<br>
+
+## Local Memory
 
 Default memory directory:
 
@@ -138,24 +172,7 @@ QMem uses layered memory:
 
 After you delete an unwanted memory item, QMem records ignore / lock state to avoid regenerating the same item in the next organization run.
 
-## Injection and Export
-
-Regular injection:
-
-- Injects structured memory nodes.
-- Injects related episode summaries.
-- Does not inject long raw conversation excerpts by default.
-
-Detailed injection:
-
-- Injects structured memory nodes.
-- Injects episode summaries.
-- Additionally injects related raw turns for cases that need complete context.
-
-Export:
-
-- Generates a portable memory package.
-- Supports backup, copying to another device, or migration to another AI platform.
+<br>
 
 ## Repository Structure
 

@@ -12,6 +12,15 @@
 
 QMem 是一个面向 AI 对话的浏览器扩展程序。它可以把你在 ChatGPT、Gemini、DeepSeek、豆包等平台上的对话保存到本地，整理成可查看、可勾选、可删除、可导出、可注入到新会话里的长期记忆。
 
+<p align="center">
+  <a href="#quickstart">Quickstart</a> ·
+  <a href="#页面功能">页面功能</a> ·
+  <a href="#本地记忆">本地记忆</a> ·
+  <a href="#仓库结构">仓库结构</a>
+</p>
+
+<br>
+
 ## 界面预览
 
 <table>
@@ -26,6 +35,8 @@ QMem 是一个面向 AI 对话的浏览器扩展程序。它可以把你在 Chat
     <td align="center">迁移页</td>
   </tr>
 </table>
+
+<br>
 
 ## Quickstart
 
@@ -79,6 +90,8 @@ uvicorn backend_service.app:app --host 127.0.0.1 --port 8765 --reload
 4. 进入“迁移”页，点击“整理记忆”。
 5. 勾选需要的记忆，点击“导出”或“注入”。
 
+<br>
+
 ## 页面功能
 
 ### 主页面
@@ -113,7 +126,28 @@ uvicorn backend_service.app:app --host 127.0.0.1 --port 8765 --reload
 - `加入我的 Skill`：保存推荐 Skill。
 - `导出` / `注入当前会话`：迁移或使用 Skill。
 
-## 本地记忆结构
+### 注入和导出
+
+普通注入：
+
+- 注入结构化记忆节点。
+- 注入相关 episode summary。
+- 不默认注入大段 raw 对话。
+
+详细注入：
+
+- 注入结构化记忆节点。
+- 注入 episode summary。
+- 额外注入相关 raw turns，用于需要完整上下文的场景。
+
+导出：
+
+- 生成可迁移的记忆包。
+- 可用于备份、复制到其他设备，或迁移到其他 AI 平台。
+
+<br>
+
+## 本地记忆
 
 默认记忆目录：
 
@@ -138,24 +172,7 @@ QMem 使用分层记忆：
 
 删除不想保留的条目后，QMem 会记录 ignore / lock，避免下次整理时把同一条记忆又自动生成回来。
 
-## 注入和导出
-
-普通注入：
-
-- 注入结构化记忆节点。
-- 注入相关 episode summary。
-- 不默认注入大段 raw 对话。
-
-详细注入：
-
-- 注入结构化记忆节点。
-- 注入 episode summary。
-- 额外注入相关 raw turns，用于需要完整上下文的场景。
-
-导出：
-
-- 生成可迁移的记忆包。
-- 可用于备份、复制到其他设备，或迁移到其他 AI 平台。
+<br>
 
 ## 仓库结构
 
