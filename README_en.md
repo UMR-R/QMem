@@ -96,54 +96,38 @@ The backend currently uses an OpenAI-compatible interface by default:
 
 ### Home
 
-- `Sync Conversation`: continuously saves new conversations from the current platform to the local raw layer.
-- `Migrate`: opens memory organization, selection, export, and injection.
-- `Settings`: configures the local backend, API Key, local directory, and advanced options.
-- `Skill`: manages My Skills and recommended Skills.
+- `Sync Conversation`: starts or pauses conversation capture on the current platform. When enabled, QMem keeps saving new user / assistant turns to the local raw layer.
+- `Migrate`: opens the memory migration workspace. Use it to add the current conversation, add platform memory, organize memory, select memory items, export, or inject.
+- `Settings`: opens local configuration for the backend URL, API Key, local directory, sync behavior, injection behavior, and data cleanup.
+- `Skill`: opens Skill management for saved Skills, recommended Skills, Skill export, and Skill injection.
 
 ### Settings
 
-- `Local Backend URL`: local FastAPI backend address.
-- `API Key`: model provider key.
-- `Local Directory`: storage directory for raw conversations and structured memory.
-- `Import Conversation`: imports historical conversation files in `json`, `jsonl`, `md`, or `txt`.
-- `Sync Memory`: automatically maintains memory after conversation sync.
-- `Detailed Injection`: includes related raw turns during injection.
-- `Clear All Memories` / `Clear Cache`: manages local data.
+- `Local Backend URL`: the local FastAPI backend address, usually `http://127.0.0.1:8765`. The extension uses it to read/write memory and call organization APIs.
+- `API Key`: the model provider key used to organize memory, generate structured nodes, and produce frontend display text.
+- `Test Connection`: checks whether the local backend and model API are available. Use it after first setup or after replacing the key.
+- `Local Directory`: sets the storage directory for raw conversations, episodes, persistent memory, and metadata.
+- `Import Conversation`: imports historical conversation files in `json`, `jsonl`, `md`, or `txt` into the local raw layer.
+- `Sync Memory`: when enabled, newly synced conversations automatically trigger incremental memory maintenance. When disabled, you can organize manually later.
+- `Detailed Injection`: controls whether `Inject` also includes related raw turns. When disabled, injection includes structured memory and episode summaries; when enabled, it includes more original context.
+- `Clear All Memories`: deletes saved raw conversations and structured memory while keeping current settings.
+- `Clear Cache`: clears temporary cache while keeping primary memory files.
 
 ### Migrate
 
-- `Add Current Conversation`: saves the current tab's conversation to local raw memory.
-- `Add Platform Memory`: saves the current AI platform's reported saved memory, custom instructions, agent config, and platform skills.
-- `Organize Memory`: rebuilds structured long-term memory from raw conversations and platform memory.
-- `Export`: exports the selected memory package.
-- `Inject`: injects selected memory into the current AI session.
+- `Add Current Conversation`: saves the AI conversation in the current tab to local raw memory. Use it when you want to add the conversation you are currently viewing to QMem.
+- `Add Platform Memory`: asks the current AI platform to report saved memory, custom instructions, agent config, and platform skills, then saves that report as a platform memory snapshot.
+- `Organize Memory`: rebuilds structured long-term memory from raw conversations and platform memory, including profile, preferences, projects, workflows, daily notes, and Skills.
+- `Export`: turns the selected memory items into a portable memory package. The package can be used for backup, copied to another device, or migrated to another AI platform.
+- `Inject`: writes the selected memory into the current AI session. Regular injection includes structured memory nodes and related episode summaries, without long raw conversation excerpts by default. If `Detailed Injection` is enabled in Settings, QMem also injects related raw turns for cases that need complete context.
 
 ### Skill
 
-- `My Skill`: views saved Skills.
-- `Recommended for You`: views backend-recommended Skills.
-- `Add to My Skill`: saves recommended Skills.
-- `Export` / `Inject Current Session`: migrates or uses Skills.
-
-### Injection and Export
-
-Regular injection:
-
-- Injects structured memory nodes.
-- Injects related episode summaries.
-- Does not inject long raw conversation excerpts by default.
-
-Detailed injection:
-
-- Injects structured memory nodes.
-- Injects episode summaries.
-- Additionally injects related raw turns for cases that need complete context.
-
-Export:
-
-- Generates a portable memory package.
-- Supports backup, copying to another device, or migration to another AI platform.
+- `My Skill`: shows Skills already saved locally.
+- `Recommended for You`: shows backend-recommended Skills based on the current catalog and memory context.
+- `Add to My Skill`: saves selected recommended Skills into My Skill for later export or injection.
+- `Export`: exports selected Skills for backup or migration.
+- `Inject Current Session`: writes selected Skills into the current AI session so the conversation can temporarily use those capability instructions.
 
 <br>
 
