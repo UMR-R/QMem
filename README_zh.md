@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <strong>Welcome contributors:</strong> 徐西南、王浩然、胡心亭
+  <strong>Contributors:</strong> 徐锡楠、王浩然、胡心亭
 </p>
 
 <p align="center">
