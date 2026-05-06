@@ -1,5 +1,5 @@
 // Background Service Worker
-// 职责：消息路由、对话捕获、LLM 增量处理（存入 chrome.storage.local）。
+// 职责：消息路由和对话捕获。
 // 注意：File System Access API 写操作无法在 Service Worker 中执行，
 //       文件同步由 popup.js 在打开时自动完成。
 
@@ -106,7 +106,7 @@ async function handleRoundCaptured(message) {
   const storageKey = `chat:${platform}:${chatId}`;
   const chatRef = `${platform}:${chatId}`;
 
-  const data = await chrome.storage.local.get([storageKey, "pending_flush"]);
+  const data = await chrome.storage.local.get(storageKey);
   const chatData = data[storageKey] ?? {
     platform, url,
     first_seen: timestamp,
@@ -123,69 +123,21 @@ async function handleRoundCaptured(message) {
   chatData.rounds.push({ timestamp, user: userText, assistant: assistantText });
   chatData.last_updated = timestamp;
 
-  const pending = data["pending_flush"] ?? [];
-  if (!pending.includes(chatRef)) pending.push(chatRef);
-
   await chrome.storage.local.set({
     [storageKey]: chatData,
-    pending_flush: pending,
   });
 
   _forwardRoundToLocalBackend(message).catch(console.error);
-
-  // 立即触发 LLM 处理（fire and forget）
-  flushPending().catch(console.error);
 }
 
-// ── Flush：LLM 增量处理，结果存入 chrome.storage.local ───────────────────────
+// ── Flush：历史兼容入口 ─────────────────────────────────────────────────────
 
 async function flushPending() {
-  const data = await chrome.storage.local.get(
-    ["pending_flush", "keepUpdated", "realtimeUpdate", "deepseek_api_key"]
-  );
-  const pending = data["pending_flush"] ?? [];
-  if (pending.length === 0 || !data["keepUpdated"]) return;
-
-  const done = [];
-  for (const chatRef of pending) {
-    const [platform, ...rest] = chatRef.split(":");
-    const chatId = rest.join(":");
-    const storageKey = `chat:${platform}:${chatId}`;
-
-    const chatResult = await chrome.storage.local.get(storageKey);
-    const chatData = chatResult[storageKey];
-    if (!chatData) { done.push(chatRef); continue; }
-
-    // LLM 增量更新：只处理上次 flush 之后新增的 rounds，避免重复
-    if (data["realtimeUpdate"] && data["deepseek_api_key"]) {
-      const lastIdx = chatData.last_processed_idx ?? 0;
-      const newRounds = chatData.rounds.slice(lastIdx);
-      if (newRounds.length > 0) {
-        try {
-          await updateMemory(
-            { platform: chatData.platform, url: chatData.url, rounds: newRounds },
-            data["deepseek_api_key"]
-          );
-          // 更新已处理索引并写回 storage
-          chatData.last_processed_idx = chatData.rounds.length;
-          await chrome.storage.local.set({ [storageKey]: chatData });
-          console.log(`[Background] 记忆已更新: ${chatRef}（处理了 ${newRounds.length} 条新 rounds）`);
-        } catch (err) {
-          console.error("[Background] memory_engine 更新失败:", err.message);
-        }
-      }
-    }
-
-    done.push(chatRef);
-  }
-
-  const remaining = pending.filter(ref => !done.includes(ref));
-  await chrome.storage.local.set({ pending_flush: remaining });
+  await chrome.storage.local.remove("pending_flush");
 }
 
-// ── 批量提取 episode：处理所有未经 LLM 处理的 RAW rounds ────────────────────
-// 扫描所有 chat:* 条目，对 last_processed_idx 之后的 rounds 调用 memory_engine。
-// 适用于 realtimeUpdate=false 期间捕获的对话，在同步时补充 episode 提取。
+// ── 旧版本地批量提取入口 ───────────────────────────────────────────────────
+// 保留给手动调试，不再由“同步记忆”自动触发。正式同步统一走本地后端。
 
 let _processAllRawRunning = false;
 
