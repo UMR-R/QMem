@@ -1,8 +1,8 @@
-# Memory Assistant
+# QMem
 
 [中文说明](README_zh.md)
 
-Memory Assistant is a Chrome extension plus a local FastAPI backend for capturing AI conversations, organizing them into structured long-term memory, and moving that memory between platforms.
+QMem is a Chrome extension plus a local FastAPI backend for capturing AI conversations, organizing them into structured long-term memory, and moving that memory between platforms.
 
 The current repository has three cooperating parts:
 
@@ -50,7 +50,7 @@ in-repo `llm_memory_transferor` modules imported by `backend_service.app`.
 4. Select the repository root folder:
 
 ```text
-memory_assistant_git/
+QMem/
 ```
 
 Do not select only `popup/` or `background/`. Chrome needs the root because the
@@ -60,13 +60,13 @@ extension manifest lives at:
 manifest.json
 ```
 
-After loading, you should see the Memory Assistant extension card in the
+After loading, you should see the QMem extension card in the
 extensions page.
 
 ### 3. Pin the extension and open the popup
 
 1. Click the Chrome extensions icon in the toolbar.
-2. Pin `Memory Assistant` so it stays visible.
+2. Pin `QMem` so it stays visible.
 3. Click the extension icon to open the popup.
 
 If the popup does not open correctly, go back to `chrome://extensions/`,

@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Memory Assistant",
+  "name": "QMem",
   "version": "1.0.0",
   "description": "AI 记忆迁移与本地长期记忆管理工具",
 

@@ -17,7 +17,7 @@
 ## 目标顶层结构
 
 ```text
-memory_assistant/
+QMem/
 ├── manifest.json
 ├── README.md
 ├── README_zh.md

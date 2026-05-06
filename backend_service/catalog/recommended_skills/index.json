@@ -1,6 +1,6 @@
 {
   "folder": "recommended_skills",
-  "updated_at": "2026-04-24T18:50:40.564821+00:00",
+  "updated_at": "2026-05-03T06:49:52.953597+00:00",
   "items": [
     {
       "id": "rec:anthropic_skills:算法艺术创作",
@@ -80,15 +80,15 @@
       "reference_md": "rec_anthropic_skills_前端界面设计/reference.md"
     },
     {
-      "id": "rec:anthropic_skills:Internal-comms",
-      "title": "Internal-comms",
+      "id": "rec:anthropic_skills:写作改写",
+      "title": "写作改写",
       "kind": "skill",
-      "folder": "rec_anthropic_skills_Internal-comms",
-      "json": "rec_anthropic_skills_Internal-comms/skill.json",
-      "recommendation_json": "rec_anthropic_skills_Internal-comms/recommendation.json",
-      "skill_md": "rec_anthropic_skills_Internal-comms/SKILL.md",
-      "forms_md": "rec_anthropic_skills_Internal-comms/forms.md",
-      "reference_md": "rec_anthropic_skills_Internal-comms/reference.md"
+      "folder": "rec_anthropic_skills_写作改写",
+      "json": "rec_anthropic_skills_写作改写/skill.json",
+      "recommendation_json": "rec_anthropic_skills_写作改写/recommendation.json",
+      "skill_md": "rec_anthropic_skills_写作改写/SKILL.md",
+      "forms_md": "rec_anthropic_skills_写作改写/forms.md",
+      "reference_md": "rec_anthropic_skills_写作改写/reference.md"
     },
     {
       "id": "rec:anthropic_skills:MCP_服务开发",
@@ -144,17 +144,6 @@
       "skill_md": "rec_anthropic_skills_Slack_GIF_生成/SKILL.md",
       "forms_md": "rec_anthropic_skills_Slack_GIF_生成/forms.md",
       "reference_md": "rec_anthropic_skills_Slack_GIF_生成/reference.md"
-    },
-    {
-      "id": "rec:anthropic_skills:主题风格生成",
-      "title": "主题风格生成",
-      "kind": "skill",
-      "folder": "rec_anthropic_skills_主题风格生成",
-      "json": "rec_anthropic_skills_主题风格生成/skill.json",
-      "recommendation_json": "rec_anthropic_skills_主题风格生成/recommendation.json",
-      "skill_md": "rec_anthropic_skills_主题风格生成/SKILL.md",
-      "forms_md": "rec_anthropic_skills_主题风格生成/forms.md",
-      "reference_md": "rec_anthropic_skills_主题风格生成/reference.md"
     },
     {
       "id": "rec:anthropic_skills:Web_组件构建",

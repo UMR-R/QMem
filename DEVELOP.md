@@ -1,4 +1,4 @@
-# Memory Assistant Developer Guide
+# QMem Developer Guide
 
 ## Current Architecture
 
@@ -20,7 +20,7 @@ content script / popup
 ## Project Structure
 
 ```text
-memory_assistant/
+QMem/
 ├── manifest.json
 ├── config.js
 ├── popup/

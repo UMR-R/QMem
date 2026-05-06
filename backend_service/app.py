@@ -6961,7 +6961,7 @@ def test_openai_compat_connection(api_key: str, base_url: str) -> tuple[bool, st
         headers={
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
-            "User-Agent": "memory-assistant-local-backend",
+            "User-Agent": "qmem-local-backend",
         },
         method="GET",
     )
@@ -8355,14 +8355,14 @@ def save_platform_memory_snapshot(settings: dict[str, Any], payload: PlatformMem
     return refreshed or target_path
 
 
-app = FastAPI(title="Memory Assistant Local Backend", version="0.2.0")
+app = FastAPI(title="QMem Local Backend", version="0.2.0")
 
 
 @app.get("/api/health")
 def health() -> dict[str, Any]:
     return {
         "ok": True,
-        "service": "memory-assistant-backend",
+        "service": "qmem-backend",
         "version": "0.2.0",
         "time": datetime.now(timezone.utc).isoformat(),
     }

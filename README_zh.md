@@ -1,8 +1,8 @@
-# Memory Assistant
+# QMem
 
 [English](README.md)
 
-Memory Assistant 是一个由 Chrome 插件、本地 FastAPI 后端和 Python 记忆整理流水线组成的项目，用来采集 AI 对话、整理结构化长期记忆，并把这些记忆迁移到其他平台。
+QMem 是一个由 Chrome 插件、本地 FastAPI 后端和 Python 记忆整理流水线组成的项目，用来采集 AI 对话、整理结构化长期记忆，并把这些记忆迁移到其他平台。
 
 当前仓库由三部分协同工作：
 
@@ -50,7 +50,7 @@ http://127.0.0.1:8765
 4. 选择仓库根目录：
 
 ```text
-memory_assistant_git/
+QMem/
 ```
 
 不要只选 `popup/` 或 `background/`，因为插件清单位于仓库根目录的：
@@ -59,12 +59,12 @@ memory_assistant_git/
 manifest.json
 ```
 
-加载成功后，你应该能在扩展列表里看到 `Memory Assistant`。
+加载成功后，你应该能在扩展列表里看到 `QMem`。
 
 ### 3. 固定插件并打开 popup
 
 1. 点击 Chrome 工具栏中的扩展图标
-2. 将 `Memory Assistant` 固定到工具栏
+2. 将 `QMem` 固定到工具栏
 3. 点击插件图标打开 popup
 
 如果 popup 打不开或显示异常，先回到 `chrome://extensions/` 检查该扩展的报错。
