@@ -4928,7 +4928,13 @@ def build_memory_categories(settings: dict[str, Any], locale: str | None = None)
 
 
 def _default_persistent_payload() -> dict[str, Any]:
-    return {"version": "1.1", "pn_next_id": 1, "episodic_tag_paths": [], "nodes": {}}
+    return {
+        "version": "1.1",
+        "pn_next_id": 1,
+        "episodic_tag_paths": [],
+        "nodes": {},
+        "deleted_node_locks": [],
+    }
 
 
 def _persistent_root(root: Path) -> Path:
@@ -5018,6 +5024,9 @@ def _load_persistent_nodes_from_directory(root: Path) -> dict[str, Any]:
         payload["version"] = index_data.get("version", payload["version"])
         payload["pn_next_id"] = index_data.get("pn_next_id", payload["pn_next_id"])
         payload["episodic_tag_paths"] = index_data.get("episodic_tag_paths", payload["episodic_tag_paths"])
+        locks = index_data.get("deleted_node_locks", [])
+        if isinstance(locks, list):
+            payload["deleted_node_locks"] = [lock for lock in locks if isinstance(lock, dict)]
         items = index_data.get("items", [])
         if isinstance(items, list):
             for item in items:
@@ -5051,7 +5060,7 @@ def _load_persistent_nodes_from_directory(root: Path) -> dict[str, Any]:
 def load_persistent_nodes(settings: dict[str, Any]) -> dict[str, Any]:
     root = get_storage_root(settings)
     directory_data = _load_persistent_nodes_from_directory(root)
-    if directory_data.get("nodes"):
+    if directory_data.get("nodes") or directory_data.get("deleted_node_locks"):
         return directory_data
     data = read_json_file(_legacy_persistent_path(root))
     if isinstance(data, dict):
@@ -5762,6 +5771,17 @@ def _remove_slugged_profile_focus_value(values: Any, slug: str) -> tuple[Any, bo
     return kept, len(kept) != len(split_values)
 
 
+def _persistent_node_delete_lock(node_id: str, node: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "node_id": node_id,
+        "deleted_at": datetime.now(timezone.utc).isoformat(),
+        "key": node.get("key"),
+        "description": node.get("description"),
+        "episode_refs": [str(ref) for ref in (node.get("episode_refs") or []) if str(ref).strip()],
+        "turn_refs": [str(ref) for ref in (node.get("turn_refs") or []) if str(ref).strip()],
+    }
+
+
 def _delete_model_memory_item(
     model: ProfileMemory | PreferenceMemory,
     category: str,
@@ -5896,7 +5916,11 @@ def delete_memory_items(settings: dict[str, Any], item_ids: list[str]) -> dict[s
 
         elif prefix in {"persistent", "daily_notes"} and suffix:
             if suffix in persistent_nodes:
-                persistent_nodes.pop(suffix, None)
+                node = persistent_nodes.pop(suffix, None)
+                if isinstance(node, dict):
+                    locks = persistent.setdefault("deleted_node_locks", [])
+                    if isinstance(locks, list):
+                        locks.append(_persistent_node_delete_lock(suffix, node))
                 persistent_changed = True
                 removed = True
 
@@ -7441,6 +7465,34 @@ def _persistent_node_support_text(node: dict[str, Any]) -> str:
     )
 
 
+def _persistent_node_matches_deleted_lock(
+    pn_data: dict[str, Any],
+    candidate_node: dict[str, Any],
+    refs: list[str],
+) -> bool:
+    if not refs:
+        return False
+    candidate_text = _persistent_node_support_text(candidate_node)
+    candidate_terms = _memory_support_terms(candidate_text)
+    candidate_refs = set(refs)
+    locks = pn_data.get("deleted_node_locks", [])
+    if not isinstance(locks, list):
+        return False
+    for lock in locks:
+        if not isinstance(lock, dict):
+            continue
+        lock_refs = {str(ref).strip() for ref in (lock.get("episode_refs") or []) if str(ref).strip()}
+        if not lock_refs or not (candidate_refs & lock_refs):
+            continue
+        lock_text = " ".join(str(lock.get(field) or "") for field in ["key", "description"])
+        lock_terms = _memory_support_terms(lock_text)
+        if candidate_refs <= lock_refs and candidate_terms and lock_terms and candidate_terms & lock_terms:
+            return True
+        if _semantic_similarity(candidate_text, lock_text) >= 0.12:
+            return True
+    return False
+
+
 def _episode_support_text(episode: Any) -> str:
     display = getattr(episode, "display", {}) or {}
     display_texts: list[str] = []
@@ -7741,6 +7793,7 @@ def save_persistent_nodes(settings: dict[str, Any], data: dict[str, Any]) -> Non
             "pn_next_id": data.get("pn_next_id", payload["pn_next_id"]),
             "episodic_tag_paths": data.get("episodic_tag_paths", payload["episodic_tag_paths"]),
             "nodes": data.get("nodes", payload["nodes"]),
+            "deleted_node_locks": data.get("deleted_node_locks", payload["deleted_node_locks"]),
         })
     payload = _prune_persistent_nodes_against_projects(settings, payload)
     payload = _prune_persistent_node_support_refs(settings, payload)
@@ -7777,6 +7830,7 @@ def save_persistent_nodes(settings: dict[str, Any], data: dict[str, Any]) -> Non
         "version": payload.get("version", "1.1"),
         "pn_next_id": payload.get("pn_next_id", 1),
         "episodic_tag_paths": payload.get("episodic_tag_paths", []),
+        "deleted_node_locks": payload.get("deleted_node_locks", []),
         "item_count": len(items),
         "items": items,
     }
@@ -7882,6 +7936,8 @@ def apply_persistent_result(
         }
         refs, turn_ids = support_refs(new_node, candidate_node)
         if not refs:
+            continue
+        if _persistent_node_matches_deleted_lock(pn_data, candidate_node, refs):
             continue
         node_id = f"pn_{str(pn_data['pn_next_id']).zfill(4)}"
         pn_data["pn_next_id"] += 1
@@ -8170,10 +8226,24 @@ def rebuild_persistent_nodes(
     reset: bool = True,
 ) -> dict[str, Any]:
     if reset:
-        pn_data = {"version": "1.0", "pn_next_id": 1, "episodic_tag_paths": [], "nodes": {}}
+        previous = load_persistent_nodes(settings)
+        pn_data = {
+            "version": "1.1",
+            "pn_next_id": 1,
+            "episodic_tag_paths": [],
+            "nodes": {},
+            "deleted_node_locks": previous.get("deleted_node_locks", []),
+        }
         save_persistent_nodes(settings, pn_data)
     elif _persistent_node_assets_missing(settings):
-        pn_data = {"version": "1.0", "pn_next_id": 1, "episodic_tag_paths": [], "nodes": {}}
+        previous = load_persistent_nodes(settings)
+        pn_data = {
+            "version": "1.1",
+            "pn_next_id": 1,
+            "episodic_tag_paths": [],
+            "nodes": {},
+            "deleted_node_locks": previous.get("deleted_node_locks", []),
+        }
         save_persistent_nodes(settings, pn_data)
         reset = True
 
@@ -8181,15 +8251,13 @@ def rebuild_persistent_nodes(
     llm_calls = 0
     batches = [episodes[index:index + batch_size] for index in range(0, len(episodes), batch_size)]
     for batch_index, episode_batch in enumerate(batches, start=1):
-        start_index = (batch_index - 1) * batch_size + 1
-        end_index = min(len(episodes), start_index + len(episode_batch) - 1)
         update_job(
             job_id,
             status="running",
             progress={
                 "current": total_steps,
                 "total": total_steps,
-                "message": f"正在维护结构化记忆节点：{start_index}-{end_index}/{len(episodes)}",
+                "message": "正在维护结构化记忆节点...",
             },
         )
         if update_persistent_nodes_for_episodes(settings, llm, episode_batch):
@@ -8453,10 +8521,7 @@ def _run_organize_job(job_id: str, settings: dict[str, Any]) -> None:
             progress={
                 "current": 0,
                 "total": 1,
-                "message": (
-                    f"正在归并平台记忆（合并 {consolidate_result['merged']} 条，"
-                    f"清理 {consolidate_result['removed']} 条）"
-                ),
+                "message": "正在归并平台记忆...",
             },
         )
         stage_started = time.perf_counter()
@@ -8511,7 +8576,7 @@ def _run_organize_job(job_id: str, settings: dict[str, Any]) -> None:
                 progress={
                     "current": current_step,
                     "total": total_steps,
-                    "message": "正在提取对话记忆",
+                    "message": "正在提取对话记忆...",
                 },
             )
 
@@ -8544,7 +8609,7 @@ def _run_organize_job(job_id: str, settings: dict[str, Any]) -> None:
                 progress={
                     "current": organize_stats["raw_conversations_skipped"],
                     "total": total_steps,
-                    "message": f"正在并行提取对话记忆：0/{len(changed_conversations)}",
+                    "message": "正在并行提取对话记忆...",
                 },
             )
             with ThreadPoolExecutor(max_workers=worker_count) as executor:
@@ -8561,7 +8626,7 @@ def _run_organize_job(job_id: str, settings: dict[str, Any]) -> None:
                         progress={
                             "current": min(len(conversations), organize_stats["raw_conversations_skipped"] + completed_count),
                             "total": total_steps,
-                            "message": f"正在并行提取对话记忆：{completed_count}/{len(changed_conversations)}",
+                            "message": "正在并行提取对话记忆...",
                         },
                     )
             organize_stats["episode_llm_calls"] += len(changed_conversations)
@@ -8632,7 +8697,7 @@ def _run_organize_job(job_id: str, settings: dict[str, Any]) -> None:
             update_job(
                 job_id,
                 status="running",
-                progress={"current": len(conversations) + 1, "total": total_steps, "message": "persistent 未变化，跳过重建"},
+                progress={"current": len(conversations) + 1, "total": total_steps, "message": "结构化记忆已是最新版本..."},
             )
             timings["persistent_rebuild_sec"] = 0.0
 
@@ -8649,6 +8714,35 @@ def _run_organize_job(job_id: str, settings: dict[str, Any]) -> None:
             or node_maintenance_signature != previous_node_signature
             or _persistent_node_assets_missing(settings)
         )
+        if not should_rebuild_persistent and not should_maintain_nodes:
+            timings["persistent_node_maintenance_sec"] = 0.0
+            timings["total_sec"] = _elapsed_seconds(run_started)
+            organize_stats["timings"] = timings
+            organize_state["raw_index"] = raw_index
+            organize_state["last_organized_at"] = datetime.now(timezone.utc).isoformat()
+            organize_state["l1_signature"] = l1_signature
+            organize_state["episode_signature"] = episode_signature
+            organize_state["persistent_signature"] = persistent_signature
+            organize_state["persistent_rebuild_version"] = PERSISTENT_REBUILD_VERSION
+            organize_state["node_maintenance_signature"] = node_maintenance_signature
+            organize_state["last_run_stats"] = organize_stats
+            save_organize_state(settings, organize_state)
+            update_timestamp(settings)
+            update_job(
+                job_id,
+                status="completed",
+                progress={"current": total_steps, "total": total_steps, "message": "记忆已是最新版本"},
+                result={
+                    "raw_conversations": len(conversations),
+                    "episodes": len(wiki.list_episodes()),
+                    "updated_episodes": 0,
+                    "performance": organize_stats,
+                    "already_latest": True,
+                    **persistent_result,
+                },
+            )
+            return
+
         if should_maintain_nodes:
             node_assets_missing = _persistent_node_assets_missing(settings)
             full_node_rebuild = (
@@ -8685,11 +8779,17 @@ def _run_organize_job(job_id: str, settings: dict[str, Any]) -> None:
             update_job(
                 job_id,
                 status="running",
-                progress={"current": total_steps, "total": total_steps, "message": "结构化记忆节点未变化，跳过维护"},
+                progress={"current": total_steps, "total": total_steps, "message": "结构化记忆节点已是最新版本..."},
             )
             timings["persistent_node_maintenance_sec"] = 0.0
 
         episode_signature = compute_episode_signature(wiki)
+        persistent_signature = compute_persistent_signature(wiki)
+        node_maintenance_signature = compute_l2_persistent_node_maintenance_signature(
+            episode_signature=episode_signature,
+            persistent_signature=persistent_signature,
+            l1_signature=l1_signature,
+        )
         timings["total_sec"] = _elapsed_seconds(run_started)
         organize_stats["timings"] = timings
         organize_state["raw_index"] = raw_index
@@ -9067,7 +9167,7 @@ def conversations_current_import(payload: CurrentConversationImportRequest) -> d
         organize_job = create_job(
             "memory_organize",
             status="running",
-            progress={"current": 0, "total": 1, "message": "正在整理当前对话"},
+            progress={"current": 0, "total": 1, "message": "正在整理当前对话..."},
         )
         thread = threading.Thread(target=_run_organize_job, args=(organize_job["id"], dict(settings)), daemon=True)
         thread.start()
@@ -9080,7 +9180,7 @@ def conversations_current_import(payload: CurrentConversationImportRequest) -> d
         job["progress"] = {
             "current": imported,
             "total": imported,
-            "message": "当前对话已加入记忆，后台正在整理",
+            "message": "当前对话已加入记忆，后台正在整理...",
         }
         JOB_REGISTRY[job["id"]] = job
 
