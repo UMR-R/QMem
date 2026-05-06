@@ -25,6 +25,11 @@ from memory_transferor.managed_memory.models import (
     ProjectMemory,
     WorkflowMemory,
 )
+from memory_transferor.memory_policy import (
+    PROJECT_SEMANTIC_ANCHORS,
+    WORKFLOW_SEMANTIC_ANCHORS,
+    retrieve_semantic_episodes,
+)
 from memory_transferor.memory_models import RawConversation
 from memory_transferor.memory_store import L0RawLayer
 from memory_transferor.platform_memory import L1SignalLayer
@@ -772,6 +777,45 @@ class MemoryBuilder:
         ts = ep.time_range_start or ep.created_at
         return ts.isoformat() if ts else "9999", turn_index, ep.episode_id
 
+    def _unique_episode_candidates(
+        self,
+        *groups: list[EpisodicMemory],
+        max_items: int,
+    ) -> list[EpisodicMemory]:
+        seen: set[str] = set()
+        selected: list[EpisodicMemory] = []
+        for group in groups:
+            for episode in group:
+                episode_id = episode.episode_id
+                if not episode_id or episode_id in seen:
+                    continue
+                seen.add(episode_id)
+                selected.append(episode)
+                if len(selected) >= max_items:
+                    return selected
+        return selected
+
+    @staticmethod
+    def _episode_has_workflow_intent(ep: EpisodicMemory) -> bool:
+        text = " ".join(
+            [
+                ep.topic or "",
+                ep.summary or "",
+                " ".join(ep.topics_covered or []),
+                " ".join(ep.key_decisions or []),
+                " ".join(ep.open_issues or []),
+            ]
+        ).lower()
+        procedure_markers = {
+            "workflow", "sop", "process", "procedure", "pipeline", "playbook", "checklist", "template",
+            "流程", "工作流", "步骤", "清单", "模板", "规范", "标准流程", "固定流程",
+        }
+        reuse_markers = {
+            "reuse", "repeat", "recurring", "whenever", "every time", "standard", "habit",
+            "复用", "重复", "每次", "以后", "固定", "标准", "长期", "习惯",
+        }
+        return any(marker in text for marker in procedure_markers) and any(marker in text for marker in reuse_markers)
+
     def _filter_digest(
         self, episodes: list[EpisodicMemory], l1_text: str, filter_type: str
     ) -> str:
@@ -787,21 +831,48 @@ class MemoryBuilder:
             # amount of project-intent context as fallback, otherwise unrelated
             # advice episodes can leak their decisions into active projects.
             flagged = [ep for ep in episodes if ep.relates_to_projects]
+            semantic = retrieve_semantic_episodes(
+                episodes,
+                PROJECT_SEMANTIC_ANCHORS,
+                min_score=0.09,
+                max_items=24,
+            )
             if flagged:
                 backfill = max(0, min(6, 12 - len(flagged)))
                 unflagged = [
                     ep for ep in episodes
                     if not ep.relates_to_projects and self._episode_has_project_intent(ep)
                 ][:backfill]
-                relevant = sorted(flagged + unflagged, key=self._episode_digest_sort_key)[:40]
+                relevant = self._unique_episode_candidates(
+                    flagged,
+                    semantic[:12],
+                    unflagged,
+                    max_items=40,
+                )
             else:
-                relevant = sorted(
-                    [ep for ep in episodes if self._episode_has_project_intent(ep)],
-                    key=self._episode_digest_sort_key,
-                )[:15]
+                intent = [ep for ep in episodes if self._episode_has_project_intent(ep)]
+                relevant = self._unique_episode_candidates(intent, semantic, max_items=24)
+            relevant = sorted(relevant, key=self._episode_digest_sort_key)
             return self._build_episode_digest(relevant, l1_text, verbose=True)[:7000]
         elif filter_type == "workflows":
-            relevant = sorted([ep for ep in episodes if ep.relates_to_workflows] or episodes, key=self._episode_digest_sort_key)
+            flagged = [ep for ep in episodes if ep.relates_to_workflows]
+            semantic = retrieve_semantic_episodes(
+                episodes,
+                WORKFLOW_SEMANTIC_ANCHORS,
+                min_score=0.09,
+                max_items=24,
+            )
+            rule_candidates = [ep for ep in episodes if self._episode_has_workflow_intent(ep)]
+            if flagged:
+                relevant = self._unique_episode_candidates(
+                    flagged,
+                    semantic[:12],
+                    rule_candidates[:8],
+                    max_items=35,
+                )
+            else:
+                relevant = self._unique_episode_candidates(rule_candidates, semantic, max_items=24)
+            relevant = sorted(relevant, key=self._episode_digest_sort_key)
             return self._build_episode_digest(relevant[:40], l1_text, verbose=True)[:6000]
         else:
             relevant = sorted(episodes, key=self._episode_digest_sort_key)

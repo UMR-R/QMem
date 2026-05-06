@@ -604,10 +604,18 @@ function restoreSelectionScroll(listEl) {
   });
 }
 
-function setOrganizeStatus(active, text = "正在整理记忆...", hint = "准备开始") {
+function normalizeOrganizeStatusText(text) {
+  const value = String(text || "正在整理记忆...").trim() || "正在整理记忆...";
+  const stripped = value
+    .replace(/[：:]\s*\d+(?:\s*-\s*\d+)?\s*\/\s*\d+\s*$/, "...")
+    .replace(/\s+\d+\s*\/\s*\d+\s*$/, "...");
+  return stripped || "正在整理记忆...";
+}
+
+function setOrganizeStatus(active, text = "正在整理记忆...", hint = "准备开始...") {
   const card = document.getElementById("organizeStatusCard");
   card.classList.toggle("hidden", !active);
-  document.getElementById("organizeStatusText").textContent = text;
+  document.getElementById("organizeStatusText").textContent = normalizeOrganizeStatusText(text);
   document.getElementById("organizeStatusHint").textContent = hint;
 }
 
@@ -1275,7 +1283,7 @@ async function runOrganize() {
   }
   organizeBtn.disabled = true;
   organizeBtn.style.opacity = "0.65";
-  setOrganizeStatus(true, "正在整理记忆...", "准备开始");
+  setOrganizeStatus(true, "正在整理记忆...", "准备开始...");
 
   try {
     if (state.organizeJobState?.status === "running") {
@@ -1345,9 +1353,7 @@ async function applyOrganizeState() {
     setOrganizeStatus(
       true,
       jobState.message || "正在整理记忆...",
-      typeof jobState.current === "number" && typeof jobState.total === "number"
-        ? `${jobState.current} / ${jobState.total}`
-        : "处理中"
+      "处理中..."
     );
     if (organizeBtn) {
       organizeBtn.disabled = true;
@@ -1368,9 +1374,13 @@ async function applyOrganizeState() {
     const updatedEpisodes = jobState.result?.updated_episodes ?? 0;
     const projects = jobState.result?.projects ?? 0;
     const workflows = jobState.result?.workflows ?? 0;
-    const memorySummary = [`episodes ${built}`, `updated ${updatedEpisodes}`, `projects ${projects}`, `workflows ${workflows}`]
-      .join(" · ");
-    toast(`整理完成：${memorySummary}`);
+    if (jobState.result?.already_latest) {
+      toast("记忆已是最新版本");
+    } else {
+      const memorySummary = [`episodes ${built}`, `updated ${updatedEpisodes}`, `projects ${projects}`, `workflows ${workflows}`]
+        .join(" · ");
+      toast(`整理完成：${memorySummary}`);
+    }
     state.lastSyncAt = new Date().toISOString();
     state.memoryItemsByCategory = {};
     state.organizeJobState = { ...jobState, acknowledgedAt: new Date().toISOString() };

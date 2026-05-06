@@ -1,7 +1,7 @@
 # Forms
 
 ## Trigger
-需要处理与Internal-comms相关的任务时
+需要处理与写作改写相关的任务时
 
 ## Output Format
 结构化结果

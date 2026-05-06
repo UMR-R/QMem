@@ -1,6 +1,6 @@
 # memory_transferor
 
-`memory_transferor` is the canonical memory pipeline planned for Memory Assistant.
+`memory_transferor` is the canonical memory pipeline planned for QMem.
 
 It owns the product memory path:
 

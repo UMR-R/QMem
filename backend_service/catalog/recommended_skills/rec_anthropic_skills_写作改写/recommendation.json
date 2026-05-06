@@ -1,18 +1,16 @@
 {
-  "id": "rec:anthropic_skills:Internal-comms",
-  "icon": "I",
+  "id": "rec:anthropic_skills:写作改写",
+  "icon": "写",
   "tags": [
     "writing"
   ],
   "keywords": [
-    "internal-comms",
     "write",
     "internal",
     "communications",
     "use"
   ],
   "persona_signals": [
-    "internal-comms",
     "write",
     "internal",
     "communications",

@@ -1,14 +1,14 @@
-# Memory Assistant
+# QMem
 
 [English](README.md)
 
-Memory Assistant 是一个由 Chrome 插件、本地 FastAPI 后端和 Python 记忆整理流水线组成的项目，用来采集 AI 对话、整理结构化长期记忆，并把这些记忆迁移到其他平台。
+QMem 是一个由 Chrome 插件、本地 FastAPI 后端和 Python 记忆整理流水线组成的项目，用来采集 AI 对话、整理结构化长期记忆，并把这些记忆迁移到其他平台。
 
 当前仓库由三部分协同工作：
 
 - `popup/`、`content/`、`background/`：Chrome 插件界面、页面侧采集与后台同步逻辑。
 - `backend_service/`：插件调用的本地 HTTP 后端。
-- `llm_memory_transferor/`：负责构建和更新结构化记忆的 Python 记忆流水线。
+- `memory_transferor/`：负责构建和更新结构化记忆的 Python 记忆流水线。
 
 ## 当前支持的能力
 
@@ -40,7 +40,7 @@ http://127.0.0.1:8765
 
 `backend_service/requirements.txt` 是本地后端首次安装时建议使用的入口，
 其中已经包含 `backend_service.app` 间接依赖的
-`llm_memory_transferor` 运行时依赖。
+`memory_transferor` 运行时依赖。
 
 ### 2. 从这个仓库加载 Chrome 插件
 
@@ -50,7 +50,7 @@ http://127.0.0.1:8765
 4. 选择仓库根目录：
 
 ```text
-memory_assistant_git/
+QMem/
 ```
 
 不要只选 `popup/` 或 `background/`，因为插件清单位于仓库根目录的：
@@ -59,12 +59,12 @@ memory_assistant_git/
 manifest.json
 ```
 
-加载成功后，你应该能在扩展列表里看到 `Memory Assistant`。
+加载成功后，你应该能在扩展列表里看到 `QMem`。
 
 ### 3. 固定插件并打开 popup
 
 1. 点击 Chrome 工具栏中的扩展图标
-2. 将 `Memory Assistant` 固定到工具栏
+2. 将 `QMem` 固定到工具栏
 3. 点击插件图标打开 popup
 
 如果 popup 打不开或显示异常，先回到 `chrome://extensions/` 检查该扩展的报错。
@@ -219,7 +219,7 @@ manifest.json
 - `background/`：service worker 与增量记忆引擎
 - `backend_service/`：本地 FastAPI 后端与推荐 Skill 目录
 - `prompts/`：可直接编辑的运行时 prompt
-- `llm_memory_transferor/`：Python 记忆库、CLI、导出器、测试与评测脚本
+- `memory_transferor/`：Python 记忆流水线、存储模型、策略、导出器与运行时工具
 - `llm_mem4/`：系统生成的示例记忆存储目录
 
 ## 补充说明

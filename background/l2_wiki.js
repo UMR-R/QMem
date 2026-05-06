@@ -1,6 +1,6 @@
 // L2Wiki JS — Python-compatible layered memory storage
-// Implements the same directory schema as llm_memory_transferor/l2_wiki.py
-// so JS (Chrome extension) and Python (mwiki CLI) can share the same directory.
+// Implements the same directory schema as memory_transferor's L2 wiki storage
+// so JS (Chrome extension) and Python backend code can share the same directory.
 
 // ── dirHandle via IndexedDB ───────────────────────────────────────────────────
 

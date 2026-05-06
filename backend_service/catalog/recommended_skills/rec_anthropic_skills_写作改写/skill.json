@@ -1,0 +1,20 @@
+{
+  "id": "rec:anthropic_skills:写作改写",
+  "title": "写作改写",
+  "description": "触发：需要处理与写作改写相关的任务时 | 目标：To write internal communications, use this skill for: | 步骤：3P updates (Progress, Plans, Problems)；Company newsletters；FAQ responses | 产出：结构化结果",
+  "kind": "skill",
+  "trigger": "需要处理与写作改写相关的任务时",
+  "goal": "To write internal communications, use this skill for:",
+  "steps": [
+    "3P updates (Progress, Plans, Problems)",
+    "Company newsletters",
+    "FAQ responses"
+  ],
+  "output_format": "结构化结果",
+  "guardrails": [],
+  "source_types": [
+    "recommended_catalog"
+  ],
+  "confidence": "medium",
+  "selected": false
+}
