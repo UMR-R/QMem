@@ -63,6 +63,7 @@ RECOMMENDED_REMOTE_SOURCES = [
 MEMORY_TRANSFEROR_SRC = PROJECT_ROOT / "memory_transferor" / "src"
 JOB_LOCK = threading.Lock()
 L2_PERSISTENT_NODE_MAINTENANCE_VERSION = "l2_persistent_nodes_v7_daily_notes_semantic_retrieval"
+PERSISTENT_REBUILD_VERSION = "persistent_rebuild_v2_semantic_candidates"
 ORGANIZE_EPISODE_MAX_WORKERS = 4
 PERSISTENT_NODE_BATCH_SIZE = 8
 
@@ -74,6 +75,12 @@ from memory_transferor.managed_memory.models import EpisodeConnection, EpisodicM
 from memory_transferor.memory_models import RawConversation, RawMessage  # noqa: E402
 from memory_transferor.memory_export import BootstrapGenerator, PackageExporter, base_display_taxonomy, taxonomy_group_source_fields  # noqa: E402
 from memory_transferor.memory_policy import L3Schema  # noqa: E402
+from memory_transferor.memory_policy.semantic_retrieval import (  # noqa: E402
+    DAILY_NOTE_SEMANTIC_ANCHORS as _DAILY_NOTE_SEMANTIC_ANCHORS,
+    PROJECT_SEMANTIC_ANCHORS as _PROJECT_ONLY_SEMANTIC_ANCHORS,
+    best_semantic_similarity as _best_semantic_similarity,
+    semantic_similarity as _semantic_similarity,
+)
 from memory_transferor.memory_store import L0RawLayer  # noqa: E402
 from memory_transferor.platform_memory import L1SignalLayer  # noqa: E402
 from memory_transferor.prompt_loader import load_prompt  # noqa: E402
@@ -2157,6 +2164,7 @@ def load_organize_state(settings: dict[str, Any]) -> dict[str, Any]:
             "l1_signature": data.get("l1_signature", ""),
             "episode_signature": data.get("episode_signature", ""),
             "persistent_signature": data.get("persistent_signature", ""),
+            "persistent_rebuild_version": data.get("persistent_rebuild_version", ""),
             "node_maintenance_signature": data.get("node_maintenance_signature", ""),
             "last_persistent_rebuild_at": data.get("last_persistent_rebuild_at"),
             "last_node_maintained_at": data.get("last_node_maintained_at"),
@@ -2168,6 +2176,7 @@ def load_organize_state(settings: dict[str, Any]) -> dict[str, Any]:
         "l1_signature": "",
         "episode_signature": "",
         "persistent_signature": "",
+        "persistent_rebuild_version": "",
         "node_maintenance_signature": "",
         "last_persistent_rebuild_at": None,
         "last_node_maintained_at": None,
@@ -7385,68 +7394,6 @@ def _memory_support_terms(value: Any) -> set[str]:
     return {term for term in terms if _is_memory_support_term(term)}
 
 
-_DAILY_NOTE_SEMANTIC_ANCHORS = [
-    "reusable personal daily context, life preference, personal choice, recurring criterion, small fact useful later",
-    "用户的日常生活上下文、个人选择、长期偏好、反复出现的标准、以后可能有用的小事实",
-    "personal communication situation, relationship boundary, wording request, response format for a real-life interaction",
-    "真实生活或职场沟通场景、关系边界、回复方式、表达要求",
-    "learning habit, practice preference, personal study plan, low-pressure routine, entertainment choice",
-    "学习方式、练习偏好、个人计划、低压力作息、休闲娱乐选择",
-]
-
-_PROJECT_ONLY_SEMANTIC_ANCHORS = [
-    "active project architecture, implementation plan, evaluation benchmark, dataset, roadmap, product design",
-    "项目架构、工程实现、评测 benchmark、数据集、路线图、产品方案、系统设计",
-    "research proposal, experiment design, paper framework, model pipeline, technical decision",
-    "研究项目、实验设计、论文框架、模型 pipeline、技术决策",
-]
-
-
-def _semantic_vector(value: Any) -> dict[str, float]:
-    text = _canonical_memory_text(value)
-    if not text:
-        return {}
-    weights: dict[str, float] = {}
-
-    def add(term: str, weight: float) -> None:
-        term = term.strip()
-        if not term or term in _PERSISTENT_SUPPORT_STOPWORDS:
-            return
-        weights[term] = weights.get(term, 0.0) + weight
-
-    for token in re.findall(r"[a-z0-9][a-z0-9_]{1,}", text):
-        add(f"w:{token}", 1.0)
-    for chunk in re.findall(r"[\u4e00-\u9fff]{2,}", text):
-        if len(chunk) <= 8:
-            add(f"zh:{chunk}", 1.0)
-        for size, weight in ((2, 0.6), (3, 0.9), (4, 1.1)):
-            if len(chunk) < size:
-                continue
-            for index in range(0, len(chunk) - size + 1):
-                add(f"g{size}:{chunk[index:index + size]}", weight)
-    return weights
-
-
-def _semantic_similarity(left: Any, right: Any) -> float:
-    left_vec = _semantic_vector(left)
-    right_vec = _semantic_vector(right)
-    if not left_vec or not right_vec:
-        return 0.0
-    shared = set(left_vec) & set(right_vec)
-    if not shared:
-        return 0.0
-    numerator = sum(left_vec[key] * right_vec[key] for key in shared)
-    left_norm = sum(value * value for value in left_vec.values()) ** 0.5
-    right_norm = sum(value * value for value in right_vec.values()) ** 0.5
-    if not left_norm or not right_norm:
-        return 0.0
-    return numerator / (left_norm * right_norm)
-
-
-def _best_semantic_similarity(text: Any, anchors: list[str]) -> float:
-    return max((_semantic_similarity(text, anchor) for anchor in anchors), default=0.0)
-
-
 def _daily_note_existing_anchor_texts(settings: dict[str, Any]) -> list[str]:
     nodes = load_persistent_nodes(settings).get("nodes", {})
     anchors: list[str] = []
@@ -8535,6 +8482,7 @@ def _run_organize_job(job_id: str, settings: dict[str, Any]) -> None:
         previous_l1_signature = organize_state.get("l1_signature", "")
         previous_episode_signature = organize_state.get("episode_signature", "")
         previous_persistent_signature = organize_state.get("persistent_signature", "")
+        previous_persistent_rebuild_version = organize_state.get("persistent_rebuild_version", "")
         previous_node_signature = organize_state.get("node_maintenance_signature", "")
 
         total_steps = max(len(conversations), 1) + 5
@@ -8664,6 +8612,7 @@ def _run_organize_job(job_id: str, settings: dict[str, Any]) -> None:
             bool(changed_episodes)
             or l1_signature != previous_l1_signature
             or episode_signature != previous_episode_signature
+            or previous_persistent_rebuild_version != PERSISTENT_REBUILD_VERSION
             or _persistent_memory_assets_missing(settings)
         )
         if should_rebuild_persistent:
@@ -8748,6 +8697,7 @@ def _run_organize_job(job_id: str, settings: dict[str, Any]) -> None:
         organize_state["l1_signature"] = l1_signature
         organize_state["episode_signature"] = episode_signature
         organize_state["persistent_signature"] = persistent_signature
+        organize_state["persistent_rebuild_version"] = PERSISTENT_REBUILD_VERSION
         organize_state["node_maintenance_signature"] = node_maintenance_signature
         organize_state["last_run_stats"] = organize_stats
         if should_rebuild_persistent:

@@ -31,6 +31,16 @@
     - 避免“教育技术实证研究；学习视频剪辑”被挤在同一个 chip 里。
     - 让用户画像里的长期关注方向和主要任务类型一样，在同一个分组下面按单个小项勾选和管理。
 
+- 🏠 将轻量语义召回推广到 Projects / Workflows 候选筛选
+  - 改了什么：
+    - 新增 `memory_policy/semantic_retrieval.py`，把本地 token / 中文 n-gram 相似度封装成通用 episode 候选召回工具。
+    - Daily Notes 的语义相似度复用通用工具，避免同一套算法继续散落在 backend 里。
+    - Projects / Workflows 的 digest 构建改成“显式标记 + 轻量语义召回 + 原有规则保底”，再按时间顺序送入原 prompt。
+    - 给 persistent rebuild 增加版本号，保证升级后会用新候选筛选逻辑重建一次。
+  - 为了什么：
+    - 减少无关 episode 进入 Projects / Workflows prompt，降低 prompt 长度和误抽取风险。
+    - 保持语义召回只做候选筛选，不新增 LLM 调用，也不直接写 persistent memory。
+
 - 🏠 继续加速“正在提取对话记忆”
   - 改了什么：
     - 将整理阶段的前端 display 生成改成懒加载：整理记忆时先写入后端字段兜底展示，需要精修某类展示时再显式调用 display LLM 补全。
