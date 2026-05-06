@@ -619,6 +619,15 @@ function setOrganizeStatus(active, text = "正在整理记忆...", hint = "准�
   document.getElementById("organizeStatusHint").textContent = hint;
 }
 
+function organizeProgressHint(jobState) {
+  const current = Number(jobState?.current);
+  const total = Number(jobState?.total);
+  if (Number.isFinite(current) && Number.isFinite(total) && total > 0) {
+    return `${Math.max(0, Math.min(current, total))} / ${total}`;
+  }
+  return "处理中...";
+}
+
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -1353,7 +1362,7 @@ async function applyOrganizeState() {
     setOrganizeStatus(
       true,
       jobState.message || "正在整理记忆...",
-      "处理中..."
+      organizeProgressHint(jobState)
     );
     if (organizeBtn) {
       organizeBtn.disabled = true;

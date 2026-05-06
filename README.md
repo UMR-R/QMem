@@ -1,225 +1,167 @@
-# QMem
+<p align="center">
+  <img src="docs/images/slogan.png" alt="QMem slogan" width="460">
+</p>
 
-[中文说明](README_zh.md)
+<p align="center">
+  <strong>Welcome contributors:</strong> 徐西南、王浩然、胡心亭
+</p>
 
-QMem is a Chrome extension plus a local FastAPI backend for capturing AI conversations, organizing them into structured long-term memory, and moving that memory between platforms.
+<p align="center">
+  <a href="README_en.md">English</a>
+</p>
 
-The current repository has three cooperating parts:
+QMem 是一个面向 AI 对话的浏览器扩展程序。它可以把你在 ChatGPT、Gemini、DeepSeek、豆包等平台上的对话保存到本地，整理成可查看、可勾选、可删除、可导出、可注入到新会话里的长期记忆。
 
-- `popup/`, `content/`, `background/`: the Chrome extension UI, page integration, and background sync logic.
-- `backend_service/`: the local HTTP service used by the extension.
-- `memory_transferor/`: the Python memory pipeline that builds and updates structured memory.
+## 界面预览
 
-## What It Can Do
+<table>
+  <tr>
+    <td width="33%"><img src="docs/images/qmem-home.png" alt="QMem 主页面"></td>
+    <td width="33%"><img src="docs/images/qmem-settings.png" alt="QMem 设置页"></td>
+    <td width="33%"><img src="docs/images/qmem-organize.png" alt="QMem 迁移页"></td>
+  </tr>
+  <tr>
+    <td align="center">主页面</td>
+    <td align="center">设置页</td>
+    <td align="center">迁移页</td>
+  </tr>
+</table>
 
-- Capture conversations from supported AI sites such as ChatGPT, Gemini, DeepSeek, and Doubao.
-- Import the current conversation into the local memory store.
-- Ask the current platform to report its saved memory, custom instructions, agent config, and available skills, then store that snapshot locally.
-- Rebuild structured memory from raw conversations.
-- Maintain incremental memory updates when `Sync Memory` is enabled.
-- Export selected memory sections as a package.
-- Inject exported memory or selected skills into the current session.
-- Manage both personal skills and recommended skills from the backend catalog.
+## Quickstart
 
-## Quick Start
+### 1. 加载扩展
 
-### 1. Start the local backend
+1. 下载本仓库源码，或下载 ZIP 后解压。
+2. 打开浏览器扩展管理页。
+   - Chrome / Arc / Brave：`chrome://extensions/`
+   - Edge：`edge://extensions/`
+3. 打开“开发者模式”。
+4. 点击“加载已解压的扩展程序”。
+5. 选择仓库根目录 `QMem/`。
 
-From the repository root:
+加载成功后，浏览器工具栏里会出现 QMem 扩展图标。
+
+### 2. 启动本地后端
+
+首次使用时，在仓库根目录安装依赖：
 
 ```bash
 pip install -r backend_service/requirements.txt
+```
+
+使用时启动本地后端：
+
+```bash
 uvicorn backend_service.app:app --host 127.0.0.1 --port 8765 --reload
 ```
 
-Recommended backend URL:
+### 3. 配置设置页
 
-```text
-http://127.0.0.1:8765
-```
+打开扩展的“设置”页，填写：
 
-`backend_service/requirements.txt` is the intended first-run install entrypoint
-for the local backend and includes the runtime dependencies needed by the
-in-repo `memory_transferor` modules imported by `backend_service.app`.
+- `本地后端地址`：推荐 `http://127.0.0.1:8765`
+- `API Key`：用于整理记忆的模型 API Key
+- `本地目录`：本地记忆文件夹，建议选择一个可以长期保留的位置
 
-### 2. Load the Chrome extension from this repository
+然后点击“保存”和“测试连接”。
 
-1. Open Chrome and go to `chrome://extensions/`.
-2. Turn on `Developer mode` in the top-right corner.
-3. Click `Load unpacked`.
-4. Select the repository root folder:
-
-```text
-QMem/
-```
-
-Do not select only `popup/` or `background/`. Chrome needs the root because the
-extension manifest lives at:
-
-```text
-manifest.json
-```
-
-After loading, you should see the QMem extension card in the
-extensions page.
-
-### 3. Pin the extension and open the popup
-
-1. Click the Chrome extensions icon in the toolbar.
-2. Pin `QMem` so it stays visible.
-3. Click the extension icon to open the popup.
-
-If the popup does not open correctly, go back to `chrome://extensions/`,
-open the extension details page, and inspect errors first.
-
-### 4. Configure the popup
-
-In `Settings`, fill in:
-
-- `Backend URL`: usually `http://127.0.0.1:8765`
-- `API key`: your model provider key
-- `Local storage directory`: where the backend should store raw chats and memory
-
-The current backend defaults are:
+当前后端默认使用 OpenAI-compatible 接口：
 
 - `api_provider = openai_compat`
 - `api_base_url = https://api.deepseek.com/v1`
 - `api_model = deepseek-chat`
 
-By default, organize and incremental updates use the backend LLM configuration
-above. Platform memory collection is handled through the current AI page.
+### 4. 同步、整理和迁移
 
-### 5. Add data and build memory
+1. 在主页面点击“同步对话”。
+2. 按需在设置页打开“同步记忆”。
+3. 继续在支持的平台聊天，或在迁移页点击“加入当前对话”“加入平台记忆”。
+4. 进入“迁移”页，点击“整理记忆”。
+5. 勾选需要的记忆，点击“导出”或“注入”。
 
-There are two main ways to accumulate conversation data:
+## 页面功能
 
-- `Import History`: use the popup `Settings` page to import local `json`, `jsonl`, `md`, or `txt` chat exports
-- `Sync Conversation`: turn on sync in the popup, keep chatting on a supported AI site, and let the extension capture new rounds in realtime
+### 主页面
 
-After raw conversations have been collected, open `Migrate` and click
-`Organize Memory` to rebuild:
+- `同步对话`：持续保存当前平台的新对话到本地 raw 层。
+- `迁移`：进入记忆整理、勾选、导出和注入页面。
+- `设置`：配置本地后端、API Key、本地目录和高级选项。
+- `Skill`：管理“我的 Skill”和推荐 Skill。
 
-- episodes
-- profile
-- preferences
-- projects
-- workflows
-- daily notes / persistent nodes
+### 设置页
 
-### 6. Export or inject memory
+- `本地后端地址`：本地 FastAPI 后端地址。
+- `API Key`：模型服务密钥。
+- `本地目录`：raw 对话和结构化记忆的保存目录。
+- `导入对话`：导入 `json`、`jsonl`、`md`、`txt` 历史对话文件。
+- `同步记忆`：同步对话后自动增量维护记忆。
+- `详细注入`：注入时额外带上相关 raw turns。
+- `清理所有记忆` / `清理缓存`：管理本地数据。
 
-After memory is organized:
+### 迁移页
 
-1. Open `Migrate`
-2. Select the memory sections you want
-3. Click `Export` to create a package, or `Inject` to inject into the current AI session
+- `加入当前对话`：把当前标签页的对话保存到本地 raw 记忆。
+- `加入平台记忆`：保存当前 AI 平台汇报的 saved memory、custom instructions、agent config 和 platform skills。
+- `整理记忆`：从 raw 对话和平台记忆中重建结构化长期记忆。
+- `导出`：导出勾选的记忆包。
+- `注入`：把勾选的记忆注入当前 AI 会话。
 
-### 7. Use the Skill page
+### Skill 页面
 
-The `Skill` page lets you:
+- `我的 Skill`：查看已保存 Skill。
+- `为你推荐`：查看后端推荐 Skill。
+- `加入我的 Skill`：保存推荐 Skill。
+- `导出` / `注入当前会话`：迁移或使用 Skill。
 
-- save recommended skills into your personal set
-- export skills
-- inject skills into the current session
-- manage backend-provided skill assets
+## 本地记忆结构
 
-## Current Product Flow
+默认记忆目录：
 
-1. The extension captures raw conversations or imports them manually.
-2. Raw chats are stored under the local memory root.
-3. `Organize Memory` calls `POST /api/memory/organize`.
-4. The backend uses `MemoryBuilder` to rebuild:
-   - episodes
-   - profile
-   - preferences
-   - projects
-   - workflows
-5. The backend stores the Daily Notes category in `daily_notes/`.
-6. If realtime memory sync is enabled, new rounds can also trigger incremental updates through `MemoryUpdater` and the background memory engine.
+```text
+backend_service/.state/wiki/
+```
 
-## Popup Views
+建议在设置页选择一个你能长期保留的本地文件夹。这个文件夹就是你的本地记忆库。
 
-### Home
+QMem 使用分层记忆：
 
-- `Sync Conversation`: turns background capture on or off.
-- `Migrate`: opens memory selection, organize, export, and inject actions.
-- `Settings`: configures backend URL, API key, storage path, and realtime memory sync.
-- `Skill`: manages saved skills, recommended skills, export, and injection.
+- `raw/`：原始对话，保留网页采集或文件导入的聊天内容。
+- `platform_memory/`：平台侧已经保存或生成的记忆信号。
+- `episodes/`：从 raw 对话中提取的对话级记忆单元。
+- `profile/`：用户画像，例如身份、知识背景、长期关注方向。
+- `preferences/`：偏好设置，例如语言偏好、表达风格、格式约束、主要任务类型。
+- `projects/`：项目记忆，例如长期项目、当前阶段、目标、上下文和状态。
+- `workflows/`：工作流 / SOP，例如用户反复使用的方法、流程和协作习惯。
+- `daily_notes/`：日常记忆，例如生活偏好、选择习惯、非项目类上下文。
+- `skills/`：用户保存或推荐的 Skill 资产。
+- `metadata/`：索引、整理状态、展示文案和删除 / 忽略记录。
 
-### Migrate
+删除不想保留的条目后，QMem 会记录 ignore / lock，避免下次整理时把同一条记忆又自动生成回来。
 
-- `Organize Memory`: rebuilds structured memory from local raw conversations.
-- `Add Current Conversation`: imports the active chat page into the backend.
-- `Add Platform Memory`: captures the platform's saved memory/custom instructions/agent config/skills and imports that snapshot.
-- `Export`: exports the selected memory package.
-- `Inject`: injects the selected package into the current AI session.
+## 注入和导出
 
-### Settings
+普通注入：
 
-- Backend URL
-- API key
-- Local storage directory
-- Realtime memory update toggle
-- History import for `json/jsonl/md/txt`
-- Temporary cache cleanup
+- 注入结构化记忆节点。
+- 注入相关 episode summary。
+- 不默认注入大段 raw 对话。
 
-## Local Backend
+详细注入：
 
-The extension talks to a local FastAPI backend in `backend_service/`. For the
-main user flow, the important thing is simply that the backend is running and
-the popup can reach it at the configured URL.
+- 注入结构化记忆节点。
+- 注入 episode summary。
+- 额外注入相关 raw turns，用于需要完整上下文的场景。
 
-## Active Prompt Files
+导出：
 
-Prompt files now live in `prompts/` and are used directly by the extension, backend, and Python pipeline.
+- 生成可迁移的记忆包。
+- 可用于备份、复制到其他设备，或迁移到其他 AI 平台。
 
-| File | Used by | Purpose |
-|---|---|---|
-| `prompts/cold_start.txt` | popup injection flow | bootstrap prompt for memory injection |
-| `prompts/platform/platform_memory_collect.txt` | popup platform-memory flow | collect saved memory and agent configuration from the current platform |
-| `prompts/episodes/episode_system.txt` | `MemoryBuilder` | episode extraction during organize |
-| `prompts/episodes/delta_system.txt` | `MemoryUpdater` and background engine | incremental memory update |
-| `prompts/nodes/profile_system.txt` | `MemoryBuilder` | profile rebuild |
-| `prompts/nodes/preferences_system.txt` | `MemoryBuilder` | preference rebuild |
-| `prompts/nodes/projects_system.txt` | `MemoryBuilder` | project rebuild |
-| `prompts/nodes/workflows_system.txt` | `MemoryBuilder` | workflow rebuild |
-| `prompts/nodes/daily_notes_system.txt` | backend and background engine | daily-note persistent-node distillation |
-| `prompts/nodes/skills_system.txt` | memory policy / future skill flow | saved and recommended skill memory |
-| `prompts/display/display_taxonomy_proposal.txt` | memory display policy | optional display taxonomy proposals |
-| `prompts/schema.txt` | backend/background persistent-node flow | schema context |
+## 仓库结构
 
-## Memory Store Layout
-
-When `storage_path` is configured, the backend writes there. Otherwise it uses `backend_service/.state/wiki/`.
-
-The active memory root currently contains directories such as:
-
-- `raw/`: imported raw conversations
-- `platform_memory/`: snapshots of saved memory or custom instructions from external platforms
-- `episodes/`: conversation-level episodic memories
-- `profile/`: profile memory
-- `preferences/`: preference memory
-- `projects/`: project memory
-- `workflows/`: workflow memory
-- `skills/`: saved skills
-- `daily_notes/`: Daily Notes, including reusable daily-life context, personal choices, tastes, constraints, and other non-project context
-- `metadata/`: indexes, organize state, display texts
-
-The checked-in sample memory root in this repo is `llm_mem4/`.
-
-## Repository Structure
-
-- `popup/`: popup HTML/CSS/JS
-- `content/`: page-side collection and injection logic
-- `background/`: service worker and incremental memory engine
-- `backend_service/`: local FastAPI backend and recommended-skill catalog
-- `prompts/`: editable runtime prompts
-- `memory_transferor/`: Python memory pipeline, storage models, policy, exporters, and runtime helpers
-- `llm_mem4/`: example memory store generated by the system
-
-## Notes
-
-- Supported host matching in the popup currently includes `chatgpt.com`, `chat.openai.com`, `gemini.google.com`, `chat.deepseek.com`, and `www.doubao.com`.
-- The popup shows a selectable command modal for starting the backend instead of a native alert.
-- The project contains several Windows-oriented UTF-8 fixes in the popup, backend, and wiki I/O paths.
-- If a popup action fails, inspect the popup console from `chrome://extensions/`.
+- `popup/`：扩展弹窗页面。
+- `content/`：页面侧采集与注入逻辑。
+- `background/`：扩展后台逻辑和增量同步。
+- `backend_service/`：本地 FastAPI 后端与推荐 Skill 目录。
+- `prompts/`：运行时 prompt。
+- `memory_transferor/`：Python 记忆流水线、存储模型、策略和导出工具。
