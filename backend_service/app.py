@@ -62,7 +62,7 @@ RECOMMENDED_REMOTE_SOURCES = [
 ]
 MEMORY_TRANSFEROR_SRC = PROJECT_ROOT / "memory_transferor" / "src"
 JOB_LOCK = threading.Lock()
-L2_PERSISTENT_NODE_MAINTENANCE_VERSION = "l2_persistent_nodes_v6_daily_notes_batch_display"
+L2_PERSISTENT_NODE_MAINTENANCE_VERSION = "l2_persistent_nodes_v7_daily_notes_semantic_retrieval"
 ORGANIZE_EPISODE_MAX_WORKERS = 4
 PERSISTENT_NODE_BATCH_SIZE = 8
 
@@ -1704,6 +1704,22 @@ def _payload_field_value(
             projects or [],
         )
     return value
+
+
+def _profile_long_term_focus_values(payload: dict[str, Any] | Any) -> list[str]:
+    value = payload.get("long_term_research_or_work_focus") if isinstance(payload, dict) else payload
+    raw_values = value if isinstance(value, list) else [value]
+    values: list[str] = []
+    seen: set[str] = set()
+    for raw_value in raw_values or []:
+        for part in re.split(r"[；;\n]+", str(raw_value or "")):
+            text = " ".join(part.split()).strip("，,。；;：: ")
+            normalized = text.lower()
+            if not text or normalized in seen:
+                continue
+            seen.add(normalized)
+            values.append(text)
+    return values
 
 
 def _taxonomy_group_description(
@@ -4533,6 +4549,19 @@ def _display_source_payload(
             locale="zh",
         )
         group_id = str(group.get("group_id") or "").strip()
+        if group_id == "long_term_focus":
+            title = _taxonomy_title(group, "zh")
+            for focus_label in _profile_long_term_focus_values(profile_payload):
+                if _is_noise_memory_text(focus_label):
+                    continue
+                profile_groups.append({
+                    "id": f"profile:long_term_research_or_work_focus:{_safe_slug(focus_label, 'item')}",
+                    "group_id": group_id,
+                    "label": title,
+                    "description": focus_label,
+                    "source_fields": ["long_term_research_or_work_focus"],
+                })
+            continue
         if group_id and description:
             profile_groups.append({
                 "id": f"profile:group:{group_id}",
@@ -5147,6 +5176,31 @@ def memory_items_for_category(
                 if not group_id:
                     continue
                 title = _taxonomy_title(group, locale)
+                if group_id == "long_term_focus":
+                    for focus_label in _profile_long_term_focus_values(profile_payload):
+                        if _is_noise_memory_text(focus_label):
+                            continue
+                        item_id = f"profile:long_term_research_or_work_focus:{_safe_slug(focus_label, 'item')}"
+                        display_title = _frontend_display_text(title, max_length=64)
+                        display_description = _frontend_display_text(focus_label, max_length=140)
+                        items.append(
+                            _frontend_memory_item(
+                                {
+                                    "id": item_id,
+                                    "title": display_title,
+                                    "description": display_description,
+                                    "display_title": display_title,
+                                    "display_description": display_description,
+                                    "source_fields": ["long_term_research_or_work_focus"],
+                                    "status": group.get("status", "active"),
+                                    "selected": False,
+                                },
+                                category="profile",
+                                fallback_title=title,
+                                fallback_description=focus_label,
+                            )
+                        )
+                    continue
                 item_id = f"profile:group:{group_id}"
                 display_title, display_description = _display_cache_texts(
                     display_cache,
@@ -5693,6 +5747,12 @@ def _remove_slugged_list_value(values: Any, slug: str) -> tuple[Any, bool]:
     return kept, len(kept) != len(values)
 
 
+def _remove_slugged_profile_focus_value(values: Any, slug: str) -> tuple[Any, bool]:
+    split_values = _profile_long_term_focus_values(values)
+    kept = [item for item in split_values if _safe_slug(str(item), "item") != slug]
+    return kept, len(kept) != len(split_values)
+
+
 def _delete_model_memory_item(
     model: ProfileMemory | PreferenceMemory,
     category: str,
@@ -5722,7 +5782,10 @@ def _delete_model_memory_item(
             continue
         current = getattr(model, field)
         if value_slug:
-            next_value, field_changed = _remove_slugged_list_value(current, value_slug)
+            if category == "profile" and field == "long_term_research_or_work_focus":
+                next_value, field_changed = _remove_slugged_profile_focus_value(current, value_slug)
+            else:
+                next_value, field_changed = _remove_slugged_list_value(current, value_slug)
         else:
             next_value = _empty_memory_field_value(current)
             field_changed = next_value != current
@@ -5882,11 +5945,12 @@ def _filter_profile_fields(data: dict[str, Any], selected_fields: set[str], sele
             continue
         value = data[field]
         if isinstance(value, list) and field in value_map:
-            kept = [
-                item
-                for item in value
-                if _safe_slug(str(item), "item") in value_map[field]
-            ]
+            source_values = (
+                _profile_long_term_focus_values(value)
+                if field == "long_term_research_or_work_focus"
+                else value
+            )
+            kept = [item for item in source_values if _safe_slug(str(item), "item") in value_map[field]]
             if kept:
                 filtered[field] = kept
         else:
@@ -7321,6 +7385,98 @@ def _memory_support_terms(value: Any) -> set[str]:
     return {term for term in terms if _is_memory_support_term(term)}
 
 
+_DAILY_NOTE_SEMANTIC_ANCHORS = [
+    "reusable personal daily context, life preference, personal choice, recurring criterion, small fact useful later",
+    "用户的日常生活上下文、个人选择、长期偏好、反复出现的标准、以后可能有用的小事实",
+    "personal communication situation, relationship boundary, wording request, response format for a real-life interaction",
+    "真实生活或职场沟通场景、关系边界、回复方式、表达要求",
+    "learning habit, practice preference, personal study plan, low-pressure routine, entertainment choice",
+    "学习方式、练习偏好、个人计划、低压力作息、休闲娱乐选择",
+]
+
+_PROJECT_ONLY_SEMANTIC_ANCHORS = [
+    "active project architecture, implementation plan, evaluation benchmark, dataset, roadmap, product design",
+    "项目架构、工程实现、评测 benchmark、数据集、路线图、产品方案、系统设计",
+    "research proposal, experiment design, paper framework, model pipeline, technical decision",
+    "研究项目、实验设计、论文框架、模型 pipeline、技术决策",
+]
+
+
+def _semantic_vector(value: Any) -> dict[str, float]:
+    text = _canonical_memory_text(value)
+    if not text:
+        return {}
+    weights: dict[str, float] = {}
+
+    def add(term: str, weight: float) -> None:
+        term = term.strip()
+        if not term or term in _PERSISTENT_SUPPORT_STOPWORDS:
+            return
+        weights[term] = weights.get(term, 0.0) + weight
+
+    for token in re.findall(r"[a-z0-9][a-z0-9_]{1,}", text):
+        add(f"w:{token}", 1.0)
+    for chunk in re.findall(r"[\u4e00-\u9fff]{2,}", text):
+        if len(chunk) <= 8:
+            add(f"zh:{chunk}", 1.0)
+        for size, weight in ((2, 0.6), (3, 0.9), (4, 1.1)):
+            if len(chunk) < size:
+                continue
+            for index in range(0, len(chunk) - size + 1):
+                add(f"g{size}:{chunk[index:index + size]}", weight)
+    return weights
+
+
+def _semantic_similarity(left: Any, right: Any) -> float:
+    left_vec = _semantic_vector(left)
+    right_vec = _semantic_vector(right)
+    if not left_vec or not right_vec:
+        return 0.0
+    shared = set(left_vec) & set(right_vec)
+    if not shared:
+        return 0.0
+    numerator = sum(left_vec[key] * right_vec[key] for key in shared)
+    left_norm = sum(value * value for value in left_vec.values()) ** 0.5
+    right_norm = sum(value * value for value in right_vec.values()) ** 0.5
+    if not left_norm or not right_norm:
+        return 0.0
+    return numerator / (left_norm * right_norm)
+
+
+def _best_semantic_similarity(text: Any, anchors: list[str]) -> float:
+    return max((_semantic_similarity(text, anchor) for anchor in anchors), default=0.0)
+
+
+def _daily_note_existing_anchor_texts(settings: dict[str, Any]) -> list[str]:
+    nodes = load_persistent_nodes(settings).get("nodes", {})
+    anchors: list[str] = []
+    if isinstance(nodes, dict):
+        for node in nodes.values():
+            if not isinstance(node, dict):
+                continue
+            text = " ".join(
+                str(value or "")
+                for value in [
+                    node.get("key"),
+                    node.get("description"),
+                    json.dumps(node.get("display"), ensure_ascii=False) if isinstance(node.get("display"), dict) else "",
+                ]
+            ).strip()
+            if text:
+                anchors.append(text)
+    return anchors
+
+
+def _daily_note_semantic_score(settings: dict[str, Any], episode: Any) -> float:
+    text = _episode_support_text(episode)
+    anchors = [*_DAILY_NOTE_SEMANTIC_ANCHORS, *_daily_note_existing_anchor_texts(settings)]
+    return _best_semantic_similarity(text, anchors)
+
+
+def _project_only_semantic_score(episode: Any) -> float:
+    return _best_semantic_similarity(_episode_support_text(episode), _PROJECT_ONLY_SEMANTIC_ANCHORS)
+
+
 def _persistent_node_support_text(node: dict[str, Any]) -> str:
     display = node.get("display") if isinstance(node.get("display"), dict) else {}
     display_text = ""
@@ -7361,19 +7517,20 @@ def _episode_support_text(episode: Any) -> str:
 
 
 def _episode_supports_persistent_node(node: dict[str, Any], episode: Any) -> bool:
-    """Require direct semantic overlap before linking an episode to a daily note."""
+    """Require direct semantic support before linking an episode to a daily note."""
     if episode is None:
         return False
     node_terms = _memory_support_terms(_persistent_node_support_text(node))
     episode_terms = _memory_support_terms(_episode_support_text(episode))
-    if not node_terms or not episode_terms:
-        return False
+    if node_terms and episode_terms:
+        overlap = node_terms & episode_terms
+        if len(overlap) >= 2:
+            return True
 
-    overlap = node_terms & episode_terms
-    if len(overlap) >= 2:
-        return True
+        if any(len(term) >= 4 for term in overlap):
+            return True
 
-    return any(len(term) >= 4 for term in overlap)
+    return _semantic_similarity(_persistent_node_support_text(node), _episode_support_text(episode)) >= 0.12
 
 
 def _persistent_node_is_project_like(node: dict[str, Any]) -> bool:
@@ -7871,7 +8028,7 @@ def _ensure_persistent_result_support_refs(result: dict[str, Any], fallback_epis
                 item["support_episode_ids"] = [fallback]
 
 
-def _episode_has_daily_note_candidate(episode: Any) -> bool:
+def _episode_has_daily_note_candidate(settings: dict[str, Any], episode: Any) -> bool:
     if _is_bootstrap_memory_import_episode(episode):
         return False
     text = _canonical_memory_text(
@@ -7887,26 +8044,30 @@ def _episode_has_daily_note_candidate(episode: Any) -> bool:
     )
     if not text:
         return False
-    if getattr(episode, "relates_to_projects", None) and not getattr(episode, "relates_to_preferences", False):
-        daily_project_markers = {
-            "生活", "日常", "饮食", "晚餐", "午餐", "早餐", "做饭", "电影", "穿搭", "衣服", "鞋", "包",
-            "周末", "休息", "作息", "学习方式", "练习方式",
-            "meal", "dinner", "lunch", "breakfast", "movie", "outfit", "weekend", "sleep", "routine",
-        }
-        if not any(marker in text for marker in daily_project_markers):
-            return False
-    user_side_markers = {
-        "喜欢", "不喜欢", "偏好", "倾向", "想", "希望", "需要", "正在考虑", "打算", "选择", "比较",
-        "不要", "最好", "适合", "周末", "日常", "生活", "做饭", "晚餐", "午餐", "早餐", "电影", "穿搭",
-        "作息", "休息", "学习", "练习",
-        "prefer", "like", "dislike", "want", "need", "looking for", "consider", "choose", "weekend", "daily",
-    }
-    assistant_only_markers = {
-        "assistant suggested", "assistant recommended", "助理建议", "助手建议", "助手推荐", "assistant offered",
-    }
-    if any(marker in text for marker in user_side_markers):
+    daily_score = _daily_note_semantic_score(settings, episode)
+    project_score = _project_only_semantic_score(episode)
+    project_only = bool(getattr(episode, "relates_to_projects", None)) and not getattr(
+        episode,
+        "relates_to_preferences",
+        False,
+    )
+    if project_only and project_score >= max(0.18, daily_score + 0.04):
+        return False
+    if daily_score >= 0.08:
         return True
-    return getattr(episode, "relates_to_preferences", False) and not any(marker in text for marker in assistant_only_markers)
+    if project_only:
+        return False
+    if getattr(episode, "relates_to_preferences", False):
+        assistant_only_markers = {
+            "assistant suggested", "assistant recommended", "助理建议", "助手建议", "助手推荐", "assistant offered",
+        }
+        if any(marker in text for marker in assistant_only_markers):
+            return False
+        return True
+    # Do not use keyword matching as a hard gate. Non-project episodes are sent
+    # to the daily_notes maintenance prompt, which decides whether to create,
+    # update, or ignore a node based on evidence boundaries.
+    return True
 
 
 def update_persistent_nodes_for_episodes(
@@ -7914,7 +8075,7 @@ def update_persistent_nodes_for_episodes(
     llm: LLMClient,
     episodes: list[Any],
 ) -> bool:
-    episodes = [episode for episode in episodes if _episode_has_daily_note_candidate(episode)]
+    episodes = [episode for episode in episodes if _episode_has_daily_note_candidate(settings, episode)]
     if not episodes:
         return False
 
@@ -7972,6 +8133,8 @@ def update_persistent_nodes_for_episodes(
                 "key_decisions": (getattr(episode, "key_decisions", []) or [])[:3],
                 "open_issues": (getattr(episode, "open_issues", []) or [])[:2],
                 "relates_to_projects": getattr(episode, "relates_to_projects", []) or [],
+                "daily_note_semantic_score": round(_daily_note_semantic_score(settings, episode), 3),
+                "project_only_semantic_score": round(_project_only_semantic_score(episode), 3),
                 "connected_episode_summaries": connected_episode_summaries,
             }
         )
@@ -8620,6 +8783,9 @@ def update_from_new_round(settings: dict[str, Any], payload: ConversationAppendR
     wiki = get_wiki(settings)
     updater = MemoryUpdater(llm=llm, wiki=wiki, schema=L3Schema())
     conversation_text = f"[USER]: {payload.user_text}\n\n[ASSISTANT]: {payload.assistant_text}"
+    conversation_time = _parse_iso_datetime(payload.timestamp) or datetime.now(timezone.utc)
+    if conversation_time.tzinfo is None:
+        conversation_time = conversation_time.replace(tzinfo=timezone.utc)
     conv_path = get_raw_root(settings, create=True) / _safe_slug(payload.platform or "unknown") / f"{_safe_slug(payload.chat_id, fallback='conversation')}.json"
     conv_data = read_json_file(conv_path) if conv_path.exists() else None
     latest_turn_refs: list[str] = []
@@ -8629,14 +8795,64 @@ def update_from_new_round(settings: dict[str, Any], payload: ConversationAppendR
             last_turn = turns[-1]
             if isinstance(last_turn, dict) and str(last_turn.get("turn_id") or "").strip():
                 latest_turn_refs = [str(last_turn.get("turn_id")).strip()]
-    return updater.update(
+    result = updater.update(
         conversation_text,
         platform=payload.platform,
         conv_id=payload.chat_id,
         turn_refs=latest_turn_refs,
         on_progress=None,
-        conversation_end_time=datetime.now(timezone.utc),
+        conversation_end_time=conversation_time,
     )
+    episode_id = str(result.get("episode_created") or "").strip() if isinstance(result, dict) else ""
+    if episode_id:
+        episode = wiki.load_episode(episode_id)
+        if episode and update_persistent_nodes_for_episodes(settings, llm, [episode]):
+            connect_episodes_by_persistent_nodes(settings, wiki)
+            result["persistent_nodes_updated"] = True
+            result["persistent_nodes"] = len(load_persistent_nodes(settings).get("nodes", {}))
+    if isinstance(result, dict) and result.get("status") == "updated":
+        profile = wiki.load_profile()
+        preferences = wiki.load_preferences()
+        save_display_texts(
+            settings,
+            _merge_display_cache(
+                load_display_texts(settings),
+                build_display_fallback_texts(
+                    profile,
+                    preferences,
+                    projects=_valid_projects(wiki),
+                    workflows=_valid_workflows(wiki),
+                    skills=derive_my_skills(settings),
+                ),
+            ),
+        )
+    return result
+
+
+def _raw_turn_pair_exists(conversation_id: str, messages: list[dict[str, Any]], user_text: str, assistant_text: str) -> bool:
+    id_to_message = {str(msg.get("id") or ""): msg for msg in messages if isinstance(msg, dict)}
+    for turn in _turn_payloads_from_message_dicts(conversation_id, messages):
+        turn_messages = [
+            id_to_message[msg_id]
+            for msg_id in (turn.get("message_ids") or [])
+            if msg_id in id_to_message
+        ]
+        turn_user = next(
+            (msg for msg in turn_messages if str(msg.get("role") or "").strip().lower() == "user"),
+            None,
+        )
+        turn_assistant = next(
+            (msg for msg in reversed(turn_messages) if str(msg.get("role") or "").strip().lower() == "assistant"),
+            None,
+        )
+        if (
+            turn_user
+            and turn_assistant
+            and str(turn_user.get("content") or "") == user_text
+            and str(turn_assistant.get("content") or "") == assistant_text
+        ):
+            return True
+    return False
 
 
 def append_raw_round(settings: dict[str, Any], payload: ConversationAppendRequest) -> Path:
@@ -8657,6 +8873,12 @@ def append_raw_round(settings: dict[str, Any], payload: ConversationAppendReques
     }
 
     messages = data.setdefault("messages", [])
+    if _raw_turn_pair_exists(payload.chat_id, messages, payload.user_text, payload.assistant_text):
+        data["turns"] = _turn_payloads_from_message_dicts(payload.chat_id, messages)
+        data["update_time"] = payload.timestamp
+        file_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        return file_path
+
     new_messages = [
         {
             "id": f"{payload.chat_id}_u_{len(messages)}",
@@ -8676,18 +8898,7 @@ def append_raw_round(settings: dict[str, Any], payload: ConversationAppendReques
         },
     ]
 
-    for new_message in new_messages:
-        duplicate = next(
-            (
-                existing
-                for existing in reversed(messages)
-                if existing.get("role") == new_message["role"]
-                and existing.get("content") == new_message["content"]
-            ),
-            None,
-        )
-        if duplicate is None:
-            messages.append(new_message)
+    messages.extend(new_messages)
 
     data["turns"] = _turn_payloads_from_message_dicts(payload.chat_id, messages)
     data["update_time"] = payload.timestamp

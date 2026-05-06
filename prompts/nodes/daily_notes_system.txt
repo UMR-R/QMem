@@ -7,6 +7,9 @@ Purpose:
 
 Input:
 - The input may contain one or more episode summaries.
+- Episodes may be retrieved by semantic similarity rather than exact keywords.
+- Semantic scores are retrieval hints only; do not copy scores into memory and do not treat them as user facts.
+- You may ignore retrieved episodes that are not useful daily_notes evidence.
 - Existing nodes are the current daily_notes state.
 - Every output update or new node MUST include `support_episode_ids` using only episode ids present in the input.
 

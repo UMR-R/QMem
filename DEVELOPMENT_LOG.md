@@ -2,6 +2,35 @@
 
 ## 2026-05-07
 
+- 🏠 修复同步记忆链路
+  - 改了什么：
+    - 修正 raw conversation 追加去重逻辑：从“单条消息内容去重”改成“整轮 user+assistant pair 去重”，避免用户重复问同一句但回答不同的时候丢失 user turn。
+    - 增量同步创建 episode 后，会同步维护 Daily Notes persistent nodes 和 persistent node episode connections。
+    - 增量同步的 episode 时间改用捕获到的 round timestamp，避免使用后端处理时间影响历史顺序。
+    - 关闭 background 里旧的 JS memory_engine 自动增量调用，正式同步统一走本地后端，避免重复 API 调用和旧格式 `mw:*` 记忆并行生成。
+  - 为了什么：
+    - 让“同步对话”保存的 raw history 和 turns 更可靠。
+    - 让“同步记忆”与当前 L2 存储、Daily Notes 展示和连接机制保持一致。
+    - 避免旧 DeepSeek-only 前端增量路径和后端新路径互相打架。
+
+- 🏠 改进 Daily Notes 的 episode 召回
+  - 改了什么：
+    - 将 Daily Notes 候选筛选从关键词硬门禁改成轻量语义向量召回：用本地 token / 字符 n-gram 向量计算 episode 与 daily note anchor、已有 daily note、项目型 anchor 的相似度。
+    - 非项目 episode 不再因为没命中关键词就被挡在 daily_notes prompt 外；明显项目型 episode 仍会被过滤。
+    - support 校验增加语义相似兜底，避免模型生成的 daily note 因为词面不完全重合被静默丢弃。
+    - 在 daily_notes prompt 输入中加入语义分数作为检索提示，并明确分数不是用户事实，模型可以忽略不该进入 daily_notes 的候选。
+  - 为了什么：
+    - 避免“拒绝同事临时加任务”“学习方式”“个人计划”等日常记忆因为缺少固定关键词而无法进入 Daily Notes。
+    - 保持后端负责召回和证据边界，模型负责判断是否形成日常记忆节点。
+
+- 🏠 拆分用户画像的长期关注方向展示
+  - 改了什么：
+    - 将 `long_term_research_or_work_focus` 从“一个字段组合并展示”改成“长期关注方向”分组下的多个子选项。
+    - 单个关注方向的 item id 继续使用 `profile:<field>:<value>` 格式，前端按同一个分组标题展示，复用现有的单项选择、注入过滤和删除逻辑。
+  - 为了什么：
+    - 避免“教育技术实证研究；学习视频剪辑”被挤在同一个 chip 里。
+    - 让用户画像里的长期关注方向和主要任务类型一样，在同一个分组下面按单个小项勾选和管理。
+
 - 🏠 继续加速“正在提取对话记忆”
   - 改了什么：
     - 将整理阶段的前端 display 生成改成懒加载：整理记忆时先写入后端字段兜底展示，需要精修某类展示时再显式调用 display LLM 补全。
