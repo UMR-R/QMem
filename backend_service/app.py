@@ -62,7 +62,7 @@ RECOMMENDED_REMOTE_SOURCES = [
 ]
 MEMORY_TRANSFEROR_SRC = PROJECT_ROOT / "memory_transferor" / "src"
 JOB_LOCK = threading.Lock()
-L2_PERSISTENT_NODE_MAINTENANCE_VERSION = "l2_persistent_nodes_v7_daily_notes_semantic_retrieval"
+L2_PERSISTENT_NODE_MAINTENANCE_VERSION = "l2_persistent_nodes_v8_node_delete_locks"
 PERSISTENT_REBUILD_VERSION = "persistent_rebuild_v2_semantic_candidates"
 ORGANIZE_EPISODE_MAX_WORKERS = 4
 PERSISTENT_NODE_BATCH_SIZE = 8
@@ -2110,6 +2110,13 @@ def get_display_texts_path(settings: dict[str, Any], *, create: bool = False) ->
     return metadata_dir / "display_texts.json"
 
 
+def get_memory_ignore_state_path(settings: dict[str, Any], *, create: bool = False) -> Path:
+    metadata_dir = get_storage_root(settings, create=create) / "metadata"
+    if create:
+        metadata_dir.mkdir(parents=True, exist_ok=True)
+    return metadata_dir / "memory_ignore_state.json"
+
+
 def _persistent_memory_assets_missing(settings: dict[str, Any]) -> bool:
     root = get_storage_root(settings)
     required_paths = [
@@ -2189,6 +2196,84 @@ def save_organize_state(settings: dict[str, Any], state: dict[str, Any]) -> None
     path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _default_memory_ignore_state() -> dict[str, Any]:
+    return {
+        "version": "1.0",
+        "profile": {"fields": [], "values": {}},
+        "preferences": {"fields": [], "values": {}},
+        "deleted_items": [],
+    }
+
+
+def _sanitize_memory_ignore_bucket(value: Any) -> dict[str, Any]:
+    bucket = value if isinstance(value, dict) else {}
+    fields = [
+        str(field).strip()
+        for field in (bucket.get("fields") or [])
+        if str(field or "").strip()
+    ]
+    values: dict[str, list[dict[str, str]]] = {}
+    raw_values = bucket.get("values")
+    if isinstance(raw_values, dict):
+        for field, entries in raw_values.items():
+            field_name = str(field or "").strip()
+            if not field_name:
+                continue
+            normalized_entries: list[dict[str, str]] = []
+            raw_entries = entries if isinstance(entries, list) else [entries]
+            for entry in raw_entries:
+                if isinstance(entry, dict):
+                    slug = str(entry.get("slug") or "").strip()
+                    text = str(entry.get("text") or "").strip()
+                else:
+                    text = str(entry or "").strip()
+                    slug = _safe_slug(text, "item") if text else ""
+                if slug or text:
+                    normalized_entries.append({"slug": slug, "text": text})
+            if normalized_entries:
+                seen: set[tuple[str, str]] = set()
+                deduped: list[dict[str, str]] = []
+                for entry in normalized_entries:
+                    key = (entry.get("slug", ""), entry.get("text", ""))
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    deduped.append(entry)
+                values[field_name] = deduped
+    return {
+        "fields": sorted(set(fields)),
+        "values": values,
+    }
+
+
+def load_memory_ignore_state(settings: dict[str, Any]) -> dict[str, Any]:
+    data = read_json_file(get_memory_ignore_state_path(settings, create=True))
+    payload = _default_memory_ignore_state()
+    if isinstance(data, dict):
+        payload["version"] = str(data.get("version") or payload["version"])
+        payload["profile"] = _sanitize_memory_ignore_bucket(data.get("profile"))
+        payload["preferences"] = _sanitize_memory_ignore_bucket(data.get("preferences"))
+        deleted_items = data.get("deleted_items", [])
+        if isinstance(deleted_items, list):
+            payload["deleted_items"] = [item for item in deleted_items if isinstance(item, dict)]
+    return payload
+
+
+def save_memory_ignore_state(settings: dict[str, Any], state: dict[str, Any]) -> None:
+    payload = _default_memory_ignore_state()
+    if isinstance(state, dict):
+        payload["version"] = str(state.get("version") or payload["version"])
+        payload["profile"] = _sanitize_memory_ignore_bucket(state.get("profile"))
+        payload["preferences"] = _sanitize_memory_ignore_bucket(state.get("preferences"))
+        deleted_items = state.get("deleted_items", [])
+        if isinstance(deleted_items, list):
+            payload["deleted_items"] = [item for item in deleted_items if isinstance(item, dict)]
+    get_memory_ignore_state_path(settings, create=True).write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
 def _hash_payload(payload: Any) -> str:
     return hashlib.sha1(
         json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
@@ -2246,7 +2331,7 @@ def compute_episode_signature(wiki: L2Wiki) -> str:
     return _hash_payload(episodes)
 
 
-def compute_persistent_signature(wiki: L2Wiki) -> str:
+def compute_persistent_signature(wiki: L2Wiki, settings: dict[str, Any] | None = None) -> str:
     profile = wiki.load_profile()
     preferences = wiki.load_preferences()
     projects = [project.model_dump(mode="json") for project in wiki.list_projects()]
@@ -2257,6 +2342,11 @@ def compute_persistent_signature(wiki: L2Wiki) -> str:
         "projects": projects,
         "workflows": workflows,
     }
+    if settings is not None:
+        ignore_state = load_memory_ignore_state(settings)
+        persistent_nodes = load_persistent_nodes(settings)
+        payload["memory_ignore_state"] = ignore_state
+        payload["persistent_node_deleted_locks"] = persistent_nodes.get("deleted_node_locks", [])
     return _hash_payload(payload)
 
 
@@ -4934,6 +5024,8 @@ def _default_persistent_payload() -> dict[str, Any]:
         "episodic_tag_paths": [],
         "nodes": {},
         "deleted_node_locks": [],
+        "ignored_episode_ids": [],
+        "ignored_turn_refs": [],
     }
 
 
@@ -5027,6 +5119,12 @@ def _load_persistent_nodes_from_directory(root: Path) -> dict[str, Any]:
         locks = index_data.get("deleted_node_locks", [])
         if isinstance(locks, list):
             payload["deleted_node_locks"] = [lock for lock in locks if isinstance(lock, dict)]
+        ignored_episode_ids = index_data.get("ignored_episode_ids", [])
+        if isinstance(ignored_episode_ids, list):
+            payload["ignored_episode_ids"] = [str(item).strip() for item in ignored_episode_ids if str(item or "").strip()]
+        ignored_turn_refs = index_data.get("ignored_turn_refs", [])
+        if isinstance(ignored_turn_refs, list):
+            payload["ignored_turn_refs"] = [str(item).strip() for item in ignored_turn_refs if str(item or "").strip()]
         items = index_data.get("items", [])
         if isinstance(items, list):
             for item in items:
@@ -5758,6 +5856,134 @@ def _empty_memory_field_value(value: Any) -> Any:
     return ""
 
 
+def _model_field_values_for_ignore(model: ProfileMemory | PreferenceMemory, field: str) -> list[str]:
+    value = getattr(model, field, None)
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item or "").strip()]
+    if isinstance(value, str):
+        return [value.strip()] if value.strip() else []
+    if isinstance(value, bool):
+        return [str(value).lower()]
+    return []
+
+
+def _record_model_memory_ignore(
+    state: dict[str, Any],
+    category: str,
+    suffix: str,
+    touched_fields: set[str],
+    before_model: ProfileMemory | PreferenceMemory,
+) -> None:
+    bucket = state.setdefault(category, {"fields": [], "values": {}})
+    if not isinstance(bucket, dict):
+        bucket = {"fields": [], "values": {}}
+        state[category] = bucket
+    fields = [field for field in touched_fields if field]
+    if not fields:
+        return
+
+    if suffix and not suffix.startswith("group:"):
+        field, sep, value_slug = suffix.partition(":")
+        if sep and field in fields and value_slug:
+            values = bucket.setdefault("values", {})
+            if not isinstance(values, dict):
+                values = {}
+                bucket["values"] = values
+            entries = values.setdefault(field, [])
+            if not isinstance(entries, list):
+                entries = []
+                values[field] = entries
+            matched_values = [
+                text
+                for text in _model_field_values_for_ignore(before_model, field)
+                if _safe_slug(text, "item") == value_slug
+            ]
+            if not matched_values:
+                matched_values = [value_slug]
+            existing = {
+                (str(entry.get("slug") or ""), str(entry.get("text") or ""))
+                for entry in entries
+                if isinstance(entry, dict)
+            }
+            for text in matched_values:
+                entry = {"slug": value_slug, "text": str(text or "").strip()}
+                key = (entry["slug"], entry["text"])
+                if key not in existing:
+                    entries.append(entry)
+                    existing.add(key)
+        else:
+            bucket["fields"] = sorted(set([*(bucket.get("fields") or []), *fields]))
+    else:
+        bucket["fields"] = sorted(set([*(bucket.get("fields") or []), *fields]))
+
+    deleted_items = state.setdefault("deleted_items", [])
+    if isinstance(deleted_items, list):
+        deleted_items.append(
+            {
+                "category": category,
+                "item": suffix,
+                "fields": sorted(fields),
+                "deleted_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+
+def _ignored_value_slugs(entries: Any) -> set[str]:
+    slugs: set[str] = set()
+    raw_entries = entries if isinstance(entries, list) else []
+    for entry in raw_entries:
+        if isinstance(entry, dict):
+            slug = str(entry.get("slug") or "").strip()
+            text = str(entry.get("text") or "").strip()
+        else:
+            text = str(entry or "").strip()
+            slug = ""
+        if slug:
+            slugs.add(slug)
+        if text:
+            slugs.add(_safe_slug(text, "item"))
+    return slugs
+
+
+def _apply_ignore_bucket_to_model(model: ProfileMemory | PreferenceMemory, bucket: dict[str, Any]) -> None:
+    ignored_fields = {str(field).strip() for field in (bucket.get("fields") or []) if str(field or "").strip()}
+    ignored_values = bucket.get("values") if isinstance(bucket.get("values"), dict) else {}
+
+    for field in ignored_fields:
+        if hasattr(model, field):
+            setattr(model, field, _empty_memory_field_value(getattr(model, field)))
+
+    for field, entries in ignored_values.items():
+        field_name = str(field or "").strip()
+        if not field_name or field_name in ignored_fields or not hasattr(model, field_name):
+            continue
+        current = getattr(model, field_name)
+        slugs = _ignored_value_slugs(entries)
+        if not slugs:
+            continue
+        if isinstance(current, list):
+            setattr(
+                model,
+                field_name,
+                [item for item in current if _safe_slug(str(item), "item") not in slugs],
+            )
+        elif isinstance(current, str) and _safe_slug(current, "item") in slugs:
+            setattr(model, field_name, "")
+
+
+def apply_memory_ignore_rules(
+    settings: dict[str, Any],
+    profile: ProfileMemory | None = None,
+    preferences: PreferenceMemory | None = None,
+) -> tuple[ProfileMemory | None, PreferenceMemory | None]:
+    state = load_memory_ignore_state(settings)
+    if profile is not None:
+        _apply_ignore_bucket_to_model(profile, state.get("profile", {}))
+    if preferences is not None:
+        _apply_ignore_bucket_to_model(preferences, state.get("preferences", {}))
+    return profile, preferences
+
+
 def _remove_slugged_list_value(values: Any, slug: str) -> tuple[Any, bool]:
     if not isinstance(values, list):
         return values, False
@@ -5777,9 +6003,24 @@ def _persistent_node_delete_lock(node_id: str, node: dict[str, Any]) -> dict[str
         "deleted_at": datetime.now(timezone.utc).isoformat(),
         "key": node.get("key"),
         "description": node.get("description"),
+        "display": node.get("display") if isinstance(node.get("display"), dict) else {},
         "episode_refs": [str(ref) for ref in (node.get("episode_refs") or []) if str(ref).strip()],
         "turn_refs": [str(ref) for ref in (node.get("turn_refs") or []) if str(ref).strip()],
     }
+
+
+def _append_unique_strings(target: list[Any], values: list[Any]) -> list[str]:
+    merged = [str(item).strip() for item in target if str(item or "").strip()]
+    for value in values:
+        text = str(value or "").strip()
+        if text and text not in merged:
+            merged.append(text)
+    return merged
+
+
+def _clear_global_episode_ignores(payload: dict[str, Any]) -> None:
+    payload["ignored_episode_ids"] = []
+    payload["ignored_turn_refs"] = []
 
 
 def _delete_model_memory_item(
@@ -5874,12 +6115,14 @@ def delete_memory_items(settings: dict[str, Any], item_ids: list[str]) -> dict[s
     preferences = wiki.load_preferences()
     persistent = load_persistent_nodes(settings)
     persistent_nodes = persistent.get("nodes", {}) if isinstance(persistent, dict) else {}
+    ignore_state = load_memory_ignore_state(settings)
 
     deleted: list[str] = []
     missing: list[str] = []
     profile_changed = False
     preferences_changed = False
     persistent_changed = False
+    ignore_changed = False
     touched_profile_fields: set[str] = set()
     touched_preference_fields: set[str] = set()
 
@@ -5892,16 +6135,22 @@ def delete_memory_items(settings: dict[str, Any], item_ids: list[str]) -> dict[s
 
         if prefix == "profile":
             if profile is not None:
+                before_profile = profile.model_copy(deep=True)
                 removed, fields = _delete_model_memory_item(profile, "profile", suffix)
                 if removed:
                     profile_changed = True
+                    ignore_changed = True
+                    _record_model_memory_ignore(ignore_state, "profile", suffix, fields, before_profile)
                     touched_profile_fields.update(fields)
 
         elif prefix == "preferences":
             if preferences is not None:
+                before_preferences = preferences.model_copy(deep=True)
                 removed, fields = _delete_model_memory_item(preferences, "preferences", suffix)
                 if removed:
                     preferences_changed = True
+                    ignore_changed = True
+                    _record_model_memory_ignore(ignore_state, "preferences", suffix, fields, before_preferences)
                     touched_preference_fields.update(fields)
 
         elif prefix in {"project", "projects"} and suffix:
@@ -5936,6 +6185,8 @@ def delete_memory_items(settings: dict[str, Any], item_ids: list[str]) -> dict[s
     if persistent_changed:
         persistent["nodes"] = persistent_nodes
         save_persistent_nodes(settings, persistent)
+    if ignore_changed:
+        save_memory_ignore_state(settings, ignore_state)
     if deleted:
         _drop_memory_display_cache(
             settings,
@@ -5943,6 +6194,7 @@ def delete_memory_items(settings: dict[str, Any], item_ids: list[str]) -> dict[s
             profile_fields=touched_profile_fields,
             preferences_fields=touched_preference_fields,
         )
+        refresh_organize_memory_signatures(settings)
 
     return {
         "ok": True,
@@ -7343,16 +7595,50 @@ def compute_l2_persistent_node_maintenance_signature(
     episode_signature: str,
     persistent_signature: str,
     l1_signature: str,
+    persistent_node_ignore_signature: str = "",
 ) -> str:
     return _hash_payload(
         {
             "episode_signature": episode_signature,
             "persistent_signature": persistent_signature,
             "l1_signature": l1_signature,
+            "persistent_node_ignore_signature": persistent_node_ignore_signature,
             "maintenance_version": L2_PERSISTENT_NODE_MAINTENANCE_VERSION,
             "prompt_hash": _hash_payload(_load_persistent_distill_prompt()),
         }
     )
+
+
+def compute_persistent_node_ignore_signature(settings: dict[str, Any]) -> str:
+    persistent_nodes = load_persistent_nodes(settings)
+    return _hash_payload(
+        {
+            "deleted_node_locks": persistent_nodes.get("deleted_node_locks", []),
+        }
+    )
+
+
+def refresh_organize_memory_signatures(settings: dict[str, Any]) -> None:
+    try:
+        wiki = get_wiki(settings)
+        organize_state = load_organize_state(settings)
+        _, l1_signature = load_l1_signals(settings)
+        episode_signature = compute_episode_signature(wiki)
+        persistent_signature = compute_persistent_signature(wiki, settings)
+        node_maintenance_signature = compute_l2_persistent_node_maintenance_signature(
+            episode_signature=episode_signature,
+            persistent_signature=persistent_signature,
+            l1_signature=l1_signature,
+            persistent_node_ignore_signature=compute_persistent_node_ignore_signature(settings),
+        )
+        organize_state["l1_signature"] = l1_signature
+        organize_state["episode_signature"] = episode_signature
+        organize_state["persistent_signature"] = persistent_signature
+        organize_state["persistent_rebuild_version"] = PERSISTENT_REBUILD_VERSION
+        organize_state["node_maintenance_signature"] = node_maintenance_signature
+        save_organize_state(settings, organize_state)
+    except Exception:
+        return
 
 
 def _canonical_memory_text(value: Any) -> str:
@@ -7794,7 +8080,10 @@ def save_persistent_nodes(settings: dict[str, Any], data: dict[str, Any]) -> Non
             "episodic_tag_paths": data.get("episodic_tag_paths", payload["episodic_tag_paths"]),
             "nodes": data.get("nodes", payload["nodes"]),
             "deleted_node_locks": data.get("deleted_node_locks", payload["deleted_node_locks"]),
+            "ignored_episode_ids": data.get("ignored_episode_ids", payload["ignored_episode_ids"]),
+            "ignored_turn_refs": data.get("ignored_turn_refs", payload["ignored_turn_refs"]),
         })
+    _clear_global_episode_ignores(payload)
     payload = _prune_persistent_nodes_against_projects(settings, payload)
     payload = _prune_persistent_node_support_refs(settings, payload)
     payload = _merge_related_persistent_nodes(payload)
@@ -7831,6 +8120,8 @@ def save_persistent_nodes(settings: dict[str, Any], data: dict[str, Any]) -> Non
         "pn_next_id": payload.get("pn_next_id", 1),
         "episodic_tag_paths": payload.get("episodic_tag_paths", []),
         "deleted_node_locks": payload.get("deleted_node_locks", []),
+        "ignored_episode_ids": payload.get("ignored_episode_ids", []),
+        "ignored_turn_refs": payload.get("ignored_turn_refs", []),
         "item_count": len(items),
         "items": items,
     }
@@ -8233,6 +8524,8 @@ def rebuild_persistent_nodes(
             "episodic_tag_paths": [],
             "nodes": {},
             "deleted_node_locks": previous.get("deleted_node_locks", []),
+            "ignored_episode_ids": previous.get("ignored_episode_ids", []),
+            "ignored_turn_refs": previous.get("ignored_turn_refs", []),
         }
         save_persistent_nodes(settings, pn_data)
     elif _persistent_node_assets_missing(settings):
@@ -8243,6 +8536,8 @@ def rebuild_persistent_nodes(
             "episodic_tag_paths": [],
             "nodes": {},
             "deleted_node_locks": previous.get("deleted_node_locks", []),
+            "ignored_episode_ids": previous.get("ignored_episode_ids", []),
+            "ignored_turn_refs": previous.get("ignored_turn_refs", []),
         }
         save_persistent_nodes(settings, pn_data)
         reset = True
@@ -8375,6 +8670,7 @@ def rebuild_persistent_memory(
         projects_data = projects_future.result()
 
     profile = builder._build_profile(profile_data, l1_text, earliest_ts, profile_ep_ids, ep_by_id)
+    profile, _ = apply_memory_ignore_rules(settings, profile=profile)
     wiki.save_profile(profile)
 
     stage("正在整理偏好设置...", 2)
@@ -8393,6 +8689,8 @@ def rebuild_persistent_memory(
             prefs.language_preference = dominant_language
     if profile.primary_task_types:
         profile.primary_task_types = []
+    profile, prefs = apply_memory_ignore_rules(settings, profile=profile, preferences=prefs)
+    if profile is not None:
         wiki.save_profile(profile)
     prefs.primary_task_types = _infer_primary_task_types_fallback(
         episodes,
@@ -8400,6 +8698,7 @@ def rebuild_persistent_memory(
         [],
         list(prefs.primary_task_types or []),
     )
+    _, prefs = apply_memory_ignore_rules(settings, preferences=prefs)
     wiki.save_preferences(prefs)
 
     stage("正在整理项目记忆...", 3)
@@ -8419,6 +8718,7 @@ def rebuild_persistent_memory(
     for project in projects:
         wiki.save_project(project)
     profile = _merge_project_focus_into_profile(profile, projects)
+    profile, _ = apply_memory_ignore_rules(settings, profile=profile)
     wiki.save_profile(profile)
 
     platform_workflows = _platform_workflows_from_records(settings)
@@ -8460,6 +8760,7 @@ def rebuild_persistent_memory(
         workflows,
         list(prefs.primary_task_types or []),
     )
+    _, prefs = apply_memory_ignore_rules(settings, preferences=prefs)
     wiki.save_preferences(prefs)
 
     builder.maintain_episode_connections(
@@ -8702,11 +9003,13 @@ def _run_organize_job(job_id: str, settings: dict[str, Any]) -> None:
             timings["persistent_rebuild_sec"] = 0.0
 
         episode_signature = compute_episode_signature(wiki)
-        persistent_signature = compute_persistent_signature(wiki)
+        persistent_signature = compute_persistent_signature(wiki, settings)
+        persistent_node_ignore_signature = compute_persistent_node_ignore_signature(settings)
         node_maintenance_signature = compute_l2_persistent_node_maintenance_signature(
             episode_signature=episode_signature,
             persistent_signature=persistent_signature,
             l1_signature=l1_signature,
+            persistent_node_ignore_signature=persistent_node_ignore_signature,
         )
         should_maintain_nodes = (
             bool(changed_episodes)
@@ -8784,11 +9087,13 @@ def _run_organize_job(job_id: str, settings: dict[str, Any]) -> None:
             timings["persistent_node_maintenance_sec"] = 0.0
 
         episode_signature = compute_episode_signature(wiki)
-        persistent_signature = compute_persistent_signature(wiki)
+        persistent_signature = compute_persistent_signature(wiki, settings)
+        persistent_node_ignore_signature = compute_persistent_node_ignore_signature(settings)
         node_maintenance_signature = compute_l2_persistent_node_maintenance_signature(
             episode_signature=episode_signature,
             persistent_signature=persistent_signature,
             l1_signature=l1_signature,
+            persistent_node_ignore_signature=persistent_node_ignore_signature,
         )
         timings["total_sec"] = _elapsed_seconds(run_started)
         organize_stats["timings"] = timings
