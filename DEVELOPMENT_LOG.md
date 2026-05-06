@@ -1,5 +1,34 @@
 # 开发日志
 
+## 2026-05-07
+
+- 🏠 继续加速“正在提取对话记忆”
+  - 改了什么：
+    - 将整理阶段的前端 display 生成改成懒加载：整理记忆时先写入后端字段兜底展示，需要精修某类展示时再显式调用 display LLM 补全。
+    - 将 profile、preferences、projects 三类 persistent 抽取改成并行调用，保持写入仍串行。
+    - 给 Daily Notes 节点维护增加候选过滤，只把可能形成日常记忆的 episode 送进节点维护 prompt。
+    - 将 Daily Notes 默认 batch size 从 4 提到 8，减少中小规模整理时的重复 LLM 调用。
+    - 给记忆条目接口增加 `refresh_display` 参数：默认加载只使用兜底展示，不额外调用 LLM；显式刷新时才按类别补全 display 文案。
+  - 为了什么：
+    - 把整理记忆的等待时间优先花在真正影响记忆结构的步骤上。
+    - 避免前端展示文案在整理阶段阻塞用户。
+    - 减少 Daily Notes 长 prompt 的调用次数，同时保留后续按需精修展示文案的能力。
+
+## 2026-05-06
+
+- 🏠 优化整理记忆的慢路径
+  - 改了什么：
+    - 将 episode 抽取改成并发 LLM 调用：先串行判断哪些 raw conversation 发生变化，再并行抽取 episode，最后串行写入 L2Wiki，避免并发写文件。
+    - 给 workflow 抽取增加候选判断：只有 episode、L1 平台记忆或文本中出现可复用流程信号时才调用 workflow prompt，否则跳过这次 LLM 调用。
+    - 将 Daily Notes 节点维护从逐 episode 调用改成 batch 调用，并记录 `persistent_node_llm_calls` 与 batch size，方便后续看真实调用数。
+    - 瘦身 `daily_notes_system` prompt，保留 schema、证据边界、前端 display、自检、粒度与合并规则，删掉重复背景和过细说明。
+    - 修正 `update_timestamp()`：整理任务只更新 `last_sync_at`，不再把整份运行时 settings 写回磁盘，避免临时测试路径污染真实配置。
+  - 为了什么：
+    - 降低新增/变更 raw 对话后的完整整理耗时。
+    - 避免没有 workflow 证据时仍跑一次 10 秒级 workflow LLM 调用。
+    - 减少 Daily Notes 维护阶段重复发送长 prompt 的次数。
+    - 保持真实 wiki 写入仍然串行，减少并发优化带来的存储风险。
+
 ## 2026-05-05
 
 - 🏠 改进记忆勾选、单条删除和前端展示兜底

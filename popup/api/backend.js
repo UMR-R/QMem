@@ -153,9 +153,10 @@
       return request(baseUrl, `/api/memory/categories${suffix}`);
     },
 
-    getMemoryItems(baseUrl, category, locale) {
+    getMemoryItems(baseUrl, category, locale, options = {}) {
       const query = new URLSearchParams({ category });
       if (locale) query.set("locale", locale);
+      if (options.refreshDisplay) query.set("refresh_display", "true");
       return request(baseUrl, `/api/memory/items?${query.toString()}`);
     },
 
