@@ -1,255 +1,167 @@
-# QMem
-
 <p align="center">
-  <img src="docs/images/icon.png" alt="QMem logo" width="96">
+  <img src="docs/images/slogan.png" alt="QMem slogan" width="760">
 </p>
 
-[中文说明](README_zh.md)
+<p align="center">
+  <strong>Welcome contributors:</strong> 徐西南、王浩然、胡心亭
+</p>
 
-QMem is a browser extension for AI conversations. It saves your conversations from platforms such as ChatGPT, Gemini, DeepSeek, and Doubao to local storage, then organizes them into long-term memory that can be viewed, selected, deleted, exported, and injected into a new AI session.
+<p align="center">
+  <a href="README_en.md">English</a>
+</p>
 
-The basic workflow is simple: load the extension, configure the local backend and model API, click `同步对话` on the home page, then organize and migrate memory from the `迁移` page. The `同步记忆` switch in `设置` can be used for automatic incremental memory maintenance.
+QMem 是一个面向 AI 对话的浏览器扩展程序。它可以把你在 ChatGPT、Gemini、DeepSeek、豆包等平台上的对话保存到本地，整理成可查看、可勾选、可删除、可导出、可注入到新会话里的长期记忆。
+
+## 界面预览
+
+<table>
+  <tr>
+    <td width="33%"><img src="docs/images/qmem-home.png" alt="QMem 主页面"></td>
+    <td width="33%"><img src="docs/images/qmem-settings.png" alt="QMem 设置页"></td>
+    <td width="33%"><img src="docs/images/qmem-organize.png" alt="QMem 迁移页"></td>
+  </tr>
+  <tr>
+    <td align="center">主页面</td>
+    <td align="center">设置页</td>
+    <td align="center">迁移页</td>
+  </tr>
+</table>
 
 ## Quickstart
 
-### 1. Download and load the browser extension
+### 1. 加载扩展
 
-1. Download this repository, or download the ZIP file and unzip it.
-2. Open your browser extension management page.
-   - Chrome / Arc / Brave: `chrome://extensions/`
-   - Edge: `edge://extensions/`
-3. Turn on Developer mode.
-4. Click Load unpacked.
-5. Select the repository root:
+1. 下载本仓库源码，或下载 ZIP 后解压。
+2. 打开浏览器扩展管理页。
+   - Chrome / Arc / Brave：`chrome://extensions/`
+   - Edge：`edge://extensions/`
+3. 打开“开发者模式”。
+4. 点击“加载已解压的扩展程序”。
+5. 选择仓库根目录 `QMem/`。
 
-```text
-QMem/
-```
+加载成功后，浏览器工具栏里会出现 QMem 扩展图标。
 
-After loading succeeds, the QMem extension icon will appear in the browser toolbar.
+### 2. 启动本地后端
 
-### 2. Get familiar with the three main pages
-
-The home page is used to start sync, enter migration, open settings, and manage Skills.
-
-![QMem home page](docs/images/qmem-home.png)
-
-The settings page is used to configure the local backend, model API, `本地目录`, and advanced switches.
-
-![QMem settings page](docs/images/qmem-settings.png)
-
-The migration page is used to organize memory, select memory items, export a memory package, or inject memory into the current AI session.
-
-![QMem migration page](docs/images/qmem-organize.png)
-
-<!-- If the screenshots above do not render, place them here:
-
-```text
-docs/images/qmem-home.png
-docs/images/qmem-settings.png
-docs/images/qmem-organize.png
-``` -->
-
-### 3. Configure the local backend, model, and local directory
-
-The QMem extension calls a local API backend to save files, organize memory, and call the model. On first use, install dependencies from the repository root:
+首次使用时，在仓库根目录安装依赖：
 
 ```bash
 pip install -r backend_service/requirements.txt
 ```
 
-Start the local backend when using QMem:
+使用时启动本地后端：
 
 ```bash
 uvicorn backend_service.app:app --host 127.0.0.1 --port 8765 --reload
 ```
 
-Then open the extension's `设置` page and fill in at least:
+### 3. 配置设置页
 
-- `本地后端地址`: recommended value is `http://127.0.0.1:8765`
-- `API Key`: the model API key used for memory organization
-- `本地目录`: the local memory folder. Choose a location that can be kept long term.
+打开扩展的“设置”页，填写：
 
-After filling in the fields, click the corresponding `保存`, then click `测试连接` to confirm that the API is available.
+- `本地后端地址`：推荐 `http://127.0.0.1:8765`
+- `API Key`：用于整理记忆的模型 API Key
+- `本地目录`：本地记忆文件夹，建议选择一个可以长期保留的位置
 
-The backend currently uses an OpenAI-compatible interface by default:
+然后点击“保存”和“测试连接”。
+
+当前后端默认使用 OpenAI-compatible 接口：
 
 - `api_provider = openai_compat`
 - `api_base_url = https://api.deepseek.com/v1`
 - `api_model = deepseek-chat`
 
-### 4. Start sync and organize memory
+### 4. 同步、整理和迁移
 
-1. Click `同步对话` on the home page. The `同步记忆` switch in `设置` controls whether QMem also performs incremental memory maintenance after sync.
-2. Continue chatting on a supported platform. QMem will save the raw conversation locally.
-3. Go to `迁移` and click `整理记忆`.
-4. After organization finishes, you can select profile, preferences, project memory, workflows, daily notes, and Skills.
-5. Click `导出` to generate a migration package, or click `注入` to write the selected memory into the current AI session.
+1. 在主页面点击“同步对话”。
+2. 按需在设置页打开“同步记忆”。
+3. 继续在支持的平台聊天，或在迁移页点击“加入当前对话”“加入平台记忆”。
+4. 进入“迁移”页，点击“整理记忆”。
+5. 勾选需要的记忆，点击“导出”或“注入”。
 
-## Three Core Modules
+## 页面功能
 
-### 1. Browser Extension
+### 主页面
 
-The extension handles user interaction, page-side collection, and memory injection.
+- `同步对话`：持续保存当前平台的新对话到本地 raw 层。
+- `迁移`：进入记忆整理、勾选、导出和注入页面。
+- `设置`：配置本地后端、API Key、本地目录和高级选项。
+- `Skill`：管理“我的 Skill”和推荐 Skill。
 
-Home page:
+### 设置页
 
-- Start or pause `同步对话`.
-- Show sync status.
-- Enter `迁移`, `设置`, and `Skill`.
+- `本地后端地址`：本地 FastAPI 后端地址。
+- `API Key`：模型服务密钥。
+- `本地目录`：raw 对话和结构化记忆的保存目录。
+- `导入对话`：导入 `json`、`jsonl`、`md`、`txt` 历史对话文件。
+- `同步记忆`：同步对话后自动增量维护记忆。
+- `详细注入`：注入时额外带上相关 raw turns。
+- `清理所有记忆` / `清理缓存`：管理本地数据。
 
-Settings page:
+### 迁移页
 
-- Configure `本地后端地址`.
-- Configure `API Key`, then click `测试连接` to check the model API.
-- Set `本地目录`.
-- Click `导入对话` to import historical conversation files. Supported formats are `json`, `jsonl`, `md`, and `txt`.
-- Turn `同步记忆` on or off.
-- Turn `详细注入` on or off.
-- Click `清理所有记忆` or `清理缓存` to manage local data.
+- `加入当前对话`：把当前标签页的对话保存到本地 raw 记忆。
+- `加入平台记忆`：保存当前 AI 平台汇报的 saved memory、custom instructions、agent config 和 platform skills。
+- `整理记忆`：从 raw 对话和平台记忆中重建结构化长期记忆。
+- `导出`：导出勾选的记忆包。
+- `注入`：把勾选的记忆注入当前 AI 会话。
 
-Migration page:
+### Skill 页面
 
-- `加入当前对话`: save the current tab's conversation to local raw memory.
-- `加入平台记忆`: ask the current AI platform to report its saved memory, custom instructions, agent config, and skills, then save that snapshot as platform memory.
-- `整理记忆`: rebuild structured long-term memory from raw conversations and platform memory.
-- `导出`: export the selected memory package.
-- `注入`: inject the selected memory into the current AI session.
+- `我的 Skill`：查看已保存 Skill。
+- `为你推荐`：查看后端推荐 Skill。
+- `加入我的 Skill`：保存推荐 Skill。
+- `导出` / `注入当前会话`：迁移或使用 Skill。
 
-Skill page:
+## 本地记忆结构
 
-- View backend-recommended Skills.
-- Click `加入我的 Skill` to save recommended Skills.
-- Click `导出` or `注入当前会话` to use Skills.
-- Manage saved Skills.
-
-### 2. Local Backend
-
-The local backend lives in `backend_service/`. It is responsible for:
-
-- Reading and writing local memory files.
-- Maintaining settings.
-- Calling the model API to organize memory.
-- Generating frontend display titles and summaries.
-- Generating export packages and injection content.
-- Managing recommended Skills and saved Skills.
-
-If the extension says the backend is unavailable, check that:
-
-- The backend process is running.
-- `本地后端地址` in `设置` matches the port used by the backend.
-- The browser is not blocking local requests.
-- The API Key and model configuration are available.
-
-### 3. Local Memory Files
-
-QMem writes raw conversations and structured memory to the local directory you configure. If no directory is configured, it defaults to:
+默认记忆目录：
 
 ```text
 backend_service/.state/wiki/
 ```
 
-Choose a local folder that you can keep long term. That folder is your local memory library.
+建议在设置页选择一个你能长期保留的本地文件夹。这个文件夹就是你的本地记忆库。
 
-## Memory Layers
+QMem 使用分层记忆：
 
-QMem manages memory in layers rather than storing one long text blob.
+- `raw/`：原始对话，保留网页采集或文件导入的聊天内容。
+- `platform_memory/`：平台侧已经保存或生成的记忆信号。
+- `episodes/`：从 raw 对话中提取的对话级记忆单元。
+- `profile/`：用户画像，例如身份、知识背景、长期关注方向。
+- `preferences/`：偏好设置，例如语言偏好、表达风格、格式约束、主要任务类型。
+- `projects/`：项目记忆，例如长期项目、当前阶段、目标、上下文和状态。
+- `workflows/`：工作流 / SOP，例如用户反复使用的方法、流程和协作习惯。
+- `daily_notes/`：日常记忆，例如生活偏好、选择习惯、非项目类上下文。
+- `skills/`：用户保存或推荐的 Skill 资产。
+- `metadata/`：索引、整理状态、展示文案和删除 / 忽略记录。
 
-### Raw
+删除不想保留的条目后，QMem 会记录 ignore / lock，避免下次整理时把同一条记忆又自动生成回来。
 
-The raw layer stores original chat content collected from webpages or imported from files.
+## 注入和导出
 
-Directory:
+普通注入：
 
-```text
-raw/
-```
+- 注入结构化记忆节点。
+- 注入相关 episode summary。
+- 不默认注入大段 raw 对话。
 
-All later memory should be traceable back to raw conversations.
+详细注入：
 
-### Platform Memory
+- 注入结构化记忆节点。
+- 注入 episode summary。
+- 额外注入相关 raw turns，用于需要完整上下文的场景。
 
-The platform memory layer stores memory signals that an AI platform already holds or generates, such as:
+导出：
 
-- saved memory
-- conversation summary
-- profile / preferences
-- custom instructions
-- agent config
-- platform skills
+- 生成可迁移的记忆包。
+- 可用于备份、复制到其他设备，或迁移到其他 AI 平台。
 
-Directory:
+## 仓库结构
 
-```text
-platform_memory/
-```
-
-### Episodes
-
-Episodes are conversation-level memory units extracted from raw conversations. The current implementation primarily uses one conversation turn as the unit, while retaining its session, time, summary, keywords, turn refs, and episode connections.
-
-Directory:
-
-```text
-episodes/
-```
-
-Episodes are the evidence base for profile, preferences, projects, workflows, daily notes, and skills.
-
-### Persistent Memory
-
-Persistent memory organizes episodes and platform memory into more stable structures:
-
-- `profile/`: user profile, such as identity, knowledge background, and long-term focus.
-- `preferences/`: preferences, such as language preference, expression style, format constraints, and main task types.
-- `projects/`: project memory, such as long-term projects, current stage, goals, context, and status.
-- `workflows/`: workflows / SOPs, such as methods, processes, and collaboration habits the user repeatedly uses.
-- `daily_notes/`: daily notes, such as life preferences, choice patterns, and non-project context.
-- `skills/`: Skill assets saved or recommended for the user.
-- `metadata/`: indexes, organize state, display text, and delete / ignore records.
-
-These items appear in the frontend as selectable memory entries. You can delete entries you do not want to keep. After deletion, QMem records ignore / lock state to avoid regenerating the same memory item in the next organization run.
-
-## Injection and Export
-
-After organization finishes, you can select memory to migrate from the `迁移` page.
-
-Regular injection:
-
-- Inject structured memory nodes.
-- Inject related episode summaries.
-- Do not inject long raw conversation excerpts by default.
-
-Detailed injection:
-
-- Inject structured memory nodes.
-- Inject episode summaries.
-- Additionally inject related raw turns for cases that need complete context.
-
-Export:
-
-- Generate a portable memory package.
-- Use it for backup, copying to another device, or migrating to another AI platform.
-
-## Sync Mechanism
-
-QMem has two related controls:
-
-- `同步对话`: the home-page button that continuously saves new conversations from the current platform to the local raw layer.
-- `同步记忆`: the advanced setting that controls whether QMem also performs incremental memory maintenance after sync.
-
-Common workflow:
-
-1. Turn on sync.
-2. Chat with AI as usual.
-3. Later, go to `迁移` and click `整理记忆`.
-4. Select the memory you want to export or inject.
-
-## Repository Structure
-
-- `popup/`: extension popup page.
-- `content/`: page-side collection and injection logic.
-- `background/`: extension background logic and incremental sync.
-- `backend_service/`: local FastAPI backend and recommended Skill catalog.
-- `prompts/`: runtime prompts.
-- `memory_transferor/`: Python memory pipeline, storage models, policies, and export tools.
+- `popup/`：扩展弹窗页面。
+- `content/`：页面侧采集与注入逻辑。
+- `background/`：扩展后台逻辑和增量同步。
+- `backend_service/`：本地 FastAPI 后端与推荐 Skill 目录。
+- `prompts/`：运行时 prompt。
+- `memory_transferor/`：Python 记忆流水线、存储模型、策略和导出工具。
