@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/slogan.png" alt="QMem slogan" width="760">
+  <img src="docs/images/slogan.png" alt="QMem slogan" width="560">
 </p>
 
 <p align="center">
