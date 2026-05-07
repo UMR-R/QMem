@@ -5,12 +5,39 @@
 
 import { updateMemory } from "./memory_engine.js";
 
+async function _broadcastCaptureDisabled() {
+  const tabs = await chrome.tabs.query({});
+  await Promise.allSettled(
+    tabs
+      .filter(tab => tab.id && tab.url && !/^(chrome|chrome-extension|about|edge):\/\//.test(tab.url))
+      .map(tab => new Promise(resolve => {
+        chrome.tabs.sendMessage(tab.id, { type: "TOGGLE_CAPTURE", enabled: false }, () => {
+          void chrome.runtime.lastError;
+          resolve();
+        });
+      }))
+  );
+}
+
 async function _forwardRoundToLocalBackend(message) {
-  const settings = await chrome.storage.local.get(["backend_url"]);
+  const settings = await chrome.storage.local.get(["backend_url", "storage_path"]);
+  const storagePath = String(settings["storage_path"] || "").trim();
+  if (!storagePath) {
+    await chrome.storage.local.set({
+      keepUpdated: false,
+      last_raw_append_error: {
+        type: "missing_storage_path",
+        updatedAt: Date.now(),
+      },
+    });
+    await _broadcastCaptureDisabled();
+    console.warn("[Background] 本地目录未配置，跳过 append");
+    return;
+  }
   const backendUrl = (settings["backend_url"] || "http://127.0.0.1:8765").replace(/\/$/, "");
 
   try {
-    await fetch(`${backendUrl}/api/conversations/append`, {
+    const response = await fetch(`${backendUrl}/api/conversations/append`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -23,6 +50,12 @@ async function _forwardRoundToLocalBackend(message) {
         user_text: message.userText,
         assistant_text: message.assistantText,
       }),
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    await chrome.storage.local.set({
+      last_raw_append_at: Date.now(),
     });
   } catch (err) {
     console.warn("[Background] 本地后端未连接，跳过 append:", err.message);

@@ -14,6 +14,8 @@ const STORAGE_KEYS = {
   realtimeUpdate: "realtimeUpdate",
   detailedInjection: "detailedInjection",
   lastSyncAt: "last_sync_at",
+  lastRawAppendAt: "last_raw_append_at",
+  lastRawAppendError: "last_raw_append_error",
   savedSkills: "saved_skill_ids",
   organizeJobState: "organize_job_state",
   memorySelection: "memory_selection_ids",
@@ -90,6 +92,7 @@ const state = {
 };
 
 const DEFAULT_BACKEND_URL = "http://127.0.0.1:8765";
+let summaryRefreshTimer = null;
 
 function logPopupError(scope, error, extra = {}) {
   const normalized = normalizeError(error, scope);
@@ -136,6 +139,28 @@ function normalizeError(error, fallback = "操作失败") {
 
 function errorMessage(error, fallback = "操作失败") {
   return normalizeError(error, fallback).message;
+}
+
+function hasStoragePath(value = state.storagePath) {
+  return !!String(value || "").trim();
+}
+
+function currentStoragePathInputValue() {
+  return document.getElementById("storageDirInput")?.value.trim() || "";
+}
+
+function requireStoragePath(action = "使用同步功能") {
+  const inputValue = currentStoragePathInputValue();
+  if (hasStoragePath()) return true;
+  if (inputValue) {
+    toast("请先保存本地路径", true);
+    return false;
+  }
+  renderDirectory();
+  renderSync();
+  renderActionAvailability();
+  toast(`请先在设置页输入本地路径，再${action}`, true);
+  return false;
 }
 
 function isExpectedSettingsFailure(error) {
@@ -476,9 +501,12 @@ function setView(viewName) {
 function renderSync() {
   const syncBtn = document.getElementById("syncBtn");
   const dot = document.getElementById("syncDot");
+  const storageReady = hasStoragePath();
 
   let statusText = "同步对话已暂停";
-  let hintText = "点击开启后，持续记录你与大模型的对话到本地";
+  let hintText = storageReady
+    ? "点击开启后，持续记录你与大模型的对话到本地"
+    : "请先在设置页输入本地路径";
 
   if (state.syncEnabled) {
     if (state.apiKeyConfigured && state.realtimeUpdate && state.keepUpdated) {
@@ -496,7 +524,10 @@ function renderSync() {
   document.getElementById("syncStatusText").textContent = statusText;
   document.getElementById("syncHintText").textContent = hintText;
   syncBtn.classList.toggle("is-active", state.syncEnabled);
+  syncBtn.classList.toggle("is-disabled", !storageReady && !state.syncEnabled);
   syncBtn.setAttribute("aria-pressed", String(state.syncEnabled));
+  syncBtn.setAttribute("aria-disabled", String(!storageReady && !state.syncEnabled));
+  syncBtn.title = storageReady ? "" : "请先在设置页输入本地路径";
   dot.classList.toggle("is-active", state.syncEnabled);
 }
 
@@ -507,9 +538,9 @@ function renderStats(summary) {
 }
 
 function renderDirectory() {
-  const value = state.storagePath || state.dirHandle?.name || "";
+  const value = state.storagePath || "";
   document.getElementById("storageDirInput").value = value;
-  document.getElementById("storageDirInput").placeholder = value ? "" : "请输入或选择本地存储目录";
+  document.getElementById("storageDirInput").placeholder = value ? "" : "请输入本地存储目录";
 }
 
 function renderSettings() {
@@ -540,15 +571,19 @@ function renderActionAvailability() {
   const organizeBtnWrap = document.getElementById("organizeBtnWrap");
   const organizeHint = document.getElementById("organizeRequirementHint");
   if (!organizeBtn) return;
-  const enabled = !!state.apiKeyConfigured;
+  const storageReady = hasStoragePath();
+  const enabled = !!state.apiKeyConfigured && storageReady;
   organizeBtn.disabled = !enabled;
   organizeBtn.style.opacity = enabled ? "" : "0.5";
   organizeBtn.title = "";
   if (organizeBtnWrap) {
-    organizeBtnWrap.title = enabled ? "" : "请先添加 API 后使用";
+    organizeBtnWrap.title = enabled
+      ? ""
+      : (storageReady ? "请先添加 API 后使用" : "请先输入本地路径");
   }
   if (organizeHint) {
     organizeHint.classList.toggle("hidden", enabled);
+    organizeHint.textContent = storageReady ? "请先在设置页配置 API Key" : "请先在设置页输入本地路径";
   }
 }
 
@@ -1091,8 +1126,42 @@ function renderRecommendedSkillItems(items, meta = null) {
   renderSkillActions();
 }
 
+function scheduleSummaryRefresh(reason = "memory-updated") {
+  if (summaryRefreshTimer) {
+    clearTimeout(summaryRefreshTimer);
+  }
+  summaryRefreshTimer = setTimeout(() => {
+    summaryRefreshTimer = null;
+    refreshSummary().catch(err => {
+      logPopupError(`Refresh summary after ${reason} failed`, err, {
+        backendUrl: state.backendUrl || DEFAULT_BACKEND_URL,
+      });
+    });
+  }, 300);
+}
+
 
 async function refreshSummary() {
+  if (!hasStoragePath()) {
+    state.categories.profile = 0;
+    state.categories.preferences = 0;
+    state.categories.projects = 0;
+    state.categories.workflows = 0;
+    state.categories.daily_notes = 0;
+    state.memoryItemsByCategory = {};
+    renderSelectionList();
+    renderStats({
+      lastSyncAt: state.lastSyncAt,
+      conversationCount: 0,
+      memoryItemCount: 0,
+    });
+    if (state.currentSkillTab === "my") {
+      renderSkillList([], state.selectedSkillIds, { showDelete: false });
+    }
+    renderSkillActions();
+    return;
+  }
+
   try {
     const locale = IS_ZH_UI ? "zh-CN" : "en-US";
     const [summary, categories] = await Promise.all([
@@ -1175,6 +1244,10 @@ async function saveSettings(showToast = true) {
     state.apiKey = document.getElementById("apiKeyInput").value.trim();
     state.backendUrl = rawBackendUrl;
     state.storagePath = document.getElementById("storageDirInput").value.trim();
+    if (!hasStoragePath()) {
+      state.syncEnabled = false;
+      state.realtimeUpdate = false;
+    }
     await storageSet({
       [STORAGE_KEYS.apiProvider]: state.apiProvider,
       [STORAGE_KEYS.apiKey]: state.apiKey,
@@ -1182,6 +1255,8 @@ async function saveSettings(showToast = true) {
       [STORAGE_KEYS.apiModel]: state.apiModel,
       [STORAGE_KEYS.backendUrl]: state.backendUrl,
       [STORAGE_KEYS.storagePath]: state.storagePath,
+      [STORAGE_KEYS.keepUpdated]: state.syncEnabled,
+      [STORAGE_KEYS.realtimeUpdate]: state.realtimeUpdate,
       [STORAGE_KEYS.detailedInjection]: state.detailedInjection,
     });
     const backendSettings = await backendApi().saveSettings(state.backendUrl, {
@@ -1199,7 +1274,9 @@ async function saveSettings(showToast = true) {
     state.apiProvider = backendSettings.api_provider || state.apiProvider;
     state.apiBaseUrl = backendSettings.api_base_url || state.apiBaseUrl;
     state.apiModel = backendSettings.api_model || state.apiModel;
-    state.storagePath = backendSettings.storage_path || state.storagePath;
+    state.storagePath = backendSettings.storage_path || "";
+    state.syncEnabled = !!backendSettings.keep_updated;
+    state.realtimeUpdate = !!backendSettings.realtime_update;
     state.detailedInjection = !!backendSettings.detailed_injection;
     renderDirectory();
     renderSettings();
@@ -1258,11 +1335,32 @@ async function broadcastCaptureToggle(enabled) {
 }
 
 async function toggleSync() {
-  state.syncEnabled = !state.syncEnabled;
+  const nextEnabled = !state.syncEnabled;
+  if (nextEnabled && !requireStoragePath("开启同步对话")) {
+    state.syncEnabled = false;
+    await storageSet({ [STORAGE_KEYS.keepUpdated]: false });
+    try {
+      await broadcastCaptureToggle(false);
+    } catch {
+      // Ignore content-script toggle failures while blocking the action.
+    }
+    return;
+  }
+
+  state.syncEnabled = nextEnabled;
   try {
     const result = await backendApi().toggleSync(state.backendUrl, { enabled: state.syncEnabled });
     state.lastSyncAt = result.last_sync_at ?? state.lastSyncAt;
-  } catch {
+  } catch (err) {
+    if (state.syncEnabled && errorMessage(err, "").includes("本地路径")) {
+      state.syncEnabled = false;
+      await storageSet({ [STORAGE_KEYS.keepUpdated]: false });
+      renderSync();
+      renderSettings();
+      renderActionAvailability();
+      toast("请先在设置页输入本地路径，再开启同步对话", true);
+      return;
+    }
     // Fallback to local state if backend is offline.
   }
   await storageSet({ [STORAGE_KEYS.keepUpdated]: state.syncEnabled });
@@ -1285,6 +1383,9 @@ async function toggleSync() {
 
 async function runOrganize() {
   const organizeBtn = document.getElementById("organizeBtn");
+  if (!requireStoragePath("整理记忆")) {
+    return;
+  }
   if (!state.apiKeyConfigured) {
     renderActionAvailability();
     toast("请先在设置页配置 API Key", true);
@@ -1757,6 +1858,9 @@ async function injectPackage() {
 }
 
 async function addCurrentConversation() {
+  if (!requireStoragePath("加入当前对话")) {
+    return;
+  }
   const button = document.getElementById("addCurrentConversationBtn");
   button.disabled = true;
   button.style.opacity = "0.65";
@@ -1787,6 +1891,9 @@ async function addCurrentConversation() {
 }
 
 async function addPlatformMemory() {
+  if (!requireStoragePath("加入平台记忆")) {
+    return;
+  }
   const button = document.getElementById("addPlatformMemoryBtn");
   button.disabled = true;
   button.style.opacity = "0.65";
@@ -1999,6 +2106,27 @@ function bindEvents() {
     btn.addEventListener("click", () => setView(btn.dataset.back));
   });
 
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== "local") return;
+    if (changes[STORAGE_KEYS.lastRawAppendAt]) {
+      state.lastSyncAt = new Date(changes[STORAGE_KEYS.lastRawAppendAt].newValue).toISOString();
+      scheduleSummaryRefresh("raw append");
+    }
+    const appendError = changes[STORAGE_KEYS.lastRawAppendError]?.newValue;
+    if (appendError?.type === "missing_storage_path") {
+      toast("请先在设置页输入本地路径，再开启同步对话", true);
+      state.syncEnabled = false;
+      storageSet({ [STORAGE_KEYS.keepUpdated]: false }).catch(err => {
+        logPopupError("Persist sync disabled after missing path", err);
+      });
+      broadcastCaptureToggle(false).catch(err => {
+        logPopupError("Broadcast sync disabled after missing path", err);
+      });
+      renderSync();
+      renderActionAvailability();
+    }
+  });
+
   document.getElementById("syncBtn").addEventListener("click", toggleSync);
   document.getElementById("selectDirBtn").addEventListener("click", () => {
     saveSettings(false).then(() => {
@@ -2038,6 +2166,12 @@ function bindEvents() {
   });
 
   document.getElementById("realtimeUpdateToggle").addEventListener("change", async event => {
+    if (event.target.checked && !requireStoragePath("开启同步记忆")) {
+      state.realtimeUpdate = false;
+      event.target.checked = false;
+      await storageSet({ [STORAGE_KEYS.realtimeUpdate]: false });
+      return;
+    }
     state.realtimeUpdate = event.target.checked;
     await storageSet({ [STORAGE_KEYS.realtimeUpdate]: state.realtimeUpdate });
     try {
@@ -2141,6 +2275,9 @@ function bindEvents() {
   document.getElementById("injectSkillBtn").addEventListener("click", injectSkills);
 
   document.getElementById("importHistoryBtn").addEventListener("click", () => {
+    if (!requireStoragePath("导入对话")) {
+      return;
+    }
     document.getElementById("importFileInput").click();
   });
 
@@ -2181,6 +2318,7 @@ async function init() {
     STORAGE_KEYS.apiBaseUrl,
     STORAGE_KEYS.apiModel,
     STORAGE_KEYS.backendUrl,
+    STORAGE_KEYS.storagePath,
     STORAGE_KEYS.keepUpdated,
     STORAGE_KEYS.keepUpdatedStrategy,
     STORAGE_KEYS.realtimeUpdate,
@@ -2224,8 +2362,23 @@ async function init() {
     state.apiBaseUrl = backendSettings.api_base_url || state.apiBaseUrl;
     state.apiModel = backendSettings.api_model || state.apiModel;
     state.detailedInjection = !!backendSettings.detailed_injection;
+    await storageSet({ [STORAGE_KEYS.storagePath]: state.storagePath });
   } catch {
     // Keep extension-local settings when backend is offline.
+  }
+
+  if (!hasStoragePath()) {
+    state.syncEnabled = false;
+    state.realtimeUpdate = false;
+    await storageSet({
+      [STORAGE_KEYS.keepUpdated]: false,
+      [STORAGE_KEYS.realtimeUpdate]: false,
+    });
+    try {
+      await backendApi().toggleSync(state.backendUrl, { enabled: false });
+    } catch {
+      // Ignore backend toggle failures while local path is missing.
+    }
   }
 
   if (!hasStoredSyncPreference) {

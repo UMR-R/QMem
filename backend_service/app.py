@@ -4961,6 +4961,23 @@ def count_raw_conversations(path: Path) -> int:
 
 
 def build_summary(settings: dict[str, Any]) -> SummaryResponse:
+    if not str(settings.get("storage_path") or "").strip():
+        return SummaryResponse(
+            last_sync_at=settings.get("last_sync_at"),
+            conversation_count=0,
+            memory_item_count=0,
+            sync_enabled=bool(settings.get("keep_updated")),
+            breakdown={
+                "profile": 0,
+                "preferences": 0,
+                "workflows": 0,
+                "projects": 0,
+                "persistent": 0,
+                "episodes": 0,
+                "raw_conversations": 0,
+            },
+        )
+
     root = get_storage_root(settings)
     wiki = get_wiki(settings)
     episodes_dir = root / "episodes"
@@ -9341,7 +9358,7 @@ def get_settings() -> SettingsResponse:
         api_key_configured=bool(settings["api_key"]),
         api_base_url=settings["api_base_url"],
         api_model=settings["api_model"],
-        storage_path=str(get_storage_root(settings)),
+        storage_path=str(settings.get("storage_path") or ""),
         keep_updated=bool(settings["keep_updated"]),
         realtime_update=bool(settings["realtime_update"]),
         detailed_injection=bool(settings.get("detailed_injection")),
@@ -9352,14 +9369,19 @@ def get_settings() -> SettingsResponse:
 
 @app.post("/api/settings", response_model=SettingsResponse)
 def update_settings(payload: SettingsUpdate) -> SettingsResponse:
-    settings = save_settings(payload.model_dump())
-    get_storage_root(settings, create=True)
+    payload_data = payload.model_dump()
+    if not str(payload_data.get("storage_path") or "").strip():
+        payload_data["keep_updated"] = False
+        payload_data["realtime_update"] = False
+    settings = save_settings(payload_data)
+    if str(settings.get("storage_path") or "").strip():
+        get_storage_root(settings, create=True)
     return SettingsResponse(
         api_provider=settings["api_provider"],
         api_key_configured=bool(settings["api_key"]),
         api_base_url=settings["api_base_url"],
         api_model=settings["api_model"],
-        storage_path=str(get_storage_root(settings)),
+        storage_path=str(settings.get("storage_path") or ""),
         keep_updated=bool(settings["keep_updated"]),
         realtime_update=bool(settings["realtime_update"]),
         detailed_injection=bool(settings.get("detailed_injection")),
@@ -9414,6 +9436,8 @@ def sync_status() -> dict[str, Any]:
 @app.post("/api/sync/toggle")
 def sync_toggle(payload: SyncToggleRequest) -> dict[str, Any]:
     settings = load_settings()
+    if payload.enabled and not str(settings.get("storage_path") or "").strip():
+        raise HTTPException(status_code=400, detail="请先输入本地路径")
     settings["keep_updated"] = payload.enabled
     if payload.enabled:
         settings = update_timestamp(settings)
@@ -9429,6 +9453,8 @@ def sync_toggle(payload: SyncToggleRequest) -> dict[str, Any]:
 @app.post("/api/conversations/append")
 def conversations_append(payload: ConversationAppendRequest) -> dict[str, Any]:
     settings = load_settings()
+    if not str(settings.get("storage_path") or "").strip():
+        raise HTTPException(status_code=400, detail="请先输入本地路径")
     append_raw_round(settings, payload)
     settings = update_timestamp(settings)
 
