@@ -52,6 +52,10 @@ class MemoryUpdater:
                 "Write all human-facing natural-language memory values in Chinese, "
                 "while preserving necessary proper nouns, model names, paper titles, "
                 "dataset names, code names, and technical terms in their original form.\n"
+                "Ordinary role labels, job titles, task labels, and UI-facing summaries "
+                "are not proper nouns; localize them into natural Chinese.\n"
+                "Do not generate English role labels or English alternatives unless the exact English phrase "
+                "appears in user-authored evidence as an official title or preferred wording.\n"
             )
         if language == "en":
             return (
@@ -63,6 +67,8 @@ class MemoryUpdater:
             "TARGET DISPLAY LANGUAGE: infer from the new conversation\n"
             "Write human-facing memory values in the dominant language of the new conversation, "
             "while preserving necessary proper nouns and technical terms in their original form.\n"
+            "Ordinary role labels, job titles, task labels, and UI-facing summaries should follow that language. "
+            "Do not invent English labels when the evidence is not English.\n"
         )
 
     @classmethod

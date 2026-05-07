@@ -658,6 +658,10 @@ class MemoryBuilder:
                 "Write all human-facing natural-language memory values in Chinese, "
                 "while preserving necessary proper nouns, model names, paper titles, "
                 "dataset names, code names, and technical terms in their original form.\n"
+                "Ordinary role labels, job titles, task labels, and UI-facing summaries "
+                "are not proper nouns; localize them into natural Chinese.\n"
+                "Do not generate English role labels or English alternatives unless the exact English phrase "
+                "appears in user-authored evidence as an official title or preferred wording.\n"
             )
         if language == "en":
             return (
@@ -669,6 +673,8 @@ class MemoryBuilder:
             "TARGET DISPLAY LANGUAGE: infer from the source evidence\n"
             "Write human-facing memory values in the dominant language of the supporting episodes, "
             "while preserving necessary proper nouns and technical terms in their original form.\n"
+            "Ordinary role labels, job titles, task labels, and UI-facing summaries should follow that language. "
+            "Do not invent English labels when the evidence is not English.\n"
         )
 
     def _build_episodes(self, conv: RawConversation) -> list[EpisodicMemory]:

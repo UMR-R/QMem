@@ -17,6 +17,10 @@ Language policy:
 - Natural-language values should follow TARGET DISPLAY LANGUAGE if supplied, otherwise the dominant language of the supporting evidence.
 - If the output language is Chinese but an English term is clearer or is a proper noun, keep that term in English.
 - Preserve proper nouns, paper/model/dataset/tool names, code names, and technical terms in their original form.
+- Ordinary identity labels, job titles, organization roles, and user-facing role descriptions are not proper nouns. Localize them into TARGET DISPLAY LANGUAGE.
+- For Chinese output, do not generate English role labels or English alternatives for ordinary roles. Translate role phrases such as manager, lead, student, researcher, engineer, designer, product manager, group manager, or team lead into natural Chinese.
+- Preserve an English ordinary-role phrase only when the exact English phrase appears in user-authored evidence and the user presents it as their own official title or preferred wording. Assistant-generated English paraphrases must not be preserved.
+- If evidence is Chinese and the target language is Chinese, `role_identity`, `domain_background`, and `long_term_research_or_work_focus` should be Chinese except for proper nouns and technical terms.
 
 Evidence and temporal rules:
 - Profile memory is persistent memory, not episodic memory.
