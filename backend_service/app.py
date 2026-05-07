@@ -4406,9 +4406,21 @@ def conversation_signature(conv: RawConversation) -> str:
         "platform": conv.platform,
         "conv_id": conv.conv_id,
         "title": conv.title,
-        "messages": [{"role": m.role, "content": m.content} for m in conv.messages],
-        "start_time": conv.start_time.isoformat() if conv.start_time else "",
-        "end_time": conv.end_time.isoformat() if conv.end_time else "",
+        "messages": [
+            {
+                "role": m.role,
+                "content": m.content,
+                "timestamp": m.timestamp,
+            }
+            for m in conv.messages
+        ],
+        "turns": [
+            {
+                "turn_id": turn.turn_id,
+                "message_ids": list(turn.message_ids or []),
+            }
+            for turn in (conv.turns or [])
+        ],
     }
     return hashlib.sha1(
         json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
@@ -9233,9 +9245,9 @@ def append_raw_round(settings: dict[str, Any], payload: ConversationAppendReques
 
     messages = data.setdefault("messages", [])
     if _raw_turn_pair_exists(payload.chat_id, messages, payload.user_text, payload.assistant_text):
-        data["turns"] = _turn_payloads_from_message_dicts(payload.chat_id, messages)
-        data["update_time"] = payload.timestamp
-        file_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        if not data.get("turns"):
+            data["turns"] = _turn_payloads_from_message_dicts(payload.chat_id, messages)
+            file_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
         return file_path
 
     new_messages = [
