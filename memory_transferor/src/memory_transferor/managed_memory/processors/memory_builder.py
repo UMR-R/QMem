@@ -535,12 +535,42 @@ class MemoryBuilder:
         messages = [id_to_message[msg_id] for msg_id in turn.message_ids if msg_id in id_to_message]
         return "\n".join(f"[{msg.role.upper()}]: {msg.content}" for msg in messages)
 
-    def _turns_text(self, conv: RawConversation) -> str:
+    def _turns_text(
+        self,
+        conv: RawConversation,
+        target_turn_refs: list[str] | None = None,
+        *,
+        context_window: int = 1,
+    ) -> str:
+        target_set = {
+            str(turn_ref or "").strip()
+            for turn_ref in (target_turn_refs or [])
+            if str(turn_ref or "").strip()
+        }
+        included_turns = conv.turns
+        if target_set:
+            target_indexes = [
+                index
+                for index, turn in enumerate(conv.turns)
+                if str(turn.turn_id or "").strip() in target_set
+            ]
+            include_indexes: set[int] = set()
+            for index in target_indexes:
+                start = max(0, index - context_window)
+                end = min(len(conv.turns), index + context_window + 1)
+                include_indexes.update(range(start, end))
+            included_turns = [
+                turn
+                for index, turn in enumerate(conv.turns)
+                if index in include_indexes
+            ]
+
         parts: list[str] = []
-        for turn in conv.turns:
+        for turn in included_turns:
             text = self._turn_text(conv, turn.turn_id).strip()
             if text:
-                parts.append(f"TURN {turn.turn_id}\n{text}")
+                label = "TARGET TURN" if str(turn.turn_id or "").strip() in target_set else "CONTEXT TURN"
+                parts.append(f"{label} {turn.turn_id}\n{text}")
         return "\n\n".join(parts)
 
     def _episode_items_from_response(self, data: Any) -> list[dict[str, Any]]:
@@ -603,14 +633,14 @@ class MemoryBuilder:
     ) -> dict[str, dict[str, str]]:
         raw_display = item.get("display") if isinstance(item.get("display"), dict) else {}
         display: dict[str, dict[str, str]] = {}
-        for lang in ["zh", "en"]:
+        lang = primary_language if primary_language in {"zh", "en"} else self._detect_primary_language(f"{title}\n{summary}")
+        if lang in {"zh", "en"}:
             value = raw_display.get(lang) if isinstance(raw_display, dict) else None
             if isinstance(value, dict):
                 display[lang] = {
                     "title": str(value.get("title") or "").strip(),
                     "summary": str(value.get("summary") or "").strip(),
                 }
-        lang = primary_language if primary_language in {"zh", "en"} else self._detect_primary_language(f"{title}\n{summary}")
         if lang in {"zh", "en"}:
             current = display.setdefault(lang, {"title": "", "summary": ""})
             current["title"] = current["title"] or title
@@ -677,12 +707,28 @@ class MemoryBuilder:
             "Do not invent English labels when the evidence is not English.\n"
         )
 
-    def _build_episodes(self, conv: RawConversation) -> list[EpisodicMemory]:
-        text = self._turns_text(conv)[:7000] or conv.full_text()[:4000]
+    def _build_episodes(
+        self,
+        conv: RawConversation,
+        target_turn_refs: list[str] | None = None,
+    ) -> list[EpisodicMemory]:
+        target_turn_refs = [
+            str(turn_ref or "").strip()
+            for turn_ref in (target_turn_refs or [])
+            if str(turn_ref or "").strip()
+        ]
+        target_set = set(target_turn_refs)
+        text = self._turns_text(conv, target_turn_refs=target_turn_refs)[:7000] or conv.full_text()[:4000]
+        target_block = (
+            f"TARGET TURN REFS: {', '.join(target_turn_refs)}\n"
+            if target_turn_refs
+            else ""
+        )
         user_prompt = (
             f"Conversation title: {conv.title or conv.conv_id}\n"
             f"Platform: {conv.platform}\n"
-            f"Message count: {len(conv.messages)}\n\n"
+            f"Message count: {len(conv.messages)}\n"
+            f"{target_block}\n"
             f"{text}"
         )
         data = self.llm.extract_json(self.prompts["episode_system"], user_prompt)
@@ -692,6 +738,10 @@ class MemoryBuilder:
             turn_refs = self._normalize_episode_turn_refs(conv, item)
             if not turn_refs:
                 continue
+            if target_set:
+                turn_refs = [turn_ref for turn_ref in turn_refs if turn_ref in target_set]
+                if not turn_refs:
+                    continue
             for turn_ref in turn_refs:
                 turn_text = self._turn_text(conv, turn_ref)
                 primary_language = str(item.get("primary_language") or "").strip().lower()

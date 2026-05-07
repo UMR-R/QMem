@@ -64,7 +64,9 @@ MEMORY_TRANSFEROR_SRC = PROJECT_ROOT / "memory_transferor" / "src"
 JOB_LOCK = threading.Lock()
 L2_PERSISTENT_NODE_MAINTENANCE_VERSION = "l2_persistent_nodes_v8_node_delete_locks"
 PERSISTENT_REBUILD_VERSION = "persistent_rebuild_v2_semantic_candidates"
+EPISODE_SCHEMA_VERSION = "turn_v2_incremental"
 ORGANIZE_EPISODE_MAX_WORKERS = 4
+ORGANIZE_EPISODE_TURN_BATCH_SIZE = 4
 PERSISTENT_NODE_BATCH_SIZE = 8
 
 if str(MEMORY_TRANSFEROR_SRC) not in sys.path:
@@ -4427,6 +4429,45 @@ def conversation_signature(conv: RawConversation) -> str:
     ).hexdigest()
 
 
+def _raw_turn_messages(conv: RawConversation, turn_id: str) -> list[RawMessage]:
+    id_to_message = {msg.msg_id: msg for msg in conv.messages}
+    turn = next((item for item in conv.turns if item.turn_id == turn_id), None)
+    if turn is None:
+        return []
+    return [
+        id_to_message[msg_id]
+        for msg_id in (turn.message_ids or [])
+        if msg_id in id_to_message
+    ]
+
+
+def turn_signature(conv: RawConversation, turn_id: str) -> str:
+    messages = _raw_turn_messages(conv, turn_id)
+    payload = {
+        "turn_id": turn_id,
+        "messages": [
+            {
+                "role": msg.role,
+                "content": msg.content,
+                "timestamp": msg.timestamp,
+            }
+            for msg in messages
+        ],
+    }
+    return hashlib.sha1(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+
+
+def conversation_turn_signatures(conv: RawConversation) -> dict[str, str]:
+    signatures: dict[str, str] = {}
+    for turn in conv.turns:
+        turn_id = str(turn.turn_id or "").strip()
+        if turn_id:
+            signatures[turn_id] = turn_signature(conv, turn_id)
+    return signatures
+
+
 def load_l1_signals(settings: dict[str, Any]) -> tuple[L1SignalLayer, str]:
     l1_root = get_l1_root(settings, create=True)
     legacy_root = get_legacy_l1_root(settings)
@@ -5702,12 +5743,30 @@ def detect_primary_language(text: str) -> str:
     return ""
 
 
-def build_fallback_episode(conv: RawConversation, episode_id: str) -> EpisodicMemory:
-    preview = conv.full_text().strip().replace("\n", " ")
+def build_fallback_episode(
+    conv: RawConversation,
+    episode_id: str,
+    *,
+    turn_ref: str = "",
+) -> EpisodicMemory:
+    turn_messages = _raw_turn_messages(conv, turn_ref) if turn_ref else []
+    preview_source = (
+        "\n\n".join(f"[{message.role.upper()}]: {message.content}" for message in turn_messages)
+        if turn_messages
+        else conv.full_text()
+    )
+    preview = preview_source.strip().replace("\n", " ")
     if len(preview) > 220:
         preview = preview[:217] + "..."
     summary = preview or "该对话已记录，但自动提取摘要失败。"
-    primary_language = detect_primary_language(conv.full_text())
+    primary_language = detect_primary_language(preview_source)
+    turn_times = [
+        parsed
+        for parsed in (_parse_iso_datetime(message.timestamp) for message in turn_messages)
+        if parsed is not None
+    ]
+    start_time = min(turn_times) if turn_times else conv.start_time
+    end_time = max(turn_times) if turn_times else (conv.end_time or conv.start_time)
     display = {}
     if primary_language:
         display[primary_language] = {
@@ -5725,21 +5784,21 @@ def build_fallback_episode(conv: RawConversation, episode_id: str) -> EpisodicMe
         summary=summary,
         key_decisions=[],
         open_issues=[],
-        granularity="conversation",
-        turn_refs=[turn.turn_id for turn in (conv.turns or []) if getattr(turn, "turn_id", "")],
+        granularity="turn" if turn_ref else "conversation",
+        turn_refs=[turn_ref] if turn_ref else [turn.turn_id for turn in (conv.turns or []) if getattr(turn, "turn_id", "")],
         relates_to_profile=False,
         relates_to_preferences=False,
         relates_to_projects=[],
         relates_to_workflows=[],
-        time_range_start=conv.start_time,
-        time_range_end=conv.end_time,
+        time_range_start=start_time,
+        time_range_end=end_time,
     )
-    if conv.start_time is not None:
-        episode.created_at = conv.start_time
-    if conv.end_time is not None:
-        episode.updated_at = conv.end_time
-    elif conv.start_time is not None:
-        episode.updated_at = conv.start_time
+    if start_time is not None:
+        episode.created_at = start_time
+    if end_time is not None:
+        episode.updated_at = end_time
+    elif start_time is not None:
+        episode.updated_at = start_time
     episode.add_evidence("l0_raw", conv.conv_id, summary[:240] if summary else conv.conv_id)
     return episode
 
@@ -5749,6 +5808,15 @@ def build_episodes_for_conversation(settings: dict[str, Any], conv: RawConversat
     # from worker threads because canonical episode writes happen serially.
     builder = MemoryBuilder(llm=get_llm(settings), wiki=None)  # type: ignore[arg-type]
     return builder._build_episodes(conv)
+
+
+def build_episodes_for_turn_refs(
+    settings: dict[str, Any],
+    conv: RawConversation,
+    turn_refs: list[str],
+) -> list[EpisodicMemory]:
+    builder = MemoryBuilder(llm=get_llm(settings), wiki=None)  # type: ignore[arg-type]
+    return builder._build_episodes(conv, target_turn_refs=turn_refs)
 
 
 def persist_raw_conversations(root: Path, conversations: list[RawConversation], *, platform_hint: str = "") -> int:
@@ -6681,6 +6749,86 @@ def _remove_episode_storage_for_conversation(episodes_dir: Path, conv_id: str, e
         if path.exists():
             path.unlink()
     for old_episode_id in episode_ids:
+        for suffix in (".json", ".md"):
+            old_path = episodes_dir / f"{old_episode_id}{suffix}"
+            if old_path.exists():
+                old_path.unlink()
+
+
+def _episode_record_sort_key(record: dict[str, Any]) -> tuple[str, int, str]:
+    turn_index = 10**9
+    turn_refs = record.get("turn_refs") or []
+    if turn_refs:
+        try:
+            turn_index = int(str(turn_refs[0]).rsplit(":turn:", 1)[1])
+        except (IndexError, ValueError):
+            turn_index = 10**9
+    created = str(record.get("created_at") or record.get("time_range_start") or "")
+    episode_id = str(record.get("episode_id") or "")
+    return created, turn_index, episode_id
+
+
+def _write_episode_records_for_conversation(
+    episodes_dir: Path,
+    conv_id: str,
+    records: list[dict[str, Any]],
+) -> None:
+    path = _episode_container_path(episodes_dir, conv_id)
+    md_path = path.with_suffix(".md")
+    clean_records = sorted(records, key=_episode_record_sort_key)
+    if not clean_records:
+        for target in (path, md_path):
+            if target.exists():
+                target.unlink()
+        return
+
+    episodes: list[EpisodicMemory] = []
+    for record in clean_records:
+        try:
+            episodes.append(EpisodicMemory.model_validate(record))
+        except Exception:
+            continue
+    if not episodes:
+        for target in (path, md_path):
+            if target.exists():
+                target.unlink()
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "conversation_id": conv_id,
+                "episode_count": len(episodes),
+                "episodes": [episode.model_dump(mode="json") for episode in episodes],
+            },
+            ensure_ascii=False,
+            indent=2,
+            default=str,
+        ),
+        encoding="utf-8",
+    )
+    md_path.write_text(
+        "\n\n---\n\n".join(episode.to_markdown() for episode in episodes),
+        encoding="utf-8",
+    )
+
+
+def _remove_episode_ids_from_conversation(
+    episodes_dir: Path,
+    conv_id: str,
+    episode_ids: list[str],
+) -> None:
+    remove_ids = {str(episode_id or "").strip() for episode_id in episode_ids if str(episode_id or "").strip()}
+    if not remove_ids:
+        return
+    path = _episode_container_path(episodes_dir, conv_id)
+    kept_records = [
+        record
+        for record in _episode_records_from_file(path)
+        if str(record.get("episode_id") or "").strip() not in remove_ids
+    ]
+    _write_episode_records_for_conversation(episodes_dir, conv_id, kept_records)
+    for old_episode_id in remove_ids:
         for suffix in (".json", ".md"):
             old_path = episodes_dir / f"{old_episode_id}{suffix}"
             if old_path.exists():
@@ -8819,6 +8967,8 @@ def _run_organize_job(job_id: str, settings: dict[str, Any]) -> None:
             "raw_conversations": 0,
             "raw_conversations_changed": 0,
             "raw_conversations_skipped": 0,
+            "raw_turns_changed": 0,
+            "raw_turns_skipped": 0,
             "episode_llm_calls": 0,
             "episodes_built": 0,
             "persistent_rebuilt": False,
@@ -8872,19 +9022,46 @@ def _run_organize_job(job_id: str, settings: dict[str, Any]) -> None:
 
         episode_stage_started = time.perf_counter()
         changed_conversations: list[dict[str, Any]] = []
+        episode_batches: list[dict[str, Any]] = []
         for conv in conversations:
             current_step += 1
             raw_key = f"{conv.platform}:{conv.conv_id}"
             signature = conversation_signature(conv)
+            current_turn_signatures = conversation_turn_signatures(conv)
+            current_turn_refs = list(current_turn_signatures.keys())
             existing_meta = raw_index.get(raw_key, {})
-            existing_episode_ids = [
-                str(item).strip()
-                for item in (
-                    existing_meta.get("episode_ids")
-                    or ([existing_meta.get("episode_id")] if existing_meta.get("episode_id") else [])
+            previous_turn_signatures = (
+                existing_meta.get("turn_signatures")
+                if isinstance(existing_meta.get("turn_signatures"), dict)
+                else {}
+            )
+            raw_turn_episode_ids = (
+                existing_meta.get("turn_episode_ids")
+                if isinstance(existing_meta.get("turn_episode_ids"), dict)
+                else {}
+            )
+            previous_turn_episode_ids: dict[str, list[str]] = {}
+            for turn_ref, ids in raw_turn_episode_ids.items():
+                raw_ids = ids if isinstance(ids, list) else [ids]
+                clean_ids = [str(item).strip() for item in raw_ids if str(item or "").strip()]
+                previous_turn_episode_ids[str(turn_ref)] = clean_ids
+            existing_episode_ids = list(
+                dict.fromkeys(
+                    [
+                        episode_id
+                        for ids in previous_turn_episode_ids.values()
+                        for episode_id in ids
+                    ]
+                    or [
+                        str(item).strip()
+                        for item in (
+                            existing_meta.get("episode_ids")
+                            or ([existing_meta.get("episode_id")] if existing_meta.get("episode_id") else [])
+                        )
+                        if str(item or "").strip()
+                    ]
                 )
-                if str(item or "").strip()
-            ]
+            )
             episodes_dir = wiki.wiki_dir / "episodes"
 
             update_job(
@@ -8897,28 +9074,87 @@ def _run_organize_job(job_id: str, settings: dict[str, Any]) -> None:
                 },
             )
 
+            schema_ok = (
+                existing_meta.get("episode_schema") == EPISODE_SCHEMA_VERSION
+                and isinstance(previous_turn_signatures, dict)
+                and isinstance(raw_turn_episode_ids, dict)
+            )
+            episode_storage_ok = (
+                not existing_episode_ids
+                or _episode_container_has_ids(episodes_dir, conv.conv_id, existing_episode_ids)
+            )
+            turn_index_complete = all(turn_ref in previous_turn_episode_ids for turn_ref in current_turn_refs)
             if (
-                existing_meta.get("signature") == signature
-                and existing_meta.get("episode_schema") == "turn_v1"
-                and existing_episode_ids
-                and _episode_container_has_ids(episodes_dir, conv.conv_id, existing_episode_ids)
+                schema_ok
+                and episode_storage_ok
+                and previous_turn_signatures == current_turn_signatures
+                and turn_index_complete
             ):
                 organize_stats["raw_conversations_skipped"] += 1
+                organize_stats["raw_turns_skipped"] += len(current_turn_refs)
                 continue
 
             organize_stats["raw_conversations_changed"] += 1
-            _remove_episode_storage_for_conversation(episodes_dir, conv.conv_id, existing_episode_ids)
+            if not schema_ok or not episode_storage_ok:
+                changed_turn_refs = current_turn_refs
+                removed_turn_refs: list[str] = []
+                retained_turn_episode_ids: dict[str, list[str]] = {}
+                episode_ids_to_remove = existing_episode_ids
+            else:
+                changed_turn_refs = [
+                    turn_ref
+                    for turn_ref, turn_sig in current_turn_signatures.items()
+                    if previous_turn_signatures.get(turn_ref) != turn_sig
+                    or turn_ref not in previous_turn_episode_ids
+                ]
+                removed_turn_refs = [
+                    turn_ref
+                    for turn_ref in previous_turn_signatures
+                    if turn_ref not in current_turn_signatures
+                ]
+                retained_turn_episode_ids = {
+                    turn_ref: previous_turn_episode_ids.get(turn_ref, [])
+                    for turn_ref in current_turn_refs
+                    if turn_ref not in changed_turn_refs
+                }
+                episode_ids_to_remove = list(
+                    dict.fromkeys(
+                        [
+                            episode_id
+                            for turn_ref in [*changed_turn_refs, *removed_turn_refs]
+                            for episode_id in previous_turn_episode_ids.get(turn_ref, [])
+                        ]
+                    )
+                )
+
+            if episode_ids_to_remove:
+                _remove_episode_ids_from_conversation(episodes_dir, conv.conv_id, episode_ids_to_remove)
+            organize_stats["raw_turns_changed"] += len(changed_turn_refs)
+            organize_stats["raw_turns_skipped"] += max(0, len(current_turn_refs) - len(changed_turn_refs))
+
+            batch_size = max(1, ORGANIZE_EPISODE_TURN_BATCH_SIZE)
+            for start in range(0, len(changed_turn_refs), batch_size):
+                episode_batches.append(
+                    {
+                        "conv": conv,
+                        "raw_key": raw_key,
+                        "turn_refs": changed_turn_refs[start:start + batch_size],
+                    }
+                )
             changed_conversations.append(
                 {
                     "conv": conv,
                     "raw_key": raw_key,
                     "signature": signature,
+                    "turn_signatures": current_turn_signatures,
+                    "changed_turn_refs": changed_turn_refs,
+                    "retained_turn_episode_ids": retained_turn_episode_ids,
                 }
             )
 
         built_by_raw_key: dict[str, list[EpisodicMemory]] = {}
-        if changed_conversations:
-            worker_count = _organize_episode_worker_count(settings, len(changed_conversations))
+        if episode_batches:
+            worker_count = _organize_episode_worker_count(settings, len(episode_batches))
             organize_stats["episode_parallel_workers"] = worker_count
             update_job(
                 job_id,
@@ -8931,12 +9167,17 @@ def _run_organize_job(job_id: str, settings: dict[str, Any]) -> None:
             )
             with ThreadPoolExecutor(max_workers=worker_count) as executor:
                 future_map = {
-                    executor.submit(build_episodes_for_conversation, settings, item["conv"]): item
-                    for item in changed_conversations
+                    executor.submit(
+                        build_episodes_for_turn_refs,
+                        settings,
+                        item["conv"],
+                        item["turn_refs"],
+                    ): item
+                    for item in episode_batches
                 }
                 for completed_count, future in enumerate(as_completed(future_map), start=1):
                     item = future_map[future]
-                    built_by_raw_key[str(item["raw_key"])] = future.result()
+                    built_by_raw_key.setdefault(str(item["raw_key"]), []).extend(future.result())
                     update_job(
                         job_id,
                         status="running",
@@ -8946,34 +9187,45 @@ def _run_organize_job(job_id: str, settings: dict[str, Any]) -> None:
                             "message": "正在并行提取对话记忆...",
                         },
                     )
-            organize_stats["episode_llm_calls"] += len(changed_conversations)
+            organize_stats["episode_llm_calls"] += len(episode_batches)
 
         for item in changed_conversations:
             conv = item["conv"]
             raw_key = str(item["raw_key"])
             signature = str(item["signature"])
+            changed_turn_refs = set(item.get("changed_turn_refs") or [])
+            turn_episode_ids: dict[str, list[str]] = {
+                str(turn_ref): list(ids or [])
+                for turn_ref, ids in (item.get("retained_turn_episode_ids") or {}).items()
+            }
             built_episodes = built_by_raw_key.get(raw_key, [])
-            if not built_episodes:
-                episode_id = stable_episode_id(f"{raw_key}:fallback")
-                built_episodes = [build_fallback_episode(conv, episode_id)]
-                status = "fallback_built"
-            else:
-                status = "turn_episodes_built"
-
-            saved_episode_ids: list[str] = []
+            status = "turn_episodes_incremental"
+            saved_new_episode_count = 0
             for episode in built_episodes:
                 _normalize_episode_memory_routes(episode)
                 first_turn = episode.turn_refs[0] if episode.turn_refs else "conversation"
+                if changed_turn_refs and first_turn not in changed_turn_refs:
+                    continue
                 episode.episode_id = stable_episode_id(f"{raw_key}:{first_turn}:{episode.topic}")
                 wiki.save_episode(episode)
                 changed_episodes.append(episode)
-                saved_episode_ids.append(episode.episode_id)
-            organize_stats["episodes_built"] += len(saved_episode_ids)
+                turn_episode_ids.setdefault(first_turn, []).append(episode.episode_id)
+                saved_new_episode_count += 1
+            for turn_ref in item.get("changed_turn_refs") or []:
+                turn_episode_ids.setdefault(str(turn_ref), [])
+            saved_episode_ids = [
+                episode_id
+                for turn_ref in item.get("turn_signatures", {})
+                for episode_id in turn_episode_ids.get(str(turn_ref), [])
+            ]
+            organize_stats["episodes_built"] += saved_new_episode_count
             raw_index[raw_key] = {
                 "signature": signature,
                 "episode_id": saved_episode_ids[0] if saved_episode_ids else "",
                 "episode_ids": saved_episode_ids,
-                "episode_schema": "turn_v1",
+                "turn_signatures": item.get("turn_signatures", {}),
+                "turn_episode_ids": turn_episode_ids,
+                "episode_schema": EPISODE_SCHEMA_VERSION,
                 "status": status,
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }

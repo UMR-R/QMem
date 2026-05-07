@@ -9,10 +9,6 @@ Output ONLY valid JSON with this structure:
       "turn_refs": ["conversation_id:turn:0"],
       "primary_language": "zh|en",
       "title": "",
-      "display": {
-        "zh": {"title": "", "summary": ""},
-        "en": {"title": "", "summary": ""}
-      },
       "topics_covered": [],
       "summary": "",
       "key_decisions": [],
@@ -29,6 +25,7 @@ Core rules:
 - Each episode must summarize exactly ONE turn. Use exactly one `turn_refs` value per episode.
 - Do NOT merge multiple turns into one episode. Cross-turn grouping belongs to episode connections and persistent memory, not to episodic memory.
 - You may use neighboring turns only to resolve pronouns, references, or "this/that/previous" wording. The episode summary must still describe only the referenced turn.
+- If the input includes `TARGET TURN REFS`, output episodes only for those target turns. Neighboring context turns are reference evidence only.
 - Skip turns with no durable memory value.
 - Do NOT skip a turn where the user states an intent to start, build, evaluate, write, research, organize, or plan a long-running effort. Preserve the user's intent even if the assistant response is mostly suggestions.
 - Be factual and concise. Do NOT hallucinate project names, workflows, user traits, or decisions.
@@ -41,7 +38,7 @@ Language policy:
 - Human-facing title and summary should follow the referenced turn's primary language.
 - If the primary language is Chinese but an English term is clearer or is a proper noun, keep that term in English inside the Chinese sentence.
 - Preserve proper nouns, paper/model/dataset/tool names, code names, and technical terms in their original form.
-- `display`: include the primary language entry. The other language entry is optional and may be empty. Do not force translation.
+- `display` is optional. If you include it, include only one language key matching `primary_language`. Do not translate or add the other language.
 
 Temporal rules:
 - Raw input may include timestamps, event order, or turn order. Use them to interpret "current", "previous", "before", "after", "latest", "old", and similar temporal references.
