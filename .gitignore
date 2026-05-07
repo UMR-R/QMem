@@ -78,3 +78,7 @@ llm_memory_transferor/wiki
 llm_memory_transferor/wiki_test_samples_rerun
 backend_service/.state/
 llm_mem4/
+
+# User memory data directories - private, never commit
+xxn/
+scripts/
