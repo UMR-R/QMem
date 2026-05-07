@@ -15,6 +15,7 @@ const STORAGE_KEYS = {
   detailedInjection: "detailedInjection",
   lastSyncAt: "last_sync_at",
   lastRawAppendAt: "last_raw_append_at",
+  lastSyncBackendError: "last_sync_backend_error",
   savedSkills: "saved_skill_ids",
   organizeJobState: "organize_job_state",
   memorySelection: "memory_selection_ids",
@@ -92,7 +93,9 @@ const state = {
 };
 
 const DEFAULT_BACKEND_URL = "http://127.0.0.1:8765";
+const SYNC_HEALTH_CHECK_INTERVAL_MS = 5000;
 let summaryRefreshTimer = null;
+let syncBackendHealthTimer = null;
 
 function logPopupError(scope, error, extra = {}) {
   const normalized = normalizeError(error, scope);
@@ -502,6 +505,7 @@ function renderSync() {
   syncBtn.setAttribute("aria-disabled", "false");
   syncBtn.title = "";
   dot.classList.toggle("is-active", state.syncEnabled);
+  updateSyncBackendHealthPolling();
 }
 
 function renderStats(summary) {
@@ -1284,9 +1288,53 @@ async function broadcastCaptureToggle(enabled) {
   );
 }
 
-async function handleSyncBackendUnavailable(error) {
+function updateSyncBackendHealthPolling() {
+  if (!state.syncEnabled) {
+    if (syncBackendHealthTimer) {
+      clearInterval(syncBackendHealthTimer);
+      syncBackendHealthTimer = null;
+    }
+    return;
+  }
+  if (syncBackendHealthTimer) return;
+  syncBackendHealthTimer = setInterval(() => {
+    checkSyncBackendHealth().catch(err => {
+      logPopupError("Periodic sync backend health check failed", err);
+    });
+  }, SYNC_HEALTH_CHECK_INTERVAL_MS);
+}
+
+async function checkSyncBackendHealth() {
+  if (!state.syncEnabled) {
+    updateSyncBackendHealthPolling();
+    return;
+  }
+  try {
+    await backendApi().getHealth(state.backendUrl);
+  } catch (err) {
+    await handleSyncBackendUnavailable(err, {
+      showCommand: false,
+      toastMessage: "本地后端已断开，同步对话已暂停",
+    });
+  }
+}
+
+async function handleSyncBackendUnavailable(error, options = {}) {
+  const {
+    showCommand = true,
+    toastMessage = "请先在设置页配置并启动本地后端",
+  } = options;
   state.syncEnabled = false;
-  await storageSet({ [STORAGE_KEYS.keepUpdated]: false });
+  await storageSet({
+    [STORAGE_KEYS.keepUpdated]: false,
+    [STORAGE_KEYS.lastSyncBackendError]: {
+      type: "backend_unavailable",
+      source: "popup",
+      message: errorMessage(error, "无法连接到本地后端"),
+      backendUrl: state.backendUrl || DEFAULT_BACKEND_URL,
+      updatedAt: Date.now(),
+    },
+  });
   try {
     await broadcastCaptureToggle(false);
   } catch (broadcastError) {
@@ -1297,8 +1345,10 @@ async function handleSyncBackendUnavailable(error) {
   logPopupError("Sync requires local backend", error, {
     backendUrl: state.backendUrl || DEFAULT_BACKEND_URL,
   });
-  toast("请先在设置页配置并启动本地后端", true);
-  showCommandModal(buildBackendStartCommand(state.backendUrl), { checkBackendOnClose: true });
+  toast(toastMessage, true);
+  if (showCommand) {
+    showCommandModal(buildBackendStartCommand(state.backendUrl), { checkBackendOnClose: true });
+  }
 }
 
 async function toggleSync() {
@@ -1324,7 +1374,10 @@ async function toggleSync() {
     }
     // Keep the local off state even if the backend is already offline.
   }
-  await storageSet({ [STORAGE_KEYS.keepUpdated]: state.syncEnabled });
+  await storageSet({
+    [STORAGE_KEYS.keepUpdated]: state.syncEnabled,
+    [STORAGE_KEYS.lastSyncBackendError]: null,
+  });
   await broadcastCaptureToggle(state.syncEnabled);
   renderSync();
   renderSettings();
@@ -2062,9 +2115,21 @@ function bindEvents() {
 
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName !== "local") return;
+    if (changes[STORAGE_KEYS.keepUpdated]) {
+      state.syncEnabled = Boolean(changes[STORAGE_KEYS.keepUpdated].newValue);
+      renderSync();
+      renderSettings();
+    }
     if (changes[STORAGE_KEYS.lastRawAppendAt]) {
       state.lastSyncAt = new Date(changes[STORAGE_KEYS.lastRawAppendAt].newValue).toISOString();
       scheduleSummaryRefresh("raw append");
+    }
+    const syncBackendError = changes[STORAGE_KEYS.lastSyncBackendError]?.newValue;
+    if (syncBackendError?.type === "backend_unavailable" && syncBackendError.source !== "popup") {
+      state.syncEnabled = false;
+      renderSync();
+      renderSettings();
+      toast("本地后端已断开，同步对话已暂停", true);
     }
   });
 
@@ -2319,6 +2384,11 @@ async function init() {
   renderSettings();
   renderSync();
   renderActionAvailability();
+  if (state.syncEnabled) {
+    checkSyncBackendHealth().catch(err => {
+      logPopupError("Initial sync backend health check failed", err);
+    });
+  }
   await refreshSummary();
   await initializeDefaultMemorySelection();
   renderSelectionList();

@@ -5,6 +5,34 @@
 
 import { updateMemory } from "./memory_engine.js";
 
+async function _broadcastCaptureDisabled() {
+  const tabs = await chrome.tabs.query({});
+  await Promise.allSettled(
+    tabs
+      .filter(tab => tab.id && tab.url && !/^(chrome|chrome-extension|about|edge):\/\//.test(tab.url))
+      .map(tab => new Promise(resolve => {
+        chrome.tabs.sendMessage(tab.id, { type: "TOGGLE_CAPTURE", enabled: false }, () => {
+          void chrome.runtime.lastError;
+          resolve();
+        });
+      }))
+  );
+}
+
+async function _disableSyncBecauseBackendUnavailable(error, backendUrl) {
+  await chrome.storage.local.set({
+    keepUpdated: false,
+    last_sync_backend_error: {
+      type: "backend_unavailable",
+      source: "background",
+      message: String(error?.message || "无法连接到本地后端"),
+      backendUrl,
+      updatedAt: Date.now(),
+    },
+  });
+  await _broadcastCaptureDisabled();
+}
+
 async function _forwardRoundToLocalBackend(message) {
   const settings = await chrome.storage.local.get(["backend_url"]);
   const backendUrl = (settings["backend_url"] || "http://127.0.0.1:8765").replace(/\/$/, "");
@@ -32,6 +60,7 @@ async function _forwardRoundToLocalBackend(message) {
     });
   } catch (err) {
     console.warn("[Background] 本地后端未连接，跳过 append:", err.message);
+    await _disableSyncBecauseBackendUnavailable(err, backendUrl);
   }
 }
 
