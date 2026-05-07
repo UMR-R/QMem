@@ -71,8 +71,8 @@ uvicorn backend_service.app:app --host 127.0.0.1 --port 8765 --reload
 Open the extension Settings page and fill in:
 
 - `Local Backend URL`: recommended value is `http://127.0.0.1:8765`
-- `API Key`: the model API key used for memory organization
-- `Local Directory`: the local memory folder. Choose a location that can be kept long term.
+- `API Key`: used for memory organization and automatic extraction. You can leave it unconfigured if you only want to record raw conversations.
+- `Local Directory`: leave it empty to use the default directory, or enter a long-term absolute path.
 
 Then click `Save` and `Test Connection`.
 
@@ -104,9 +104,9 @@ The backend currently uses an OpenAI-compatible interface by default:
 ### Settings
 
 - `Local Backend URL`: the local FastAPI backend address, usually `http://127.0.0.1:8765`. The extension uses it to read/write memory and call organization APIs.
-- `API Key`: the model provider key used to organize memory, generate structured nodes, and produce frontend display text.
+- `API Key`: the model provider key used to organize memory, generate structured nodes, and produce frontend display text. It is not required when only recording raw conversations.
 - `Test Connection`: checks whether the local backend and model API are available. Use it after first setup or after replacing the key.
-- `Local Directory`: sets the storage directory for raw conversations, episodes, persistent memory, and metadata.
+- `Local Directory`: sets the storage directory for raw conversations, episodes, persistent memory, and metadata. Leave it empty to use the default directory; use an absolute path when customizing it.
 - `Import Conversation`: imports historical conversation files in `json`, `jsonl`, `md`, or `txt` into the local raw layer.
 - `Sync Memory`: when enabled, newly synced conversations automatically trigger incremental memory maintenance. When disabled, you can organize manually later.
 - `Detailed Injection`: controls whether `Inject` also includes related raw turns. When disabled, injection includes structured memory and episode summaries; when enabled, it includes more original context.
@@ -136,10 +136,10 @@ The backend currently uses an OpenAI-compatible interface by default:
 Default memory directory:
 
 ```text
-backend_service/.state/wiki/
+backend_service/wiki/
 ```
 
-Choose a local folder that you can keep long term. That folder is your local memory library.
+You can leave `Local Directory` empty in Settings. When it is empty, QMem uses the default directory above. If you customize it, enter an absolute path that is valid on your operating system.
 
 QMem uses layered memory:
 

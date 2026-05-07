@@ -5,35 +5,8 @@
 
 import { updateMemory } from "./memory_engine.js";
 
-async function _broadcastCaptureDisabled() {
-  const tabs = await chrome.tabs.query({});
-  await Promise.allSettled(
-    tabs
-      .filter(tab => tab.id && tab.url && !/^(chrome|chrome-extension|about|edge):\/\//.test(tab.url))
-      .map(tab => new Promise(resolve => {
-        chrome.tabs.sendMessage(tab.id, { type: "TOGGLE_CAPTURE", enabled: false }, () => {
-          void chrome.runtime.lastError;
-          resolve();
-        });
-      }))
-  );
-}
-
 async function _forwardRoundToLocalBackend(message) {
-  const settings = await chrome.storage.local.get(["backend_url", "storage_path"]);
-  const storagePath = String(settings["storage_path"] || "").trim();
-  if (!storagePath) {
-    await chrome.storage.local.set({
-      keepUpdated: false,
-      last_raw_append_error: {
-        type: "missing_storage_path",
-        updatedAt: Date.now(),
-      },
-    });
-    await _broadcastCaptureDisabled();
-    console.warn("[Background] 本地目录未配置，跳过 append");
-    return;
-  }
+  const settings = await chrome.storage.local.get(["backend_url"]);
   const backendUrl = (settings["backend_url"] || "http://127.0.0.1:8765").replace(/\/$/, "");
 
   try {
