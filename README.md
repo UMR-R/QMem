@@ -52,6 +52,7 @@ QMem 是一个面向 AI 对话的浏览器扩展程序。它可以把你在 Chat
 
 加载成功后，浏览器工具栏里会出现 QMem 扩展图标。
 
+
 ### 2. 启动本地后端
 
 首次使用时，在仓库根目录安装依赖：
@@ -65,6 +66,9 @@ pip install -r backend_service/requirements.txt
 ```bash
 uvicorn backend_service.app:app --host 127.0.0.1 --port 8765 --reload
 ```
+
+
+恭喜🎉 到这里已经可以顺着我们的扩展程序提示开始试用啦！ 也可以继续看下去
 
 ### 3. 配置设置页
 
