@@ -2160,6 +2160,12 @@ function bindEvents() {
   document.getElementById("closeCommandModalBtn").addEventListener("click", () => {
     closeCommandModal().catch(err => logPopupError("Close command modal failed", err));
   });
+  document.getElementById("copyCommandBtn").addEventListener("click", async () => {
+    const command = document.getElementById("commandModalText")?.textContent || "";
+    if (!command.trim()) return;
+    const copied = await copyTextToClipboard(command);
+    toast(copied ? "启动命令已复制" : "复制失败，请手动复制", !copied);
+  });
   document.getElementById("commandModal").addEventListener("click", event => {
     if (event.target.id === "commandModal") {
       closeCommandModal().catch(err => logPopupError("Close command modal failed", err));

@@ -1096,9 +1096,13 @@ button {
   line-height: 1.5;
 }
 
+.modal-command-wrap {
+  position: relative;
+}
+
 .modal-command {
   margin: 0;
-  padding: 14px;
+  padding: 14px 48px 14px 14px;
   border-radius: 16px;
   background: rgba(15, 23, 42, 0.96);
   color: #f8fafc;
@@ -1109,6 +1113,35 @@ button {
   user-select: text;
   -webkit-user-select: text;
   overflow: auto;
+}
+
+.modal-copy-command-btn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(226, 232, 240, 0.22);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #f8fafc;
+  cursor: pointer;
+}
+
+.modal-copy-command-btn:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.modal-copy-command-btn svg {
+  width: 16px;
+  height: 16px;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .toast {

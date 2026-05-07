@@ -271,8 +271,16 @@
             <h3 id="commandModalTitle">启动本地后端</h3>
             <button id="closeCommandModalBtn" class="modal-close-btn" type="button" aria-label="关闭弹窗">×</button>
           </div>
-          <p class="modal-copy">请打开Terminal，执行以下命令启动本地后端：</p>
-          <pre id="commandModalText" class="modal-command" tabindex="0"></pre>
+          <p class="modal-copy">请打开Terminal，在项目目录执行以下命令启动本地后端：</p>
+          <div class="modal-command-wrap">
+            <pre id="commandModalText" class="modal-command" tabindex="0"></pre>
+            <button id="copyCommandBtn" class="modal-copy-command-btn" type="button" aria-label="复制启动命令" title="复制启动命令">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <rect x="9" y="9" width="11" height="11" rx="2"></rect>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+              </svg>
+            </button>
+          </div>
         </div>
       </div>
       <div id="toast" class="toast hidden"></div>
