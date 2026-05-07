@@ -28,6 +28,8 @@ Project definition:
 - A project is a user-owned, actively advanced body of work, such as writing, implementation, product design, research planning, evaluation, or system building.
 - Prefer the parent project over every artifact, method, source, dataset, tool, or evaluation setup mentioned inside it.
 - Return `[]` if there is no real ongoing project.
+- Planning can be project evidence when it belongs to research, writing, implementation, evaluation, product work, or another ongoing body of work.
+- Personal-life adjustment plans and routine-only plans are usually daily notes, not projects, unless the user explicitly frames them as an ongoing tracked project.
 - The domain examples above are illustrative. Do not create fixed project categories from them; infer project names, stages, and boundaries from evidence.
 - Follow-up questions about literature, examples, tools, existing work, or related benchmarks usually update the parent project instead of becoming the project name.
 

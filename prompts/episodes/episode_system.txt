@@ -56,6 +56,8 @@ Field rules:
 - relates_to_profile: true only if the turn reveals stable background, identity, role, domain, language mode, or durable communication context.
 - relates_to_preferences: true only if the turn reveals stable response style, terminology, formatting, language, interaction, or selection criteria.
 - relates_to_projects: list only higher-level user-owned ongoing projects. If the user says they want to build or pursue a project, use a concise parent-project label derived from that user intent, not from later assistant suggestions or conversation titles.
+- A turn about planning can be project evidence when the user is planning research, writing, implementation, evaluation, product work, or another ongoing body of work.
+- Do not route a personal-life adjustment plan or routine-only plan to projects unless the user frames it as an ongoing tracked project.
 - relates_to_workflows: list only reusable procedures with a trigger and repeatable steps.
 
 Example policy:
