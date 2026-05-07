@@ -1284,15 +1284,45 @@ async function broadcastCaptureToggle(enabled) {
   );
 }
 
+async function handleSyncBackendUnavailable(error) {
+  state.syncEnabled = false;
+  await storageSet({ [STORAGE_KEYS.keepUpdated]: false });
+  try {
+    await broadcastCaptureToggle(false);
+  } catch (broadcastError) {
+    logPopupError("Disable capture after backend check failed", broadcastError);
+  }
+  renderSync();
+  renderSettings();
+  logPopupError("Sync requires local backend", error, {
+    backendUrl: state.backendUrl || DEFAULT_BACKEND_URL,
+  });
+  toast("请先在设置页配置并启动本地后端", true);
+  showCommandModal(buildBackendStartCommand(state.backendUrl), { checkBackendOnClose: true });
+}
+
 async function toggleSync() {
   const nextEnabled = !state.syncEnabled;
+
+  if (nextEnabled) {
+    try {
+      await backendApi().getHealth(state.backendUrl);
+    } catch (err) {
+      await handleSyncBackendUnavailable(err);
+      return;
+    }
+  }
 
   state.syncEnabled = nextEnabled;
   try {
     const result = await backendApi().toggleSync(state.backendUrl, { enabled: state.syncEnabled });
     state.lastSyncAt = result.last_sync_at ?? state.lastSyncAt;
-  } catch {
-    // Fallback to local state if backend is offline.
+  } catch (err) {
+    if (nextEnabled) {
+      await handleSyncBackendUnavailable(err);
+      return;
+    }
+    // Keep the local off state even if the backend is already offline.
   }
   await storageSet({ [STORAGE_KEYS.keepUpdated]: state.syncEnabled });
   await broadcastCaptureToggle(state.syncEnabled);
