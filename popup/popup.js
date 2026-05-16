@@ -204,6 +204,8 @@ const STRINGS = {
     selectionNoItemsDesc: "当前类别还没有整理出可单独选择的内容。",
     apiStatusOk: "API 调用：可用",
     syncBackendRequired: "请先在设置页配置并启动本地后端",
+    showMoreSkills: "查看更多",
+    showLessSkills: "收起",
   },
   en: {
     appTitle: "QMem",
@@ -355,6 +357,8 @@ const STRINGS = {
     selectionNoItemsDesc: "No individual items have been extracted for this category yet.",
     apiStatusOk: "API: OK",
     syncBackendRequired: "Please configure and start the local backend in Settings first",
+    showMoreSkills: "Show more",
+    showLessSkills: "Show less",
   },
 };
 
@@ -389,6 +393,7 @@ const state = {
   expandedCategories: new Set(),
   memoryItemsByCategory: {},
   recommendedSkillItems: [],
+  recommendedExpanded: false,
   storagePath: "",
   categories: {
     profile: 0,
@@ -1484,10 +1489,34 @@ function syncSkillSelection(skillId, checked) {
   }
 }
 
+const RECOMMENDED_INITIAL_COUNT = 3;
+
+function updateShowMoreBtn() {
+  const btn = document.getElementById("showMoreSkillsBtn");
+  const scroll = document.getElementById("skillListScroll");
+  if (!btn) return;
+  const total = state.recommendedSkillItems.length;
+  const remaining = total - RECOMMENDED_INITIAL_COUNT;
+  if (remaining <= 0 || state.currentSkillTab !== "recommended") {
+    btn.classList.add("hidden");
+    scroll?.classList.remove("is-scrollable");
+    return;
+  }
+  btn.classList.remove("hidden");
+  btn.textContent = state.recommendedExpanded
+    ? t("showLessSkills")
+    : `${t("showMoreSkills")} (${remaining})`;
+  scroll?.classList.toggle("is-scrollable", state.recommendedExpanded);
+}
+
 function renderRecommendedSkillItems(items, meta = null) {
   state.recommendedSkillItems = Array.isArray(items) ? [...items] : [];
   renderRecommendedSkillMeta(meta);
-  renderSkillList((items || []).slice(0, 3), state.selectedRecommendedIds, { showDelete: false });
+  const displayItems = state.recommendedExpanded
+    ? state.recommendedSkillItems
+    : state.recommendedSkillItems.slice(0, RECOMMENDED_INITIAL_COUNT);
+  renderSkillList(displayItems, state.selectedRecommendedIds, { showDelete: false });
+  updateShowMoreBtn();
   renderSkillActions();
 }
 
@@ -2645,9 +2674,11 @@ function bindEvents() {
 
   document.getElementById("mySkillTab").addEventListener("click", async () => {
     state.currentSkillTab = "my";
+    state.recommendedExpanded = false;
     document.getElementById("mySkillTab").classList.add("is-active");
     document.getElementById("recommendedSkillTab").classList.remove("is-active");
     renderRecommendedSkillMeta(null);
+    updateShowMoreBtn();
     renderSkillActions();
     try {
       const result = await backendApi().getMySkills(state.backendUrl);
@@ -2673,6 +2704,11 @@ function bindEvents() {
         renderRecommendedSkillItems([], null);
         toast(`${t("toastPrefixLoadRecommendedFailed")}${translateBackendError(errorMessage(err, t("errCheckBackend")))}`, true);
       });
+  });
+
+  document.getElementById("showMoreSkillsBtn").addEventListener("click", () => {
+    state.recommendedExpanded = !state.recommendedExpanded;
+    renderRecommendedSkillItems(state.recommendedSkillItems);
   });
 
   document.getElementById("saveRecommendedSkillBtn").addEventListener("click", saveRecommendedSkills);
@@ -2734,6 +2770,7 @@ function applyLang() {
   renderSync();
   renderSettings();
   renderDirectory();
+  updateShowMoreBtn();
   if (state.lastSummary) renderStats(state.lastSummary);
   const emptyCard = document.querySelector("[data-skill-id='skill:empty']");
   if (emptyCard) {

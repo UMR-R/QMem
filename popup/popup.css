@@ -802,11 +802,44 @@ button {
   color: #ffffff;
 }
 
+.skill-list-scroll {
+  overflow: hidden;
+}
+.skill-list-scroll.is-scrollable {
+  overflow-y: auto;
+  max-height: 278px;
+  padding-right: 2px;
+}
+.skill-list-scroll.is-scrollable::-webkit-scrollbar {
+  width: 4px;
+}
+.skill-list-scroll.is-scrollable::-webkit-scrollbar-track {
+  background: transparent;
+}
+.skill-list-scroll.is-scrollable::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: 4px;
+}
+
 .skill-list {
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
+
+.show-more-btn {
+  display: block;
+  width: 100%;
+  padding: 6px 0 2px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--primary);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+.show-more-btn:hover { text-decoration: underline; }
 
 .recommended-skill-meta {
   margin: -4px 0 10px;
