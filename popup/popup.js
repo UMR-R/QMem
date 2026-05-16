@@ -19,6 +19,7 @@ const STORAGE_KEYS = {
   savedSkills: "saved_skill_ids",
   organizeJobState: "organize_job_state",
   memorySelection: "memory_selection_ids",
+  lang: "ui_lang",
 };
 
 const SUPPORTED_HOSTS = new Set([
@@ -51,6 +52,315 @@ const CATEGORY_LABELS = IS_ZH_UI
       workflows: "Workflows / SOP",
       daily_notes: "Daily Notes",
     };
+
+const STRINGS = {
+  zh: {
+    appTitle: "迁忆",
+    brandSubtitle: "让你的对话记忆，随你而行",
+    syncBtnLabel: "同步对话",
+    migrate: "迁移",
+    settings: "设置",
+    lastSync: "最近同步",
+    conversationCount: "已记录对话",
+    memoryCount: "记忆条目",
+    contactUs: "联系我们",
+    organizeMemoryTitle: "整理记忆",
+    organizeRequirementHint: "请先在设置页配置 API Key",
+    addCurrentConversation: "加入当前对话",
+    addPlatformMemory: "加入平台记忆",
+    selectMemoryTitle: "勾选记忆内容",
+    export: "导出",
+    inject: "注入",
+    mySkill: "我的 Skill",
+    recommended: "为你推荐",
+    delete: "删除",
+    addToMySkill: "加入我的 Skill",
+    injectSession: "注入当前会话",
+    settingsTitle: "设置",
+    apiConfig: "API 配置",
+    backendUrlLabel: "本地后端地址",
+    save: "保存",
+    backendUrlHint: "可选地址：http://127.0.0.1:8765",
+    apiKeyLabel: "API Key",
+    testConnection: "测试连接",
+    localDirTitle: "本地目录",
+    localDirHint: "留空时使用默认目录 backend_service/wiki；如需自定义，请填写当前操作系统可用的绝对路径。",
+    syncStrategyTitle: "同步策略",
+    syncMemoryLabel: "同步记忆",
+    syncMemoryHint: "新对话到来后自动提取记忆",
+    injectStrategyTitle: "注入策略",
+    detailedInjectionLabel: "详细注入",
+    detailedInjectionHint: "对细节保留更高",
+    dataManagementTitle: "数据管理",
+    importConversation: "导入对话",
+    importConversationHint: "支持 txt/md/json 的原始对话",
+    clearAllMemory: "清理所有记忆",
+    clearAllMemoryHint: "删除已保存的对话和记忆文件，但保留当前设置",
+    clearCache: "清理缓存",
+    clearCacheHint: "清理本地临时缓存，保留主记忆文件",
+    modalTitle: "启动本地后端",
+    modalCopy: "请打开Terminal，在项目目录执行以下命令启动本地后端：",
+    backendUrlPlaceholder: "请输入本地后端地址",
+    apiKeyPlaceholder: "请输入 API Key",
+    apiKeyChangePlaceholder: "如需更换，请重新输入新的 API Key",
+    localDirPlaceholder: "留空使用默认目录",
+    ariaMore: "更多",
+    ariaBack: "返回",
+    ariaCloseModal: "关闭弹窗",
+    ariaCopyCommand: "复制启动命令",
+    syncPaused: "同步对话已暂停",
+    syncActive: "同步对话中",
+    syncHintDefault: "点击开启后，持续记录你与大模型的对话到本地",
+    syncHintWithMemory: "正在记录对话，并自动提取记忆",
+    syncHintNoMemory: "正在记录原始对话，可稍后在迁移页整理记忆",
+    syncHintNoKey: "正在记录原始对话，配置 API 后才会自动提取记忆",
+    countSuffix: " 条",
+    apiStatusUnconfigured: "API 调用：待配置",
+    apiStatusUnverified: "API 调用：待验证",
+    dirPlaceholder: "留空使用默认目录",
+    skillEmptyTitle: "还没有提取出 Skill",
+    skillEmptyDesc: "我的 Skill 会从已整理的记忆中自动提取。先开启同步或整理记忆，系统会逐步生成可复用的 Skill。",
+    toastDirSet: "目录已设置：",
+    toastBackendOnline: "本地后端已在线",
+    toastBackendOffline: "无法连接到本地后端",
+    toastBackendDisconnected: "本地后端已断开，同步对话已暂停",
+    toastMemoryDeleted: "已删除这条记忆",
+    toastSkillRemovedSingle: "Skill 已从列表中移除",
+    toastSkillSelectFirst: "请先勾选要删除的 Skill",
+    toastSkillDeleted: "已删除选中的 Skill",
+    toastSettingsSaved: "设置已保存到本地后端",
+    toastApiOk: "API 调用可用，设置已保存",
+    toastSyncWithMemory: "同步对话已开启，将自动增量更新记忆",
+    toastSyncNoMemory: "记录已开启，可稍后在迁移页整理记忆",
+    toastSyncRawOnly: "记录已开启，当前仅保存原始对话",
+    toastSyncStopped: "同步对话已暂停",
+    toastNeedApiKey: "请先在设置页配置 API Key",
+    toastOrganizeRunning: "整理任务已在后台进行中",
+    toastOrganizeStarted: "已开始整理记忆，后台会继续运行",
+    toastOrganizeDone: "整理完成，记忆已更新",
+    toastMemoryUpToDate: "记忆已是最新版本",
+    toastExported: "记忆包已导出",
+    toastInjectFallback: "当前页面未就绪，记忆内容已复制到剪贴板。刷新当前对话页后可直接粘贴。",
+    toastInjected: "记忆内容已注入当前会话输入框",
+    toastAddingConversation: "正在加入当前对话...",
+    toastConversationAdded: "当前对话加入完成，可稍后点击整理记忆",
+    toastCollectingPlatform: "正在采集平台记忆...",
+    toastPlatformAdded: "平台记忆加入完成，可稍后点击整理记忆",
+    toastSkillSelectRecommended: "请至少选择一个推荐 Skill",
+    toastSkillExported: "Skill 已导出",
+    toastSkillInjectFallback: "当前页面未就绪，Skill 已复制到剪贴板。刷新当前对话页后可直接粘贴。",
+    toastSkillInjected: "Skill 已注入当前会话输入框",
+    toastCacheCleared: "临时缓存已清理",
+    toastMemoryCleared: "所有记忆文件已清理",
+    toastDirSaved: "本地目录已保存",
+    toastCopyCommandOk: "启动命令已复制",
+    toastCopyCommandFailed: "复制失败，请手动复制",
+    toastSyncMemoryOnWithApi: "同步记忆已开启。重新同步或刷新当前会话页后，将自动提取记忆。",
+    toastSyncMemoryOnNoApi: "同步记忆已开启，配置 API 后才会开始提取记忆。",
+    toastSyncMemoryOff: "同步记忆已关闭。新对话可稍后手动整理。",
+    toastDetailedOn: "详细注入已开启",
+    toastDetailedOff: "详细注入已关闭",
+    toastSkillSelectOne: "请至少选择一个 Skill",
+    toastPrefixDeleteFailed: "删除失败：",
+    toastPrefixSelectionFailed: "更新勾选失败：",
+    toastPrefixExpandFailed: "展开失败：",
+    toastPrefixBackendOnlineBut: "本地后端在线，但 ",
+    toastPrefixConnectionFailed: "连接失败：",
+    toastPrefixOrganizeFailed: "整理失败：",
+    toastPrefixOrganizeDoneWith: "整理完成：",
+    toastPrefixInjectFailed: "注入失败：",
+    toastPrefixConversationFailed: "加入当前对话失败：",
+    toastPrefixPlatformFailed: "加入平台记忆失败：",
+    toastPrefixAddFailed: "加入失败：",
+    toastPrefixExportFailed: "导出失败：",
+    toastPrefixLoadRecommendedFailed: "加载推荐 Skill 失败：",
+    toastPrefixImportFailed: "导入失败：",
+    toastPrefixClearFailed: "清理失败：",
+    toastPrefixSaveFailed: "保存失败：",
+    toastPrefixInitFailed: "初始化失败：",
+    toastImportComplete: "原始对话导入完成：",
+    toastImportJobCreated: "原始对话导入任务已创建：",
+    toastSavedSkillCount: "已加入我的 Skill：",
+    toastSavedSkillSuffix: " 项",
+    organizeProcessing: "正在整理记忆...",
+    organizeReady: "准备开始...",
+    organizeProcessingHint: "处理中...",
+    confirmDeleteMemory: "删除这条记忆吗？\n\n",
+    confirmClearAll: "这会删除已保存的对话和记忆文件，但保留当前设置。确定继续吗？",
+    errDeleteMemory: "无法删除这条记忆",
+    errSaveDir: "无法保存本地目录",
+    errConnectBackend: "无法连接本地后端",
+    errClearMemory: "无法清理所有记忆文件",
+    errCheckBackend: "请检查本地后端",
+    skillLabelDesc: "描述：",
+    skillLabelOutput: "产出：",
+    skillLabelGoal: "目标：",
+    skillLabelSteps: "步骤：",
+    skillUnnamed: "未命名 Skill",
+    workflowFallbackTitle: "工作流",
+    workflowFallbackDesc: "从你的记忆里提炼出的工作流程。",
+    persistentFallbackDesc: "由长期对话稳定提炼出的习惯与能力。",
+    selectionNoItems: "暂无细项",
+    selectionNoItemsDesc: "当前类别还没有整理出可单独选择的内容。",
+    apiStatusOk: "API 调用：可用",
+    syncBackendRequired: "请先在设置页配置并启动本地后端",
+  },
+  en: {
+    appTitle: "QMem",
+    brandSubtitle: "Take your AI memory wherever you go",
+    syncBtnLabel: "Sync",
+    migrate: "Migrate",
+    settings: "Settings",
+    lastSync: "Last Sync",
+    conversationCount: "Conversations",
+    memoryCount: "Memory Items",
+    contactUs: "Contact Us",
+    organizeMemoryTitle: "Organize Memory",
+    organizeRequirementHint: "Please configure an API Key in Settings first",
+    addCurrentConversation: "Add Current Chat",
+    addPlatformMemory: "Add Platform Memory",
+    selectMemoryTitle: "Select Memory Items",
+    export: "Export",
+    inject: "Inject",
+    mySkill: "My Skills",
+    recommended: "Recommended",
+    delete: "Delete",
+    addToMySkill: "Save to My Skills",
+    injectSession: "Inject to Session",
+    settingsTitle: "Settings",
+    apiConfig: "API Configuration",
+    backendUrlLabel: "Local Backend URL",
+    save: "Save",
+    backendUrlHint: "Default: http://127.0.0.1:8765",
+    apiKeyLabel: "API Key",
+    testConnection: "Test",
+    localDirTitle: "Local Directory",
+    localDirHint: "Leave blank to use the default directory (backend_service/wiki); or enter an absolute path for your OS.",
+    syncStrategyTitle: "Sync Strategy",
+    syncMemoryLabel: "Sync Memory",
+    syncMemoryHint: "Auto-extract memory after new conversations",
+    injectStrategyTitle: "Inject Strategy",
+    detailedInjectionLabel: "Detailed Injection",
+    detailedInjectionHint: "Preserve more detail in injections",
+    dataManagementTitle: "Data Management",
+    importConversation: "Import Conversations",
+    importConversationHint: "Supports raw conversations in txt/md/json",
+    clearAllMemory: "Clear All Memory",
+    clearAllMemoryHint: "Delete all saved conversations and memory files, keeping current settings",
+    clearCache: "Clear Cache",
+    clearCacheHint: "Clear local temporary cache, keeping main memory files",
+    modalTitle: "Start Local Backend",
+    modalCopy: "Open a Terminal and run the following command in your project directory to start the local backend:",
+    backendUrlPlaceholder: "Enter local backend URL",
+    apiKeyPlaceholder: "Enter your API Key",
+    apiKeyChangePlaceholder: "Enter a new API Key to replace the current one",
+    localDirPlaceholder: "Leave blank for default directory",
+    ariaMore: "More",
+    ariaBack: "Back",
+    ariaCloseModal: "Close dialog",
+    ariaCopyCommand: "Copy startup command",
+    syncPaused: "Sync paused",
+    syncActive: "Syncing",
+    syncHintDefault: "Click to start recording your AI conversations locally",
+    syncHintWithMemory: "Recording conversations and auto-extracting memory",
+    syncHintNoMemory: "Recording raw conversations, organize memory later in Migrate",
+    syncHintNoKey: "Recording raw conversations, auto-extraction not started",
+    countSuffix: "",
+    apiStatusUnconfigured: "API: Not configured",
+    apiStatusUnverified: "API: Not verified",
+    dirPlaceholder: "Leave blank for default directory",
+    skillEmptyTitle: "No Skills yet",
+    skillEmptyDesc: "Skills are auto-extracted from your organized memory. Start syncing or run Organize Memory, and Skills will appear over time.",
+    toastDirSet: "Directory set: ",
+    toastBackendOnline: "Local backend is online",
+    toastBackendOffline: "Cannot connect to local backend",
+    toastBackendDisconnected: "Local backend disconnected, sync paused",
+    toastMemoryDeleted: "Memory item deleted",
+    toastSkillRemovedSingle: "Skill removed from list",
+    toastSkillSelectFirst: "Select a Skill to delete first",
+    toastSkillDeleted: "Selected Skills deleted",
+    toastSettingsSaved: "Settings saved",
+    toastApiOk: "API connection OK, settings saved",
+    toastSyncWithMemory: "Sync started, memory will be auto-updated",
+    toastSyncNoMemory: "Recording started, organize memory later in Migrate",
+    toastSyncRawOnly: "Recording started, saving raw conversations only",
+    toastSyncStopped: "Sync paused",
+    toastNeedApiKey: "Please configure an API Key in Settings first",
+    toastOrganizeRunning: "Organize task is already running",
+    toastOrganizeStarted: "Organization started, running in background",
+    toastOrganizeDone: "Organization complete, memory updated",
+    toastMemoryUpToDate: "Memory is already up to date",
+    toastExported: "Memory package exported",
+    toastInjectFallback: "Page not ready — memory copied to clipboard. Refresh the page to paste.",
+    toastInjected: "Memory injected into current session",
+    toastAddingConversation: "Adding current conversation…",
+    toastConversationAdded: "Conversation added, organize memory later",
+    toastCollectingPlatform: "Collecting platform memory…",
+    toastPlatformAdded: "Platform memory added, organize memory later",
+    toastSkillSelectRecommended: "Select at least one recommended Skill",
+    toastSkillExported: "Skill exported",
+    toastSkillInjectFallback: "Page not ready — Skill copied to clipboard. Refresh the page to paste.",
+    toastSkillInjected: "Skill injected into current session",
+    toastCacheCleared: "Temporary cache cleared",
+    toastMemoryCleared: "All memory files cleared",
+    toastDirSaved: "Local directory saved",
+    toastCopyCommandOk: "Startup command copied",
+    toastCopyCommandFailed: "Copy failed, please copy manually",
+    toastSyncMemoryOnWithApi: "Memory sync enabled. Auto-extraction starts after next sync or page refresh.",
+    toastSyncMemoryOnNoApi: "Memory sync enabled. Configure an API Key to start extracting memory.",
+    toastSyncMemoryOff: "Memory sync disabled. New conversations can be organized manually.",
+    toastDetailedOn: "Detailed injection enabled",
+    toastDetailedOff: "Detailed injection disabled",
+    toastSkillSelectOne: "Select at least one Skill",
+    toastPrefixDeleteFailed: "Delete failed: ",
+    toastPrefixSelectionFailed: "Selection update failed: ",
+    toastPrefixExpandFailed: "Expand failed: ",
+    toastPrefixBackendOnlineBut: "Backend is online, but ",
+    toastPrefixConnectionFailed: "Connection failed: ",
+    toastPrefixOrganizeFailed: "Organization failed: ",
+    toastPrefixOrganizeDoneWith: "Organization complete: ",
+    toastPrefixInjectFailed: "Injection failed: ",
+    toastPrefixConversationFailed: "Failed to add conversation: ",
+    toastPrefixPlatformFailed: "Failed to add platform memory: ",
+    toastPrefixAddFailed: "Add failed: ",
+    toastPrefixExportFailed: "Export failed: ",
+    toastPrefixLoadRecommendedFailed: "Failed to load recommended Skills: ",
+    toastPrefixImportFailed: "Import failed: ",
+    toastPrefixClearFailed: "Clear failed: ",
+    toastPrefixSaveFailed: "Save failed: ",
+    toastPrefixInitFailed: "Initialization failed: ",
+    toastImportComplete: "Import complete: ",
+    toastImportJobCreated: "Import task created: ",
+    toastSavedSkillCount: "Added to My Skills: ",
+    toastSavedSkillSuffix: "",
+    organizeProcessing: "Organizing memory…",
+    organizeReady: "Getting ready…",
+    organizeProcessingHint: "Processing…",
+    confirmDeleteMemory: "Delete this memory item?\n\n",
+    confirmClearAll: "This will delete all saved conversations and memory files, but keep current settings. Are you sure?",
+    errDeleteMemory: "Cannot delete this memory item",
+    errSaveDir: "Cannot save local directory",
+    errConnectBackend: "Cannot connect to local backend",
+    errClearMemory: "Cannot clear memory files",
+    errCheckBackend: "Check local backend",
+    skillLabelDesc: "",
+    skillLabelOutput: "",
+    skillLabelGoal: "",
+    skillLabelSteps: "",
+    skillUnnamed: "Unnamed Skill",
+    workflowFallbackTitle: "Workflow",
+    workflowFallbackDesc: "A reusable workflow extracted from your memory.",
+    persistentFallbackDesc: "A stable habit or capability extracted from your conversations.",
+    selectionNoItems: "No items yet",
+    selectionNoItemsDesc: "No individual items have been extracted for this category yet.",
+    apiStatusOk: "API: OK",
+    syncBackendRequired: "Please configure and start the local backend in Settings first",
+  },
+};
+
+function t(key) {
+  return STRINGS[state.lang]?.[key] ?? STRINGS.zh[key] ?? key;
+}
 
 const state = {
   dirHandle: null,
@@ -90,9 +400,73 @@ const state = {
   categoryLabels: { ...CATEGORY_LABELS },
   selectionListScrollTop: 0,
   selectionChipScrollLefts: {},
+  lang: "zh",
+  lastSummary: null,
 };
 
 const DEFAULT_BACKEND_URL = "http://127.0.0.1:8765";
+const BACKEND_ERROR_EN = {
+  "请先在设置页配置 API Key": "Please configure an API Key in Settings first",
+  "请至少选择一项记忆内容": "Please select at least one memory item",
+  "当前对话为空，无法加入记忆": "Current conversation is empty, cannot add to memory",
+  "请至少选择一个 Skill": "Please select at least one Skill",
+  "当前默认配置不匹配这把 key": "The current configuration does not match this API key",
+  "加入当前对话失败": "Failed to add conversation",
+  "导入失败": "Import failed",
+  "整理失败": "Organization failed",
+};
+function translateBackendError(msg) {
+  if (!msg || state.lang !== "en") return msg;
+  const s = String(msg);
+  if (BACKEND_ERROR_EN[s]) return BACKEND_ERROR_EN[s];
+  if (s.startsWith("暂不支持 ")) return `Unsupported: ${s.slice(5)}`;
+  return s;
+}
+
+const BACKEND_MSG_EN = {
+  "正在并行整理画像、偏好和项目...": "Processing profile, preferences, and projects…",
+  "正在整理偏好设置...": "Organizing preferences…",
+  "正在整理项目记忆...": "Organizing project memory…",
+  "正在整理工作流...": "Organizing workflows…",
+  "正在重建索引...": "Rebuilding index…",
+  "正在维护结构化记忆节点...": "Updating persistent memory nodes…",
+  "正在归并平台记忆...": "Merging platform memory…",
+  "未找到可整理的历史对话": "No conversations found to organize",
+  "正在提取对话记忆...": "Extracting conversation memory…",
+  "正在并行提取对话记忆...": "Extracting conversation memory in parallel…",
+  "结构化记忆已是最新版本...": "Structured memory is already up to date…",
+  "记忆已是最新版本": "Memory is already up to date",
+  "结构化记忆节点已是最新版本...": "Persistent memory nodes are already up to date…",
+  "整理完成": "Organization complete",
+  "当前对话已加入记忆": "Current conversation added to memory",
+  "正在整理当前对话...": "Organizing current conversation…",
+  "当前对话已加入记忆，后台正在整理...": "Conversation added, organizing in background…",
+  "准备开始整理": "Preparing to organize…",
+  "整理失败": "Organization failed",
+  "导入历史失败": "Import failed",
+  "请先输入 API Key": "Please enter an API Key",
+  "请至少勾选一项记忆内容": "Please select at least one memory item",
+  "未找到当前标签页": "No active tab found",
+  "请先切换到 ChatGPT、Gemini、DeepSeek 或豆包页面": "Please switch to a ChatGPT, Gemini, DeepSeek, or Doubao page first",
+  "当前页面不支持注入": "This page does not support injection",
+  "当前页面不支持抓取整段对话": "This page does not support conversation capture",
+  "当前页面没有可加入的对话内容": "No conversation content found on this page",
+  "当前页面不支持抓取平台记忆": "This page does not support platform memory capture",
+  "当前页面没有可保存的平台记忆信息": "No platform memory found on this page",
+  "平台没有返回可解析的内容": "Platform returned no parseable content",
+  "未找到 JSON 结构": "No JSON structure found in response",
+  "JSON 结构不完整": "JSON structure is incomplete",
+  "当前页面未就绪，无法自动提交采集指令": "Page not ready, cannot auto-submit collection command",
+  "平台记忆采集发送失败": "Failed to send memory collection command",
+  "平台记忆采集失败": "Platform memory collection failed",
+  "等待平台记忆采集结果超时": "Platform memory collection timed out",
+  "平台返回的记忆内容不是对象": "Platform returned memory in unexpected format",
+};
+function translateBackendMsg(text) {
+  if (state.lang !== "en") return text;
+  return BACKEND_MSG_EN[text] ?? text;
+}
+
 const SYNC_HEALTH_CHECK_INTERVAL_MS = 5000;
 let summaryRefreshTimer = null;
 let syncBackendHealthTimer = null;
@@ -355,7 +729,7 @@ async function pickDirectory() {
     state.storagePath = handle.name || "";
   }
   renderDirectory();
-  toast(`目录已设置：${handle.name}`);
+  toast(`${t("toastDirSet")}${handle.name}`);
 }
 
 async function readJson(dir, filename) {
@@ -399,13 +773,23 @@ async function loadEpisodeById(epId) {
 }
 
 function formatRelativeTime(isoString) {
+  const minute = 60 * 1000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+  if (state.lang === "en") {
+    if (!isoString) return "Not started";
+    const date = new Date(isoString);
+    if (Number.isNaN(date.getTime())) return "Not started";
+    const diff = Date.now() - date.getTime();
+    if (diff < minute) return "Just now";
+    if (diff < hour) return `${Math.floor(diff / minute)}m ago`;
+    if (diff < day) return `${Math.floor(diff / hour)}h ago`;
+    return `${Math.floor(diff / day)}d ago`;
+  }
   if (!isoString) return "未开始";
   const date = new Date(isoString);
   if (Number.isNaN(date.getTime())) return "未开始";
   const diff = Date.now() - date.getTime();
-  const minute = 60 * 1000;
-  const hour = 60 * minute;
-  const day = 24 * hour;
   if (diff < minute) return "刚刚";
   if (diff < hour) return `${Math.floor(diff / minute)} 分钟前`;
   if (diff < day) return `${Math.floor(diff / hour)} 小时前`;
@@ -462,9 +846,9 @@ async function closeCommandModal() {
   state.pendingBackendCheckOnModalClose = false;
   try {
     await backendApi().getHealth(state.backendUrl);
-    toast("本地后端已在线");
+    toast(t("toastBackendOnline"));
   } catch (err) {
-    toast("无法连接到本地后端", true);
+    toast(t("toastBackendOffline"), true);
     logPopupError("Backend still offline after command modal close", err, {
       backendUrl: state.backendUrl || DEFAULT_BACKEND_URL,
     });
@@ -483,18 +867,15 @@ function renderSync() {
   const syncBtn = document.getElementById("syncBtn");
   const dot = document.getElementById("syncDot");
 
-  let statusText = "同步对话已暂停";
-  let hintText = "点击开启后，持续记录你与大模型的对话到本地";
+  let statusText = t("syncPaused");
+  let hintText = t("syncHintDefault");
 
   if (state.syncEnabled) {
+    statusText = t("syncActive");
     if (state.realtimeUpdate && state.keepUpdated) {
-      statusText = "同步对话中";
-      hintText = state.apiKeyConfigured
-        ? "正在记录对话，并自动提取记忆"
-        : "正在记录原始对话，配置 API 后才会自动提取记忆";
+      hintText = state.apiKeyConfigured ? t("syncHintWithMemory") : t("syncHintNoKey");
     } else {
-      statusText = "同步对话中";
-      hintText = "正在记录原始对话，可稍后在迁移页整理记忆";
+      hintText = t("syncHintNoMemory");
     }
   }
 
@@ -509,15 +890,16 @@ function renderSync() {
 }
 
 function renderStats(summary) {
+  state.lastSummary = summary;
   document.getElementById("lastSyncValue").textContent = formatRelativeTime(summary.lastSyncAt);
-  document.getElementById("conversationCountValue").textContent = `${summary.conversationCount} 条`;
-  document.getElementById("memoryCountValue").textContent = `${summary.memoryItemCount} 条`;
+  document.getElementById("conversationCountValue").textContent = `${summary.conversationCount}${t("countSuffix")}`;
+  document.getElementById("memoryCountValue").textContent = `${summary.memoryItemCount}${t("countSuffix")}`;
 }
 
 function renderDirectory() {
   const value = state.storagePath || "";
   document.getElementById("storageDirInput").value = value;
-  document.getElementById("storageDirInput").placeholder = value ? "" : "留空使用默认目录";
+  document.getElementById("storageDirInput").placeholder = value ? "" : t("dirPlaceholder");
 }
 
 function renderSettings() {
@@ -527,19 +909,24 @@ function renderSettings() {
   document.getElementById("backendUrlInput").value = state.backendUrl;
   document.getElementById("realtimeUpdateToggle").checked = state.realtimeUpdate;
   document.getElementById("detailedInjectionToggle").checked = state.detailedInjection;
-  if (state.apiKey) {
-    apiKeyInput.placeholder = "请输入 API Key";
-  } else if (state.apiKeyConfigured) {
-    apiKeyInput.placeholder = "如需更换，请重新输入新的 API Key";
+  if (state.apiKeyConfigured && !state.apiKey) {
+    apiKeyInput.placeholder = t("apiKeyChangePlaceholder");
   } else {
-    apiKeyInput.placeholder = "请输入 API Key";
+    apiKeyInput.placeholder = t("apiKeyPlaceholder");
   }
   if (!state.apiKey && !state.apiKeyConfigured) {
-    apiKeyStatus.textContent = "API 调用：待配置";
+    apiKeyStatus.textContent = t("apiStatusUnconfigured");
+  } else if (state.apiConnectionStatus === "ok") {
+    apiKeyStatus.textContent = t("apiStatusOk");
+  } else if (typeof state.apiConnectionStatus === "string" && state.apiConnectionStatus.startsWith("failed:")) {
+    const msg = translateBackendError(state.apiConnectionStatus.slice(7));
+    apiKeyStatus.textContent = state.lang === "en"
+      ? `API unavailable: ${msg}`
+      : `API 调用：不可用（${msg}）`;
   } else if (state.apiConnectionStatus) {
     apiKeyStatus.textContent = state.apiConnectionStatus;
   } else {
-    apiKeyStatus.textContent = "API 调用：待验证";
+    apiKeyStatus.textContent = t("apiStatusUnverified");
   }
 }
 
@@ -556,7 +943,7 @@ function renderActionAvailability() {
   }
   if (organizeHint) {
     organizeHint.classList.toggle("hidden", !!state.apiKeyConfigured || !state.organizeApiHintVisible);
-    organizeHint.textContent = "请先在设置页配置 API Key";
+    organizeHint.textContent = t("organizeRequirementHint");
   }
 }
 
@@ -613,14 +1000,18 @@ function restoreSelectionScroll(listEl) {
 }
 
 function normalizeOrganizeStatusText(text) {
-  const value = String(text || "正在整理记忆...").trim() || "正在整理记忆...";
-  const stripped = value
-    .replace(/[：:]\s*\d+(?:\s*-\s*\d+)?\s*\/\s*\d+\s*$/, "...")
-    .replace(/\s+\d+\s*\/\s*\d+\s*$/, "...");
-  return stripped || "正在整理记忆...";
+  const fallback = t("organizeProcessing");
+  const value = String(text || fallback).trim() || fallback;
+  const translated = translateBackendMsg(value);
+  const stripped = translated
+    .replace(/[：:]\s*\d+(?:\s*-\s*\d+)?\s*\/\s*\d+\s*$/, "…")
+    .replace(/\s+\d+\s*\/\s*\d+\s*$/, "…");
+  return stripped || fallback;
 }
 
-function setOrganizeStatus(active, text = "正在整理记忆...", hint = "准备开始...") {
+function setOrganizeStatus(active, text, hint) {
+  if (text === undefined) text = t("organizeProcessing");
+  if (hint === undefined) hint = t("organizeReady");
   const card = document.getElementById("organizeStatusCard");
   card.classList.toggle("hidden", !active);
   document.getElementById("organizeStatusText").textContent = normalizeOrganizeStatusText(text);
@@ -633,7 +1024,7 @@ function organizeProgressHint(jobState) {
   if (Number.isFinite(current) && Number.isFinite(total) && total > 0) {
     return `${Math.max(0, Math.min(current, total))} / ${total}`;
   }
-  return "处理中...";
+  return t("organizeProcessingHint");
 }
 
 function sleep(ms) {
@@ -643,7 +1034,7 @@ function sleep(ms) {
 async function ensureCategoryItems(category) {
   if (state.memoryItemsByCategory[category]) return state.memoryItemsByCategory[category];
   try {
-    const locale = IS_ZH_UI ? "zh-CN" : "en-US";
+    const locale = state.lang === "en" ? "en-US" : "zh-CN";
     const result = await backendApi().getMemoryItems(state.backendUrl, category, locale);
     state.memoryItemsByCategory[category] = result.items || [];
   } catch {
@@ -679,7 +1070,7 @@ async function deleteMemoryItem(categoryId, item) {
   if (!itemId) return;
   const preview = buildSelectionPreview(categoryId, item);
   const label = preview.title || preview.description || itemId;
-  const confirmed = confirm(`删除这条记忆吗？\n\n${label}`);
+  const confirmed = confirm(`${t("confirmDeleteMemory")}${label}`);
   if (!confirmed) return;
   try {
     await backendApi().deleteMemoryItems(state.backendUrl, { item_ids: [itemId] });
@@ -687,9 +1078,9 @@ async function deleteMemoryItem(categoryId, item) {
     await persistMemorySelection();
     state.memoryItemsByCategory = {};
     await refreshSummary();
-    toast("已删除这条记忆");
+    toast(t("toastMemoryDeleted"));
   } catch (err) {
-    toast(`删除失败：${errorMessage(err, "无法删除这条记忆")}`, true);
+    toast(`${t("toastPrefixDeleteFailed")}${translateBackendError(errorMessage(err, t("errDeleteMemory")))}`, true);
   }
 }
 
@@ -734,21 +1125,21 @@ function renderSelectionList() {
     const parentCheck = group.querySelector(".selection-parent-check");
     parentCheck.addEventListener("change", event => {
       toggleCategorySelection(category.id, event.target.checked).catch(err => {
-        toast(`更新勾选失败：${err.message}`, true);
+        toast(`${t("toastPrefixSelectionFailed")}${err.message}`, true);
       });
     });
 
     const expandBtn = group.querySelector(".selection-expand-btn");
     expandBtn.addEventListener("click", () => {
       toggleCategoryExpanded(category.id).catch(err => {
-        toast(`展开失败：${err.message}`, true);
+        toast(`${t("toastPrefixExpandFailed")}${err.message}`, true);
       });
     });
 
     if (expanded) {
       const childList = group.querySelector(".selection-children");
       if (items.length === 0) {
-        childList.innerHTML = `<div class="selection-child"><input type="checkbox" checked disabled><div><strong>暂无细项</strong><p>当前类别还没有整理出可单独选择的内容。</p></div></div>`;
+        childList.innerHTML = `<div class="selection-child"><input type="checkbox" checked disabled><div><strong>${t("selectionNoItems")}</strong><p>${t("selectionNoItemsDesc")}</p></div></div>`;
       } else if (category.id === "profile" || category.id === "preferences") {
         const grouped = new Map();
         items.forEach(item => {
@@ -790,7 +1181,7 @@ function renderSelectionList() {
               const itemId = event.currentTarget.dataset.deleteItemId;
               const item = groupItems.find(candidate => candidate.id === itemId);
               deleteMemoryItem(category.id, item).catch(err => {
-                toast(`删除失败：${errorMessage(err, "无法删除这条记忆")}`, true);
+                toast(`${t("toastPrefixDeleteFailed")}${translateBackendError(errorMessage(err, t("errDeleteMemory")))}`, true);
               });
             });
           });
@@ -819,7 +1210,7 @@ function renderSelectionList() {
             event.preventDefault();
             event.stopPropagation();
             deleteMemoryItem(category.id, item).catch(err => {
-              toast(`删除失败：${errorMessage(err, "无法删除这条记忆")}`, true);
+              toast(`${t("toastPrefixDeleteFailed")}${translateBackendError(errorMessage(err, t("errDeleteMemory")))}`, true);
             });
           });
           childList.appendChild(child);
@@ -849,8 +1240,8 @@ function deriveMySkills(allData, pnData) {
     skills.push({
       id: `workflow:${workflow.workflow_name || index}`,
       icon: "流",
-      title: workflow.workflow_name || `工作流 ${index + 1}`,
-      description: workflow.preferred_artifact_format || workflow.trigger_condition || "从你的记忆里提炼出的工作流程。",
+      title: workflow.workflow_name || `${t("workflowFallbackTitle")} ${index + 1}`,
+      description: workflow.preferred_artifact_format || workflow.trigger_condition || t("workflowFallbackDesc"),
     });
   });
 
@@ -860,16 +1251,16 @@ function deriveMySkills(allData, pnData) {
       id: `persistent:${id}`,
       icon: "忆",
       title: node.description || node.key || id,
-      description: "由长期对话稳定提炼出的习惯与能力。",
+      description: t("persistentFallbackDesc"),
     });
   });
 
   if (skills.length === 0) {
     skills.push({
       id: "skill:empty",
-      icon: "空",
-      title: "还没有提取出 Skill",
-      description: "我的 Skill 会从已整理的记忆中自动提取。先开启同步或整理记忆，系统会逐步生成可复用的 Skill。",
+      icon: state.lang === "en" ? "∅" : "空",
+      title: t("skillEmptyTitle"),
+      description: t("skillEmptyDesc"),
       selectable: false,
     });
   }
@@ -888,9 +1279,9 @@ function getSkillIcon(item) {
 function buildEmptySkillCard() {
   return {
     id: "skill:empty",
-    icon: "空",
-    title: "还没有提取出 Skill",
-    description: "我的 Skill 会从已整理的记忆中自动提取。先开启同步或整理记忆，系统会逐步生成可复用的 Skill。",
+    icon: state.lang === "en" ? "∅" : "空",
+    title: t("skillEmptyTitle"),
+    description: t("skillEmptyDesc"),
     selectable: false,
   };
 }
@@ -913,21 +1304,21 @@ function buildSkillPreview(item) {
     };
   }
 
-  const title = truncateText(item?.display_title || item?.title || "未命名 Skill", 28);
-  const displaySummary = item?.display_summary ? `描述：${item.display_summary}` : "";
-  const displayOutput = item?.display_output ? `产出：${item.display_output}` : "";
+  const title = truncateText(item?.display_title || item?.title || t("skillUnnamed"), 28);
+  const displaySummary = item?.display_summary ? `${t("skillLabelDesc")}${item.display_summary}` : "";
+  const displayOutput = item?.display_output ? `${t("skillLabelOutput")}${item.display_output}` : "";
   const summaryCandidates = [
     displaySummary && displayOutput ? `${displaySummary} · ${displayOutput}` : "",
     displaySummary,
     displayOutput,
-    item?.goal ? `目标：${item.goal}` : "",
-    item?.output_format ? `产出：${item.output_format}` : "",
+    item?.goal ? `${t("skillLabelGoal")}${item.goal}` : "",
+    item?.output_format ? `${t("skillLabelOutput")}${item.output_format}` : "",
     item?.description || "",
   ].filter(Boolean);
 
   let summary = summaryCandidates[0] || "";
   if (!summary && Array.isArray(item?.steps) && item.steps.length > 0) {
-    summary = `步骤：${item.steps.slice(0, 2).join(" / ")}`;
+    summary = `${t("skillLabelSteps")}${item.steps.slice(0, 2).join(" / ")}`;
   }
   if (summary.includes("|")) {
     summary = summary
@@ -958,16 +1349,16 @@ async function deleteSkill(skillId) {
       const result = await backendApi().getMySkills(state.backendUrl);
       renderSkillList(result.items || [], state.selectedSkillIds, { showDelete: false });
     }
-    toast("Skill 已从列表中移除");
+    toast(t("toastSkillRemovedSingle"));
   } catch (err) {
-    toast(`删除失败：${err.message}`, true);
+    toast(`${t("toastPrefixDeleteFailed")}${err.message}`, true);
   }
 }
 
 async function deleteSelectedSkills() {
   const skillIds = Array.from(state.selectedSkillIds);
   if (!skillIds.length) {
-    toast("请先勾选要删除的 Skill", true);
+    toast(t("toastSkillSelectFirst"), true);
     return;
   }
   try {
@@ -978,9 +1369,9 @@ async function deleteSelectedSkills() {
     });
     const result = await backendApi().getMySkills(state.backendUrl);
     renderSkillList(result.items || [], state.selectedSkillIds, { showDelete: false });
-    toast("已删除选中的 Skill");
+    toast(t("toastSkillDeleted"));
   } catch (err) {
-    toast(`删除失败：${err.message}`, true);
+    toast(`${t("toastPrefixDeleteFailed")}${err.message}`, true);
   }
 }
 
@@ -993,6 +1384,7 @@ function renderSkillList(items, selectedSet, options = {}) {
   safeItems.forEach(item => {
     const wrapper = document.createElement("div");
     wrapper.className = "skill-item";
+    wrapper.dataset.skillId = item.id;
     const iconText = getSkillIcon(item);
     const preview = buildSkillPreview(item);
     const actionNodes = item.selectable === false
@@ -1030,10 +1422,10 @@ function renderSkillList(items, selectedSet, options = {}) {
 }
 
 function formatRecommendedUpdatedAt(value) {
-  if (!value) return IS_ZH_UI ? "最近更新：未知" : "Updated: unknown";
+  if (!value) return state.lang !== "en" ? "最近更新：未知" : "Updated: unknown";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
-    return IS_ZH_UI ? "最近更新：未知" : "Updated: unknown";
+    return state.lang !== "en" ? "最近更新：未知" : "Updated: unknown";
   }
   const now = new Date();
   const sameDay = now.getFullYear() === date.getFullYear()
@@ -1041,7 +1433,7 @@ function formatRecommendedUpdatedAt(value) {
     && now.getDate() === date.getDate();
   const hh = String(date.getHours()).padStart(2, "0");
   const mm = String(date.getMinutes()).padStart(2, "0");
-  if (IS_ZH_UI) {
+  if (state.lang !== "en") {
     return sameDay
       ? `最近更新：今天 ${hh}:${mm}`
       : `最近更新：${date.getMonth() + 1}/${date.getDate()} ${hh}:${mm}`;
@@ -1060,10 +1452,10 @@ function renderRecommendedSkillMeta(meta) {
     return;
   }
   const status = meta.last_refresh_status === "success"
-    ? (IS_ZH_UI ? "今日推荐" : "Today")
-    : (IS_ZH_UI ? "推荐缓存" : "Cached");
+    ? (state.lang !== "en" ? "今日推荐" : "Today")
+    : (state.lang !== "en" ? "推荐缓存" : "Cached");
   const sourceText = Array.isArray(meta.sources) && meta.sources.length
-    ? (IS_ZH_UI ? `来源：${meta.sources.join(" / ")}` : `Sources: ${meta.sources.join(" / ")}`)
+    ? (state.lang !== "en" ? `来源：${meta.sources.join(" / ")}` : `Sources: ${meta.sources.join(" / ")}`)
     : "";
   const updatedText = formatRecommendedUpdatedAt(meta.last_updated_at);
   el.textContent = [status, updatedText, sourceText].filter(Boolean).join(" · ");
@@ -1116,7 +1508,7 @@ function scheduleSummaryRefresh(reason = "memory-updated") {
 
 async function refreshSummary() {
   try {
-    const locale = IS_ZH_UI ? "zh-CN" : "en-US";
+    const locale = state.lang === "en" ? "en-US" : "zh-CN";
     const [summary, categories] = await Promise.all([
       backendApi().getSummary(state.backendUrl),
       backendApi().getMemoryCategories(state.backendUrl, locale),
@@ -1235,7 +1627,7 @@ async function saveSettings(showToast = true) {
     renderSync();
     renderActionAvailability();
     if (showToast) {
-      toast("设置已保存到本地后端");
+      toast(t("toastSettingsSaved"));
     }
     if (showToast) {
       showCommandModal(buildBackendStartCommand(state.backendUrl));
@@ -1261,20 +1653,20 @@ async function testConnection() {
     if (!result.ok) {
       throw new Error(result.message || "当前默认配置不匹配这把 key");
     }
-    state.apiConnectionStatus = "API 调用：可用";
+    state.apiConnectionStatus = "ok";
     await saveSettings(false);
     state.organizeApiHintVisible = false;
     renderSettings();
     renderActionAvailability();
-    toast("API 调用可用，设置已保存");
+    toast(t("toastApiOk"));
   } catch (err) {
     try {
       await backendApi().getHealth(state.backendUrl);
-      state.apiConnectionStatus = `API 调用：不可用（${err.message}）`;
+      state.apiConnectionStatus = `failed:${err.message}`;
       renderSettings();
-      toast(`本地后端在线，但 ${err.message}`, true);
+      toast(`${t("toastPrefixBackendOnlineBut")}${translateBackendError(err.message)}`, true);
     } catch {
-      toast(`连接失败：${err.message}`, true);
+      toast(`${t("toastPrefixConnectionFailed")}${translateBackendError(err.message)}`, true);
     }
   }
 }
@@ -1314,7 +1706,7 @@ async function checkSyncBackendHealth() {
   } catch (err) {
     await handleSyncBackendUnavailable(err, {
       showCommand: false,
-      toastMessage: "本地后端已断开，同步对话已暂停",
+      toastMessage: t("toastBackendDisconnected"),
     });
   }
 }
@@ -1322,7 +1714,7 @@ async function checkSyncBackendHealth() {
 async function handleSyncBackendUnavailable(error, options = {}) {
   const {
     showCommand = true,
-    toastMessage = "请先在设置页配置并启动本地后端",
+    toastMessage = t("syncBackendRequired"),
   } = options;
   state.syncEnabled = false;
   await storageSet({
@@ -1384,14 +1776,14 @@ async function toggleSync() {
   await refreshSummary();
   if (state.syncEnabled) {
     if (state.apiKeyConfigured && state.realtimeUpdate && state.keepUpdated) {
-      toast("同步对话已开启，将自动增量更新记忆");
+      toast(t("toastSyncWithMemory"));
     } else if (state.apiKeyConfigured) {
-      toast("记录已开启，可稍后在迁移页整理记忆");
+      toast(t("toastSyncNoMemory"));
     } else {
-      toast("记录已开启，当前仅保存原始对话");
+      toast(t("toastSyncRawOnly"));
     }
   } else {
-      toast("同步对话已暂停");
+      toast(t("toastSyncStopped"));
   }
 }
 
@@ -1400,27 +1792,27 @@ async function runOrganize() {
   if (!state.apiKeyConfigured) {
     state.organizeApiHintVisible = true;
     renderActionAvailability();
-    toast("请先在设置页配置 API Key", true);
+    toast(t("toastNeedApiKey"), true);
     return;
   }
   state.organizeApiHintVisible = false;
   organizeBtn.disabled = true;
   organizeBtn.style.opacity = "0.65";
-  setOrganizeStatus(true, "正在整理记忆...", "准备开始...");
+  setOrganizeStatus(true);
 
   try {
     if (state.organizeJobState?.status === "running") {
-      toast("整理任务已在后台进行中");
+      toast(t("toastOrganizeRunning"));
       startOrganizeStatePolling();
       return;
     }
-    toast("已开始整理记忆，后台会继续运行");
+    toast(t("toastOrganizeStarted"));
     const response = await backendApi().organizeMemory(state.backendUrl);
     if (response.job_id) {
       state.organizeJobState = {
         jobId: response.job_id,
         status: "running",
-        message: "正在整理记忆...",
+        message: "",
         current: null,
         total: null,
         error: "",
@@ -1431,7 +1823,7 @@ async function runOrganize() {
       await applyOrganizeState();
       startOrganizeStatePolling();
     } else {
-      toast("整理完成，记忆已更新");
+      toast(t("toastOrganizeDone"));
       setOrganizeStatus(false);
       organizeBtn.disabled = false;
       organizeBtn.style.opacity = "";
@@ -1440,7 +1832,7 @@ async function runOrganize() {
     logPopupError("Organize memory failed", err, {
       backendUrl: state.backendUrl,
     });
-    toast(`整理失败：${err.message}`, true);
+    toast(`${t("toastPrefixOrganizeFailed")}${translateBackendError(err.message)}`, true);
     setOrganizeStatus(false);
     organizeBtn.disabled = false;
     organizeBtn.style.opacity = "";
@@ -1475,7 +1867,7 @@ async function applyOrganizeState() {
   if (jobState.status === "running") {
     setOrganizeStatus(
       true,
-      jobState.message || "正在整理记忆...",
+      jobState.message,
       organizeProgressHint(jobState)
     );
     if (organizeBtn) {
@@ -1498,11 +1890,11 @@ async function applyOrganizeState() {
     const projects = jobState.result?.projects ?? 0;
     const workflows = jobState.result?.workflows ?? 0;
     if (jobState.result?.already_latest) {
-      toast("记忆已是最新版本");
+      toast(t("toastMemoryUpToDate"));
     } else {
       const memorySummary = [`episodes ${built}`, `updated ${updatedEpisodes}`, `projects ${projects}`, `workflows ${workflows}`]
         .join(" · ");
-      toast(`整理完成：${memorySummary}`);
+      toast(`${t("toastPrefixOrganizeDoneWith")}${memorySummary}`);
     }
     state.lastSyncAt = new Date().toISOString();
     state.memoryItemsByCategory = {};
@@ -1516,7 +1908,7 @@ async function applyOrganizeState() {
   }
 
   if (jobState.status === "failed" && !jobState.acknowledgedAt) {
-    toast(`整理失败：${jobState.error || "整理失败"}`, true);
+    toast(`${t("toastPrefixOrganizeFailed")}${translateBackendError(jobState.error || "整理失败")}`, true);
     state.organizeJobState = { ...jobState, acknowledgedAt: new Date().toISOString() };
     await storageSet({ [STORAGE_KEYS.organizeJobState]: state.organizeJobState });
   }
@@ -1531,7 +1923,7 @@ function startOrganizeStatePolling() {
           ...(state.organizeJobState || {}),
           jobId: job.id,
           status: job.status,
-          message: job.progress?.message || "正在整理记忆...",
+          message: job.progress?.message || "",
           current: typeof job.progress?.current === "number" ? job.progress.current : null,
           total: typeof job.progress?.total === "number" ? job.progress.total : null,
           error: job.error || "",
@@ -1676,16 +2068,16 @@ async function exportPackage() {
     });
     const date = new Date().toISOString().slice(0, 10);
     downloadText(result.filename || `memory_package_${date}.txt`, result.content || "");
-    toast("记忆包已导出");
+    toast(t("toastExported"));
   } catch {
     try {
       const pkg = await buildMemoryPackage();
       const text = buildMemoryPrompt(pkg);
       const date = new Date().toISOString().slice(0, 10);
       downloadText(`memory_package_${date}.txt`, text);
-      toast("记忆包已导出");
+      toast(t("toastExported"));
     } catch (err) {
-      toast(err.message, true);
+      toast(translateBackendError(err.message), true);
     }
   }
 }
@@ -1851,21 +2243,21 @@ async function injectPackage() {
     });
     const injection = await injectTextIntoTab(result.text || "");
     if (injection?.fallback === "clipboard") {
-      toast("当前页面未就绪，记忆内容已复制到剪贴板。刷新当前对话页后可直接粘贴。");
+      toast(t("toastInjectFallback"));
     } else {
-      toast("记忆内容已注入当前会话输入框");
+      toast(t("toastInjected"));
     }
   } catch {
     try {
       const pkg = await buildMemoryPackage();
       const injection = await injectTextIntoTab(buildMemoryPrompt(pkg));
       if (injection?.fallback === "clipboard") {
-        toast("当前页面未就绪，记忆内容已复制到剪贴板。刷新当前对话页后可直接粘贴。");
+        toast(t("toastInjectFallback"));
       } else {
-        toast("记忆内容已注入当前会话输入框");
+        toast(t("toastInjected"));
       }
     } catch (err) {
-      toast(`注入失败：${err.message}`, true);
+      toast(`${t("toastPrefixInjectFailed")}${translateBackendError(err.message)}`, true);
     }
   }
 }
@@ -1876,7 +2268,7 @@ async function addCurrentConversation() {
   button.style.opacity = "0.65";
 
   try {
-    toast("正在加入当前对话...");
+    toast(t("toastAddingConversation"));
     const conversation = await scrapeCurrentConversationFromTab();
     const response = await backendApi().importCurrentConversation(state.backendUrl, {
       platform: conversation.platform,
@@ -1891,9 +2283,9 @@ async function addCurrentConversation() {
       : null;
     if (job?.status === "failed") throw new Error(job.error || "加入当前对话失败");
     await refreshSummary();
-    toast("当前对话加入完成，可稍后点击整理记忆");
+    toast(t("toastConversationAdded"));
   } catch (err) {
-    toast(`加入当前对话失败：${err.message}`, true);
+    toast(`${t("toastPrefixConversationFailed")}${translateBackendError(err.message)}`, true);
   } finally {
     button.disabled = false;
     button.style.opacity = "";
@@ -1906,7 +2298,7 @@ async function addPlatformMemory() {
   button.style.opacity = "0.65";
 
   try {
-    toast("正在采集平台记忆...");
+    toast(t("toastCollectingPlatform"));
     let snapshot;
     try {
       snapshot = await collectPlatformMemoryWithPrompt();
@@ -1915,9 +2307,9 @@ async function addPlatformMemory() {
       snapshot = await scrapePlatformMemoryFromTab();
     }
     const response = await backendApi().importPlatformMemory(state.backendUrl, snapshot);
-    toast("平台记忆加入完成，可稍后点击整理记忆");
+    toast(t("toastPlatformAdded"));
   } catch (err) {
-    toast(`加入平台记忆失败：${err.message}`, true);
+    toast(`${t("toastPrefixPlatformFailed")}${translateBackendError(err.message)}`, true);
   } finally {
     button.disabled = false;
     button.style.opacity = "";
@@ -1939,7 +2331,7 @@ function inferTargetPlatformFromTab(tab) {
 async function saveRecommendedSkills() {
   const selectedIds = [...state.selectedRecommendedIds];
   if (selectedIds.length === 0) {
-    toast("请至少选择一个推荐 Skill", true);
+    toast(t("toastSkillSelectRecommended"), true);
     return;
   }
   try {
@@ -1948,9 +2340,9 @@ async function saveRecommendedSkills() {
     state.selectedSkillIds = new Set(result.saved_skill_ids || mergedIds);
     state.selectedRecommendedIds = new Set([...state.selectedRecommendedIds, ...selectedIds]);
     await storageSet({ [STORAGE_KEYS.savedSkills]: [...state.selectedSkillIds] });
-    toast(`已加入我的 Skill：${selectedIds.length} 项`);
+    toast(`${t("toastSavedSkillCount")}${selectedIds.length}${t("toastSavedSkillSuffix")}`);
   } catch (err) {
-    toast(`加入失败：${err.message}`, true);
+    toast(`${t("toastPrefixAddFailed")}${translateBackendError(err.message)}`, true);
   }
 }
 
@@ -1958,13 +2350,13 @@ async function exportSkills() {
   const allSkillIds = new Set([...state.selectedSkillIds, ...state.selectedRecommendedIds]);
   const selectedIds = [...allSkillIds];
   if (selectedIds.length === 0) {
-    toast("请至少选择一个 Skill", true);
+    toast(t("toastSkillSelectOne"), true);
     return;
   }
   try {
     const result = await backendApi().exportSkills(state.backendUrl, { skill_ids: selectedIds });
     downloadText(result.filename || `skills_${new Date().toISOString().slice(0, 10)}.json`, result.content || "");
-    toast("Skill 已导出");
+    toast(t("toastSkillExported"));
   } catch (err) {
     try {
       const allData = await storageGet(null);
@@ -1983,9 +2375,9 @@ async function exportSkills() {
         skills: selected,
       };
       downloadText(`skills_${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(payload, null, 2));
-      toast("Skill 已导出");
+      toast(t("toastSkillExported"));
     } catch (fallbackErr) {
-      toast(`导出失败：${fallbackErr.message || err.message}`, true);
+      toast(`${t("toastPrefixExportFailed")}${translateBackendError(fallbackErr.message || err.message)}`, true);
     }
   }
 }
@@ -2012,9 +2404,9 @@ async function injectSkills() {
     });
     const injection = await injectTextIntoTab(result.text || "");
     if (injection?.fallback === "clipboard") {
-      toast("当前页面未就绪，Skill 已复制到剪贴板。刷新当前对话页后可直接粘贴。");
+      toast(t("toastSkillInjectFallback"));
     } else {
-      toast("Skill 已注入当前会话输入框");
+      toast(t("toastSkillInjected"));
     }
   } catch {
     try {
@@ -2033,12 +2425,12 @@ async function injectSkills() {
       if (selected.length === 0) throw new Error("请至少选择一个 Skill");
       const injection = await injectTextIntoTab(buildSkillPrompt(selected));
       if (injection?.fallback === "clipboard") {
-        toast("当前页面未就绪，Skill 已复制到剪贴板。刷新当前对话页后可直接粘贴。");
+        toast(t("toastSkillInjectFallback"));
       } else {
-        toast("Skill 已注入当前会话输入框");
+        toast(t("toastSkillInjected"));
       }
     } catch (err) {
-      toast(`注入失败：${err.message}`, true);
+      toast(`${t("toastPrefixInjectFailed")}${translateBackendError(err.message)}`, true);
     }
   }
 }
@@ -2050,13 +2442,11 @@ async function clearCache() {
     // Ignore backend failure and still clear local cache.
   }
   await new Promise(resolve => chrome.storage.local.remove(["_raw_progress", "_sw_keepalive", "pending_flush"], resolve));
-  toast("临时缓存已清理");
+  toast(t("toastCacheCleared"));
 }
 
 async function clearAllMemoryFiles() {
-  const confirmed = window.confirm(
-    "这会删除已保存的对话和记忆文件，但保留当前设置。确定继续吗？",
-  );
+  const confirmed = window.confirm(t("confirmClearAll"));
   if (!confirmed) return;
 
   await backendApi().clearCache(state.backendUrl, { scope: "all_memory" });
@@ -2083,7 +2473,7 @@ async function clearAllMemoryFiles() {
   await refreshSummary();
   renderSettings();
   renderActionAvailability();
-  toast("所有记忆文件已清理");
+  toast(t("toastMemoryCleared"));
 }
 
 function bindEvents() {
@@ -2094,6 +2484,16 @@ function bindEvents() {
   }
 
   document.getElementById("menuBtn").addEventListener("click", () => setView("settings"));
+  const langBtn = document.getElementById("langToggleBtn");
+  if (langBtn) {
+    langBtn.addEventListener("click", async () => {
+      state.lang = state.lang === "zh" ? "en" : "zh";
+      await storageSet({ [STORAGE_KEYS.lang]: state.lang });
+      state.memoryItemsByCategory = {};
+      applyLang();
+      refreshSummary().catch(() => {});
+    });
+  }
   document.getElementById("gotoMigrateBtn").addEventListener("click", () => setView("migrate"));
   document.getElementById("gotoSettingsBtn").addEventListener("click", () => setView("settings"));
   document.getElementById("gotoSkillBtn").addEventListener("click", async () => {
@@ -2129,19 +2529,19 @@ function bindEvents() {
       state.syncEnabled = false;
       renderSync();
       renderSettings();
-      toast("本地后端已断开，同步对话已暂停", true);
+      toast(t("toastBackendDisconnected"), true);
     }
   });
 
   document.getElementById("syncBtn").addEventListener("click", toggleSync);
   document.getElementById("selectDirBtn").addEventListener("click", () => {
     saveSettings(false).then(() => {
-      toast("本地目录已保存");
+      toast(t("toastDirSaved"));
     }).catch(err => {
       if (!isExpectedSettingsFailure(err)) {
         logPopupError("Save storage path failed", err, { backendUrl: state.backendUrl || DEFAULT_BACKEND_URL });
       }
-      toast(`保存失败：${errorMessage(err, "无法保存本地目录")}`, true);
+      toast(`${t("toastPrefixSaveFailed")}${translateBackendError(errorMessage(err, t("errSaveDir")))}`, true);
     });
   });
 
@@ -2150,7 +2550,7 @@ function bindEvents() {
       if (!isExpectedSettingsFailure(err)) {
         logPopupError("Save settings failed", err, { backendUrl: state.backendUrl || DEFAULT_BACKEND_URL });
       }
-      toast(`保存失败：${errorMessage(err, "无法连接本地后端")}`, true);
+      toast(`${t("toastPrefixSaveFailed")}${translateBackendError(errorMessage(err, t("errConnectBackend")))}`, true);
       showCommandModal(buildBackendStartCommand(
         document.getElementById("backendUrlInput")?.value.trim() || state.backendUrl,
       ), { checkBackendOnClose: true });
@@ -2164,7 +2564,7 @@ function bindEvents() {
     const command = document.getElementById("commandModalText")?.textContent || "";
     if (!command.trim()) return;
     const copied = await copyTextToClipboard(command);
-    toast(copied ? "启动命令已复制" : "复制失败，请手动复制", !copied);
+    toast(copied ? t("toastCopyCommandOk") : t("toastCopyCommandFailed"), !copied);
   });
   document.getElementById("commandModal").addEventListener("click", event => {
     if (event.target.id === "commandModal") {
@@ -2203,11 +2603,11 @@ function bindEvents() {
     renderSync();
     renderActionAvailability();
     if (state.realtimeUpdate && state.apiKeyConfigured && state.syncEnabled && state.keepUpdated) {
-      toast("同步记忆已开启。重新同步或刷新当前会话页后，将自动提取记忆。");
+      toast(t("toastSyncMemoryOnWithApi"));
     } else if (state.realtimeUpdate && !state.apiKeyConfigured) {
-      toast("同步记忆已开启，配置 API 后才会开始提取记忆。");
+      toast(t("toastSyncMemoryOnNoApi"));
     } else {
-      toast("同步记忆已关闭。新对话可稍后手动整理。");
+      toast(t("toastSyncMemoryOff"));
     }
   });
 
@@ -2234,7 +2634,7 @@ function bindEvents() {
       // Keep local change when backend is offline.
     }
     renderSettings();
-    toast(state.detailedInjection ? "详细注入已开启" : "详细注入已关闭");
+    toast(t(state.detailedInjection ? "toastDetailedOn" : "toastDetailedOff"));
   });
 
   document.getElementById("organizeBtn").addEventListener("click", runOrganize);
@@ -2271,7 +2671,7 @@ function bindEvents() {
       .catch(err => {
         logPopupError("Load recommended skills failed", err, { backendUrl: state.backendUrl || DEFAULT_BACKEND_URL });
         renderRecommendedSkillItems([], null);
-        toast(`加载推荐 Skill 失败：${errorMessage(err, "请检查本地后端")}`, true);
+        toast(`${t("toastPrefixLoadRecommendedFailed")}${translateBackendError(errorMessage(err, t("errCheckBackend")))}`, true);
       });
   });
 
@@ -2296,9 +2696,9 @@ function bindEvents() {
       if (job?.status === "failed") throw new Error(job.error || "导入失败");
       const imported = job?.result?.imported_conversations;
       await refreshSummary();
-      toast(imported ? `原始对话导入完成：${imported} 条对话` : `原始对话导入任务已创建：${result.job_id}`);
+      toast(imported ? `${t("toastImportComplete")}${imported}${t("countSuffix")}` : `${t("toastImportJobCreated")}${result.job_id}`);
     } catch (err) {
-      toast(`导入失败：${err.message}`, true);
+      toast(`${t("toastPrefixImportFailed")}${translateBackendError(err.message)}`, true);
     } finally {
       event.target.value = "";
     }
@@ -2307,9 +2707,44 @@ function bindEvents() {
   document.getElementById("clearCacheBtn").addEventListener("click", clearCache);
   document.getElementById("clearAllMemoryBtn").addEventListener("click", () => {
     clearAllMemoryFiles().catch(err => {
-      toast(`清理失败：${errorMessage(err, "无法清理所有记忆文件")}`, true);
+      toast(`${t("toastPrefixClearFailed")}${translateBackendError(errorMessage(err, t("errClearMemory")))}`, true);
     });
   });
+}
+
+function applyLang() {
+  const btn = document.getElementById("langToggleBtn");
+  if (btn) btn.textContent = state.lang === "zh" ? "EN" : "中";
+  document.querySelectorAll("[data-i18n]").forEach(el => {
+    const str = t(el.dataset.i18n);
+    if (str !== undefined) el.textContent = str;
+  });
+  document.querySelectorAll("[data-i18n-placeholder]").forEach(el => {
+    const str = t(el.dataset.i18nPlaceholder);
+    if (str !== undefined) el.placeholder = str;
+  });
+  document.querySelectorAll("[data-i18n-aria]").forEach(el => {
+    const str = t(el.dataset.i18nAria);
+    if (str !== undefined) el.setAttribute("aria-label", str);
+  });
+  document.querySelectorAll("[data-i18n-title]").forEach(el => {
+    const str = t(el.dataset.i18nTitle);
+    if (str !== undefined) el.title = str;
+  });
+  renderSync();
+  renderSettings();
+  renderDirectory();
+  if (state.lastSummary) renderStats(state.lastSummary);
+  const emptyCard = document.querySelector("[data-skill-id='skill:empty']");
+  if (emptyCard) {
+    const card = buildEmptySkillCard();
+    const iconEl = emptyCard.querySelector(".skill-icon");
+    const titleEl = emptyCard.querySelector(".skill-copy h4");
+    const descEl = emptyCard.querySelector(".skill-copy p");
+    if (iconEl) iconEl.textContent = card.icon;
+    if (titleEl) titleEl.textContent = card.title;
+    if (descEl) descEl.textContent = card.description;
+  }
 }
 
 async function init() {
@@ -2330,6 +2765,7 @@ async function init() {
     STORAGE_KEYS.savedSkills,
     STORAGE_KEYS.organizeJobState,
     STORAGE_KEYS.memorySelection,
+    STORAGE_KEYS.lang,
   ]);
 
   state.apiProvider = settings[STORAGE_KEYS.apiProvider] || state.apiProvider;
@@ -2346,6 +2782,7 @@ async function init() {
   state.storagePath = settings[STORAGE_KEYS.storagePath] || state.storagePath;
   state.lastSyncAt = settings[STORAGE_KEYS.lastSyncAt] || null;
   state.organizeJobState = settings[STORAGE_KEYS.organizeJobState] || null;
+  state.lang = settings[STORAGE_KEYS.lang] || "zh";
   state.dirHandle = await loadSavedDir();
   const savedSkillIds = settings[STORAGE_KEYS.savedSkills] || [];
   state.selectedSkillIds = new Set(savedSkillIds);
@@ -2386,9 +2823,7 @@ async function init() {
   }
 
   bindEvents();
-  renderDirectory();
-  renderSettings();
-  renderSync();
+  applyLang();
   renderActionAvailability();
   if (state.syncEnabled) {
     checkSyncBackendHealth().catch(err => {
@@ -2416,5 +2851,5 @@ async function init() {
 
 init().catch(err => {
   logPopupError("Init failed", err);
-  toast(`初始化失败：${err.message}`, true);
+  toast(`${t("toastPrefixInitFailed")}${err.message}`, true);
 });
